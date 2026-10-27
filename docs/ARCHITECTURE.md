@@ -49,7 +49,7 @@ src/
 - `editor.rs`: common editor initialized from document layout; page geometry and
   whiteboard camera affect presentation and navigation only. World coordinates
   stay f64; only local offsets become screen f32. No type setter/conversion tool.
-- `app.rs`: creation dialog, virtual category trees, tabs, clear read-only/error
+- `app.rs`: application state and action coordination, clear read-only/error
   state. Closing a tab does not delete a file. Browser session bytes survive tab
   closure but not reload. Desktop files are reread from their real location. Refresh follows uniquely
   matched native UUIDs after external moves, updates tab locators, and closes
@@ -74,3 +74,14 @@ User opens a workspace. Explorer lists nested folders and actual PDFs. On edit, 
 
 ## Build constraint
 Make native and WASM compile from the first milestone. If a library is native-only, hide it behind target-specific modules, not behind a broken compile path.
+
+## M0.6 UI boundaries
+
+`ui/style.rs` centralizes light/dark tokens; `ui/icons.rs` paints original vector
+icons. `chrome`, `explorer`, `tabs`, `toolbar` and `dialog` are small presentation
+components. They return actions; IO and document creation remain coordinated by
+`app.rs`. The app assembles panels instead of one large rendering function.
+`editor.rs` remains the shared metadata-driven renderer/navigation controller.
+Theme, Explorer visibility and the Whiteboard grid toggle are session-only UI
+state. No domain, PDF payload, canonical storage or save lifecycle changes.
+Follow `UI_DESIGN.md` for dimensions, palette, interaction and responsiveness.

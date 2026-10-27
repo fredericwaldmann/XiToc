@@ -3,6 +3,7 @@ mod document;
 mod editor;
 mod pdf;
 mod storage;
+mod ui;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
