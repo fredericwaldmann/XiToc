@@ -37,3 +37,18 @@ Each PR must show checks executed and manual observations. Only mark a milestone
 - Inspect browser console for startup errors. Test WebGL2-disabled startup
   shows an error instead of leaving the loading message indefinitely.
 - CI compile checks do not substitute for native/browser visual smoke tests.
+
+
+## GitHub Pages deployment follow-up (M0)
+- Run `trunk serve --open`: the app loads at the local root; resizing retains a
+  full-window canvas, and both preview modes still work.
+- Run `trunk build --release --public-url /XiToc/`: inspect `dist/index.html`
+  and confirm generated JavaScript/WASM URLs start with `/XiToc/`.
+- Serve `dist/` mounted at `/XiToc/`; request the HTML, JavaScript and WASM and
+  confirm successful responses. In a WebGL2 browser, confirm startup, resize
+  and A4/Whiteboard switching, with no failed asset requests.
+- Set Pages source to GitHub Actions. Push to `main` or dispatch the GitHub Pages
+  workflow on `main`; verify build, artifact upload and deploy succeed, then
+  open `https://fredericwaldmann.github.io/XiToc/` and repeat the browser checks.
+- CI remains responsible for native builds; Pages deployment uses `pages.yml`
+  only. Manual dispatch on another branch must not deploy.

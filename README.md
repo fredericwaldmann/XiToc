@@ -20,16 +20,41 @@ For web, install Trunk and the WASM target:
 
 ```sh
 rustup target add wasm32-unknown-unknown
-cargo install trunk --locked
+cargo install trunk --version 0.22.0 --locked
 trunk serve --open
 ```
 
-The browser needs WebGL2. `trunk build --release --locked --public-url ./`
-produces static files in `dist/`, suitable for hosting under a subdirectory.
-CI builds native targets on Linux, Windows and macOS and uploads the static
-web artifact. To deploy it, configure the repository's Settings → Pages source
-to **GitHub Actions**; pushes to the default branch deploy after checks pass.
-No hosting settings are modified by this change.
+The browser needs WebGL2. The existing Trunk entry point starts eframe on the
+full-window canvas; eframe observes canvas resizing and adjusts its drawing size.
+Desktop and browser use the same `XiTocApp` implementation.
+
+## GitHub Pages
+
+Build for the repository subdirectory (case-sensitive):
+
+```sh
+trunk build --release --public-url /XiToc/
+```
+
+Trunk writes `dist/index.html`, JavaScript and WASM with `/XiToc/` asset URLs.
+`Trunk.toml` keeps local serving at `/` and enforces Cargo.lock; the command-line
+public URL overrides that local default. No hard-coded HTML base URL is needed.
+
+In the GitHub repository, select **Settings → Pages → Build and deployment →
+Source → GitHub Actions**. Push this configuration to `main`, or run **GitHub
+Pages** from the Actions tab with `main` selected. The site will be available at
+<https://fredericwaldmann.github.io/XiToc/> after deployment succeeds.
+
+`.github/workflows/pages.yml` installs stable Rust, the WASM target and Trunk
+0.22.0, builds the release bundle, uploads `dist/` and deploys with the official
+Pages actions. Deployment permissions are scoped to the deploy job; no personal
+access token or `gh-pages` branch is needed. Concurrent deployments are serialized.
+Manual runs on other branches build only; only `main` can deploy.
+
+`.github/workflows/ci.yml` retains native checks for Linux, Windows and macOS
+and a web build on pushes and pull requests. It does not deploy, so the two
+workflows cannot publish competing Pages artifacts. Repository settings and the
+live deployment must be verified on GitHub after pushing.
 
 ## Try the preview
 
