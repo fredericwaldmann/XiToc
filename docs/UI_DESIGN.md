@@ -1,4 +1,4 @@
-# XiToc UI design system (M0.6)
+# XiToc UI design system (M0.6 foundation, M1 tools)
 
 Follow this document for all interface work. `src/ui/style.rs` is the source of
 Rust tokens; update both together. Use egui logical points, never physical pixels.
@@ -70,14 +70,24 @@ advertise rename/move/delete before M3. Categories are virtual views of real pat
 Tabs show type icon, filename, active surface and 2 pt accent underline, close
 button and full path/type tooltip. They scroll horizontally and reveal newly
 activated tabs. Tab focus uses an accent outline; Enter/Space activates a focused
-tab. Closing never deletes a file. Do not show a dirty indicator until content
-editing and genuine dirty-state tracking exist.
+tab. Closing never deletes a file. M1 prefixes dirty tab titles with a filled dot
+and exposes “Unsaved drawing (memory only)” in the tooltip. The bottom status
+always warns when any tab has unsaved ink. Discard dialogs default to keeping
+work; Escape cancels. Never label memory-only ink as saved.
 
-Toolbar reserves space for Pen, Eraser, Undo/Redo (M1), Select, Text and Shapes
-(M6). These are disabled and explain availability on hover. Working Whiteboard
-view controls are zoom out/in, Reset view and optional dot grid. Page Notes show
-A4 / fit-width information. No save control claims an unsupported save operation.
-Browser Export PDF remains an explicit export request, not a verified disk save.
+The M1 toolbar provides Pen, Eraser and Hand selection, an Ink settings menu,
+Undo/Redo and View zoom controls. Active tools use the selection background;
+Undo/Redo are disabled when their document journal has no corresponding action.
+Ink contains an inline expandable opaque color picker (Edit color), pen width (0.25–12 document points) and
+eraser radius (4–48 logical screen points). The default pen is blue (#2563C8),
+2.5 pt wide. M1 renders constant-width ink; pressure hardware comes later.
+The screen-space eraser ring must match the swept hit-test radius. Use logical
+points, not physical display pixels, for its dimensions. View supports both
+layouts; Page 100% fits the available width. Hand/Space-drag pans without ink.
+Selection, Text and Shapes remain disabled in the Ink menu with M6 tooltips.
+Browser Export PDF is disabled while that tab contains unsaved ink, explaining
+that drawing export is M2. Blank/original PDF export remains an explicit request,
+never a verified disk save. Ctrl/Cmd+S explains the persistence limitation.
 
 ## Document surfaces
 
@@ -86,12 +96,15 @@ Page Notes: white A4 rectangles with 0.75 pt gray edge and subtle black shadow
 24 pt outer margin and page gap. Width fits available space up to 794 pt; below
 210 pt page width, horizontal scrolling preserves readable geometry. Retain the
 page list and label pages beneath the paper; do not add multipage editing yet.
+M1 zoom scales that fit-width baseline; scrollbars expose enlarged pages. Ink is
+stored page-locally in PDF points, clipped to paper, and never in the margins.
 
 Whiteboards: fill the editor with the board color, no paper edge or page shadow.
 Optional low-contrast dots follow the existing camera, spaced adaptively to avoid
-excessive drawing. Grid visibility and camera changes are session-only. Drag or
-space-drag pans; Ctrl/Cmd-wheel or pinch zooms around the pointer. Toolbar zoom
-anchors at the viewport center. These are navigation controls, not a drawing engine.
+excessive drawing. Grid visibility and camera changes are session-only. Pen draws by default;
+Hand, space-drag or middle-drag pans; Ctrl/Cmd-wheel or pinch zooms around the
+pointer. Toolbar zoom anchors at the viewport center. M1 ink uses the same
+controller and renderer as A4, without page bounds.
 External PDFs display a truthful read-only/preview-unavailable explanation.
 
 ## Responsive behavior and component boundaries
@@ -99,8 +112,9 @@ External PDFs display a truthful read-only/preview-unavailable explanation.
 The Explorer can be hidden with the top sidebar button. Narrow Explorer headers
 use “Files” and a Workspace menu; long trees scroll. Tabs scroll rather than wrap.
 Toolbar contents move into Tools/View menus; below 360 pt editor width, one typed
-document menu contains the available view/export actions and disabled tools.
-Inline view controls require 600 pt; inline future tools require 820 pt. Status
+document menu contains drawing, view and permitted export actions.
+Inline drawing controls require 760 pt; inline view controls require 1100 pt.
+Smaller editors use Tools/View menus without changing toolbar height. Status
 context is omitted on narrow windows; the status text truncates and the details
 button always exposes the complete message. Dialog inputs follow available width.
 No fixed physical-pixel sizing; egui handles display scaling and canvas resizing.

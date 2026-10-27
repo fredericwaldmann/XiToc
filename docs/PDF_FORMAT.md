@@ -86,3 +86,19 @@ On save, rewrite the PDF from the trusted document model and never maintain side
 - Bad/corrupted/missing payload is handled with a clear message and does not overwrite original.
 - Empty, one-stroke, multi-page A4, and large/negative whiteboard tests.
 - Preserve last good file on failed save; repeated save/reopen/modify/save should not grow stale payloads unboundedly.
+
+## M1 in-memory drawing (not persisted)
+
+`drawing::Stroke` prepares stable document/stroke UUIDs, page/canvas ownership,
+f64 PDF-point positions and widths, pressure-ready points and RGBA color. These
+objects are held in the editor session only. The implemented blank-PDF schema 1
+has not changed; it cannot contain ink. No sidecar or alternate note format is
+written. Export is blocked for unsaved drawing, and Save explicitly reports that
+persistence is unavailable. Discarding/restarting loses the session's ink.
+
+M2 must deliberately version the document payload and decode/migrate old blank
+notes, include stroke/page ownership and editor snapshots, emit matching visible
+vector paths with round caps/joins, and validate full drawing round trips. Never
+feed an ink-bearing snapshot into the blank encoder or claim original blank PDF
+bytes represent current edits. Add atomic update failure/recovery tests and a
+saved revision marker before enabling Save or dirty-document export.

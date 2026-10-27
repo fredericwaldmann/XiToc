@@ -85,3 +85,44 @@ components. They return actions; IO and document creation remain coordinated by
 Theme, Explorer visibility and the Whiteboard grid toggle are session-only UI
 state. No domain, PDF payload, canonical storage or save lifecycle changes.
 Follow `UI_DESIGN.md` for dimensions, palette, interaction and responsiveness.
+
+## M1 drawing boundaries
+
+`drawing.rs` is independent of egui, storage and PDF mechanics. `Stroke` contains
+its stable UUID, owning document UUID, `Surface::Page(index)` or `Surface::Canvas`,
+ordered `InkPoint { position: [f64; 2], pressure }`, RGBA color and width. Coordinates
+and widths are PDF points (72/inch); A4 geometry converts explicitly from mm.
+Mouse pressure defaults to 1.0; M1 uses constant width. Stroke types derive serde
+for future integration, but are not written as a new format or added to schema 1.
+
+Each opened editor owns a `Drawing` with immutable owner/layout, strokes and a
+command journal. Insert and Erase commands store affected objects/original indices
+using shared references, not whole-document snapshots. Undo reverts; redo reapplies;
+a new command truncates the redo branch. One swept eraser gesture commits one
+command, restoring erased stroke identity and stacking order on undo. Future
+shape/text commands can extend this journal. Dirty means current ink differs from
+the blank persisted baseline; undoing/erasing all ink returns to that baseline.
+
+`canvas.rs` is the common input/rendering controller, called with a surface and
+f64 `Transform`. It consumes ordered egui pointer samples once per surface/frame,
+keeps an active gesture separate from committed strokes, captures pen style at
+pointer-down, and finalizes on release, lost focus, view changes or tab changes.
+A4 excursions end at the edge and do not bridge margins. Both layouts use the same
+controller, smoothing, eraser tests and rounded renderer. Logical coordinates are
+independent of DPI; only local screen positions become f32. Quadratic midpoint
+interpolation stays within the samples' convex hull; raw samples remain editable.
+Logical paths and anti-aliased meshes cache completed strokes by view transform/DPI;
+eraser hit tests use the same smoothed path plus stroke radius. Meshes for erased
+or abandoned strokes are released; history retains semantic objects for undo.
+
+`editor.rs` supplies page-local transforms/scrolling or Whiteboard camera
+transforms/panning. It never changes document kind. `app.rs` guards destructive
+navigation: dirty-tab close/workspace change/native quit require confirmation;
+external refresh/open preserves dirty tabs even when the source disappears or
+changes. `index.html` uses the Rust-maintained dirty flag for browser beforeunload.
+Browser/OS forced termination can bypass warnings; no crash recovery exists yet.
+
+M1 deliberately leaves `DocumentData`'s blank schema and `pdf.rs` unchanged. PDF
+export of dirty tabs is blocked rather than exporting stale blank bytes. M2 must
+version a complete document snapshot, write conventional visible ink plus matching
+embedded edit data, and implement safe writes/round trips and a saved revision.

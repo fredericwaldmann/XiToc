@@ -1,10 +1,11 @@
 # XiToc
 
-Local-first Rust editor shell, shared by desktop and WASM. M0.6 adds a consistent
-light/dark interface to the M0.5 foundation: distinct
+Local-first Rust handwriting app, shared by desktop and WASM. M1 adds in-memory
+vector drawing to the M0.6 light/dark interface and M0.5 foundation: distinct
 **Page Notes** and **Whiteboards**, real native workspace discovery/creation, and
 one-file blank PDF persistence. Uses pinned egui/eframe 0.37.0. No account,
-backend, handwriting tools or full drawing serialization exists yet.
+backend or full drawing serialization exists yet. **M1 ink is memory-only:**
+PDF saving/reopening of handwriting arrives in M2.
 
 ## Run
 
@@ -70,8 +71,8 @@ atomically without overwriting an existing file, then opens it in a tab.
 The type indicator near the title comes from PDF metadata. There is no editor
 mode switch: a Page Note stays a Page Note, and a Whiteboard stays a Whiteboard.
 Page Notes show A4 boundaries and page scrolling. Whiteboards are borderless:
-drag or space-drag to pan; Ctrl/Cmd-wheel or pinch to zoom around the pointer,
-or use +/− and Reset view. Navigation is session-only in M0.5.
+use Hand, space-drag or middle-drag to pan; Ctrl/Cmd-wheel or pinch to zoom around the pointer,
+or use +/− and Reset view. Navigation remains session-only through M1.
 
 Close and reopen tabs, or restart XiToc and select the workspace again. Both
 UUID and type are inside `XiToc/document.json`, a named PDF attachment. Ordinary
@@ -100,8 +101,8 @@ creation requires a filesystem supporting atomic hard-link publication; an
 unsupported filesystem returns an error and preserves existing files. Linux's
 workspace picker uses an installed XDG desktop portal; no GTK dependency is added.
 
-Drawing, saved camera state, undo/redo, existing-document saves and multi-page
-creation remain later milestones. See the M0.5 checklist in
+Drawing and undo/redo work in memory in M1. Saved ink/camera state,
+existing-document saves and multi-page creation remain later milestones. See the milestone checklists in
 [TEST_PLAN.md](docs/TEST_PLAN.md) for native/web/restart/ordinary-viewer tests.
 
 ## Interface foundation (M0.6)
@@ -113,11 +114,32 @@ labels to see full paths; the bottom **…** button opens the complete status me
 
 Whiteboards offer zoom, Reset view and an optional dot-grid toggle; camera/grid
 changes are session-only. Narrow toolbars put controls in Tools/View or a typed
-document menu. Pen, Eraser, Undo/Redo (M1), Select, Text and Shapes (M6) are visibly
-disabled with availability hints. No document conversion or fake save controls.
+document menu. Pen, Eraser, Hand and Undo/Redo now work in M1; Ink contains color/width settings.
+Select, Text and Shapes (M6) remain disabled with availability hints. No document conversion or fake save controls.
 
 See [the design system](docs/UI_DESIGN.md) for palette, spacing, typography,
 component boundaries and interaction conventions. UI changes must follow it.
+
+## Drawing (M1)
+
+Select **Pen** and drag with the mouse on either document type. Use **Ink** for
+opaque pen color and width (document points), or eraser radius (screen points).
+Select **Eraser** to remove whole strokes; its ring shows the actual hit area.
+Each pen stroke or eraser drag is one undo operation. **Ctrl/Cmd+Z** undoes and
+**Ctrl/Cmd+Shift+Z** redoes in the active tab. **Hand** or **Space-drag** pans;
+Whiteboards also allow middle-drag. View offers +/− and Reset; **Ctrl/Cmd-wheel**
+or pinch zooms. Page Notes scroll and constrain ink to A4 boundaries; their 100%
+zoom fits width. Whiteboards have arbitrary world coordinates and no page edge.
+
+**Ink is not saved to PDF in M1.** Dirty tabs show a dot and the status warns that
+changes are memory-only. Closing a dirty tab, changing native workspace or
+quitting asks before discarding; browser reload/leave requests its standard
+warning, subject to browser restrictions. Forced shutdown can still lose ink.
+Refresh retains unsaved tabs after external PDF changes/removal. PDF export is
+disabled for dirty tabs; Ctrl/Cmd+S explains that persistence is deferred. Blank
+PDF creation and original-PDF export still work. No sidecars or alternative note
+format are written. Discard/restart loses drawing; M2 will add synchronized visible
+PDF graphics and embedded editable strokes, safe updates and full round trips.
 
 ## Checks
 
