@@ -82,8 +82,8 @@ Rename/move/delete controls within XiToc are deferred to M3.
 On web, use **New Document**, **Create & export PDF**, **Import PDF…** and
 **Export PDF…**. Browser documents are a session list, with no arbitrary folder
 access. Confirm the browser download before leaving/reloading; after reload,
-import the exported PDF to restore its type. Export status says “requested”
-because the app cannot verify completion of a browser disk save. Closing a tab
+import the exported PDF to restore its type. Export status only confirms the dialog closed, including cancellation; the app
+cannot verify completion of a browser disk save. Closing a tab
 retains its bytes in the session so it can be reopened from the Explorer.
 
 External PDFs classify as read-only Page Notes. PDF content rendering/conversion

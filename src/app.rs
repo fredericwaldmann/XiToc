@@ -465,7 +465,7 @@ impl XiTocApp {
                 }
                 Event::Imported(Err(error)) | Event::Export(Err(error)) => self.status = error,
                 Event::Export(Ok(())) => {
-                    self.status = "Export requested. Confirm the browser download; XiToc cannot verify a permanent disk save.".into();
+                    self.status = "Export dialog closed. Confirm any PDF download in your browser; XiToc cannot verify a permanent disk save.".into();
                 }
             }
         }

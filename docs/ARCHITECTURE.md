@@ -43,8 +43,8 @@ src/
   directory levels; large workspaces can pause during Open/Refresh. Filesystems
   without hard-link support fail safely instead of falling back to partial writes.
 - `storage/web.rs`: explicit browser file import and download export, with file
-  size checks before reading. Completion means export requested, not verified
-  permanent storage. The original imported PDF bytes are retained for export;
+  size checks before reading. The export callback only confirms dialog closure (including cancel), never
+  verified permanent storage. The original imported PDF bytes are retained for export;
   unfamiliar PDFs are never reconstructed or silently converted.
 - `editor.rs`: common editor initialized from document layout; page geometry and
   whiteboard camera affect presentation and navigation only. World coordinates
