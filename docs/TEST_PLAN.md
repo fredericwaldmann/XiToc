@@ -37,3 +37,26 @@ Each PR must show checks executed and manual observations. Only mark a milestone
 - Inspect browser console for startup errors. Test WebGL2-disabled startup
   shows an error instead of leaving the loading message indefinitely.
 - CI compile checks do not substitute for native/browser visual smoke tests.
+
+## Desktop release pipeline (M0 distribution follow-up)
+- Run `python3 -m unittest discover -s scripts -p 'test_*.py'`. These test archive
+  contents, missing/empty output, CPU mismatches, unexpected paths, corrupt ZIPs,
+  executable permissions, manifest/tag mismatch and Cargo binary-name discovery.
+  Format-header fixtures are not substitutes for compiling or launching apps.
+- Validate `.github/workflows/release.yml` with actionlint. Run the usual fmt,
+  Rust tests, Clippy, native build, WASM check and Trunk build.
+- Build Linux with the explicit release target and run `scripts/release.py package`;
+  inspect the tar contents, bytes, CPU format and execute permissions.
+- On GitHub: push a new version-matching `v*` tag containing the workflow/scripts.
+  Confirm all four native jobs pass before publish starts, the release notes are
+  generated, and all four correctly named archives are attached.
+- Introduce a failed build in a test version: publication must be skipped. A
+  mismatched tag/version must fail in prepare before native builds start.
+- Interrupt an asset upload: any release created must remain a draft. Inspect
+  and remove an incomplete draft before retrying. An existing published release
+  must not be overwritten. Manual dispatch must check out the specified tag.
+- Download/extract each real archive, launch on the matching OS/CPU, resize the
+  window and switch preview modes. Check unsigned Windows/macOS warnings and
+  Linux runtime requirements as documented in README.md.
+- These remote failure scenarios and Windows/macOS runtime checks require GitHub
+  Actions/desktop machines; local archive fixture tests do not prove them.
