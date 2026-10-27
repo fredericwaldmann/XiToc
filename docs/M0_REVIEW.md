@@ -38,3 +38,21 @@ and a default-branch push; no remote settings or deployment were changed here.
 The whiteboard is a static preview, with no pan/zoom or document coordinates.
 Modes are session UI state only. Future document creation must choose and persist
 a note's mode as specified in PRODUCT.md. PDF round trips remain the M2 gate.
+
+## GitHub Pages deployment follow-up
+
+Added `Trunk.toml` with locked dependency resolution and local `/` serving.
+`pages.yml` builds explicitly for `/XiToc/`, uploads the Pages artifact and
+uses the official deployment action. It triggers on pushes to `main` and manual
+dispatch; deployment is restricted to `main`. Existing native/web CI remains
+in `ci.yml`, with its competing deployment removed. Cargo.toml, Cargo.lock,
+the shared application, platform entry points and HTML needed no changes.
+
+Follow-up checks on Linux: fmt, Clippy with warnings denied, tests (0 tests),
+WASM check, native build, and `trunk build --release --public-url /XiToc/` all
+exited 0. Both workflow YAML files parsed, and trigger, job dependency and
+permission assertions passed. Local Trunk serving returned HTTP 200 for HTML,
+JavaScript and WASM. The release bundle mounted at `/XiToc/` also returned
+HTTP 200 for all three, with the expected URL prefix and valid WASM magic
+bytes. `--open` was not exercised, and browser rendering/resizing
+and live GitHub Actions deployment remain manual checks in TEST_PLAN.md.

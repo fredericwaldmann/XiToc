@@ -20,7 +20,9 @@ Each native XiToc note MUST be a single, valid, independently viewable PDF. All 
 
 - Shared semantic types must not depend on egui, filesystem, or browser APIs. Keep serde models versioned and testable in memory.
 - Use stable object IDs and logical document coordinates, independent of screen pixels.
-- Use a single editor input controller and rendering pipeline; modes affect page bounds, coordinate transform and export only.
+- Page Notes and Whiteboards are immutable document types chosen at creation, never an editor mode toggle. Derive layout from PDF metadata; no conversion UI. Use a single editor input controller and rendering pipeline; document kind affects page bounds, coordinate transform and export only.
+- Explorer Pages/Whiteboards sections are virtual categories over real workspace-relative paths. Preserve folder hierarchy and PDF identity; never manufacture category folders or duplicate files. Ordinary external PDFs classify as Page but remain read-only until explicit conversion is implemented.
+- M0.5 may create valid blank PDFs with the named embedded payload. This is only a blank-document subset, not completion of M2 handwriting serialization. Keep future/unknown payloads explicit errors and never rewrite unfamiliar PDF graphics.
 - Treat PDF output as TWO synchronized parts: conventional visible PDF graphics/pages, and a named embedded edit-data file (`XiToc/document.json`) described in `docs/PDF_FORMAT.md`.
 - Preserve user data: save to a temporary file and atomically replace on desktop when feasible, preserve last valid revision on failure, never overwrite on parse error, and test crash/error paths. On web do not report "saved" until an actual file write/export completes.
 - PDF round trips are a milestone gate. Test with a normal PDF viewer AND by loading edits back into the app.

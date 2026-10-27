@@ -1,8 +1,9 @@
 # XiToc
 
-M0 bootable Rust UI shell, shared by native and WASM. Uses exactly eframe/egui
-0.37.0 with the Glow renderer and the current `App::ui` API. No account,
-backend, note storage, filesystem access or PDF implementation exists yet.
+Local-first Rust editor shell, shared by desktop and WASM. M0.5 adds distinct
+**Page Notes** and **Whiteboards**, real native workspace discovery/creation, and
+one-file blank PDF persistence. Uses pinned egui/eframe 0.37.0. No account,
+backend, handwriting tools or full drawing serialization exists yet.
 
 ## Run
 
@@ -20,29 +21,87 @@ For web, install Trunk and the WASM target:
 
 ```sh
 rustup target add wasm32-unknown-unknown
-cargo install trunk --locked
+cargo install trunk --version 0.22.0 --locked
 trunk serve --open
 ```
 
-The browser needs WebGL2. `trunk build --release --locked --public-url ./`
-produces static files in `dist/`, suitable for hosting under a subdirectory.
-CI builds native targets on Linux, Windows and macOS and uploads the static
-web artifact. To deploy it, configure the repository's Settings → Pages source
-to **GitHub Actions**; pushes to the default branch deploy after checks pass.
-No hosting settings are modified by this change.
+The browser needs WebGL2. The existing Trunk entry point starts eframe on the
+full-window canvas; eframe observes canvas resizing and adjusts its drawing size.
+Desktop and browser use the same `XiTocApp` implementation.
 
-## Try the preview
+## GitHub Pages
 
-- Drag the Explorer's right border to resize it.
-- Select A4: a white, portrait 210:297 page fits the gray work area.
-- Select Whiteboard: a grid fills the work area without page edges.
-- Resize the window; switch modes with the pointer or Tab and Space/Enter.
-- Reload/restart: the preview resets. No files are read or written.
+Build for the repository subdirectory (case-sensitive):
 
-The header represents a single preview, not an opened note. Drawing tools are
-disabled placeholders. Drawing, pan/zoom, file tabs, save/undo shortcuts and
-PDF persistence belong to later milestones. The preview mode is UI state,
-not a document model or a saved note mode.
+```sh
+trunk build --release --public-url /XiToc/
+```
+
+Trunk writes `dist/index.html`, JavaScript and WASM with `/XiToc/` asset URLs.
+`Trunk.toml` keeps local serving at `/` and enforces Cargo.lock; the command-line
+public URL overrides that local default. No hard-coded HTML base URL is needed.
+
+In the GitHub repository, select **Settings → Pages → Build and deployment →
+Source → GitHub Actions**. Push this configuration to `main`, or run **GitHub
+Pages** from the Actions tab with `main` selected. The site will be available at
+<https://fredericwaldmann.github.io/XiToc/> after deployment succeeds.
+
+`.github/workflows/pages.yml` installs stable Rust, the WASM target and Trunk
+0.22.0, builds the release bundle, uploads `dist/` and deploys with the official
+Pages actions. Deployment permissions are scoped to the deploy job; no personal
+access token or `gh-pages` branch is needed. Concurrent deployments are serialized.
+Manual runs on other branches build only; only `main` can deploy.
+
+`.github/workflows/ci.yml` retains native checks for Linux, Windows and macOS
+and a web build on pushes and pull requests. It does not deploy, so the two
+workflows cannot publish competing Pages artifacts. Repository settings and the
+live deployment must be verified on GitHub after pushing.
+
+## Create and open documents (M0.5)
+
+On desktop, choose **Open workspace…** and select a real folder. The resizable
+Explorer groups actual PDFs under **▤ Pages** and **◇ Whiteboards**, preserving
+the actual folder hierarchy. These are virtual views, not physical category
+folders. Select or right-click a folder and choose **New Document → New Page
+Note / New Whiteboard**; enter a filename. Creation writes a valid blank PDF
+atomically without overwriting an existing file, then opens it in a tab.
+
+The type indicator near the title comes from PDF metadata. There is no editor
+mode switch: a Page Note stays a Page Note, and a Whiteboard stays a Whiteboard.
+Page Notes show A4 boundaries and page scrolling. Whiteboards are borderless:
+drag or space-drag to pan; Ctrl/Cmd-wheel or pinch to zoom around the pointer,
+or use +/− and Reset view. Navigation is session-only in M0.5.
+
+Close and reopen tabs, or restart XiToc and select the workspace again. Both
+UUID and type are inside `XiToc/document.json`, a named PDF attachment. Ordinary
+viewers display a blank A4 page for both types; that page does not constrain the
+Whiteboard editor. Move/rename a file with your OS file manager, then **Refresh**
+the Explorer: its location changes but its embedded identity/type does not.
+Rename/move/delete controls within XiToc are deferred to M3.
+
+On web, use **New Document**, **Create & export PDF**, **Import PDF…** and
+**Export PDF…**. Browser documents are a session list, with no arbitrary folder
+access. Confirm the browser download before leaving/reloading; after reload,
+import the exported PDF to restore its type. Export status only confirms the dialog closed, including cancellation; the app
+cannot verify completion of a browser disk save. Closing a tab
+retains its bytes in the session so it can be reopened from the Explorer.
+
+External PDFs classify as read-only Page Notes. PDF content rendering/conversion
+is deferred; XiToc explicitly reports unavailable content instead of showing a
+fake blank copy. Malformed/future XiToc metadata is an error. Visible external
+edits with recognized metadata are also treated conservatively as read-only.
+The app does not rewrite these PDFs; web export retains original bytes.
+
+Limits: PDF input 16 MiB, edit payload 64 KiB, native workspace 4096 entries and
+32 folder levels, UTF-8 filenames, no symlink traversal. Scanning occurs only on
+Open/Refresh/create and is synchronous, so large workspaces can pause. Native
+creation requires a filesystem supporting atomic hard-link publication; an
+unsupported filesystem returns an error and preserves existing files. Linux's
+workspace picker uses an installed XDG desktop portal; no GTK dependency is added.
+
+Drawing, saved camera state, undo/redo, existing-document saves and multi-page
+creation remain later milestones. See the M0.5 checklist in
+[TEST_PLAN.md](docs/TEST_PLAN.md) for native/web/restart/ordinary-viewer tests.
 
 ## Checks
 
@@ -62,7 +121,7 @@ Download archives from [GitHub Releases](https://github.com/fredericwaldmann/XiT
 No Rust installation is needed to run these builds. Archives contain only the
 executable; fonts are embedded and there are currently no external app resources.
 These are portable binaries, without installers, automatic updates or macOS
-`.app` bundles. The current release still has the M0 preview limitations above.
+`.app` bundles. The current release still has the M0.5 blank-document limitations above.
 
 | Platform | CPU | Archive | Executable |
 | --- | --- | --- | --- |
