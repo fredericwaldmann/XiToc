@@ -1,0 +1,6 @@
+[build]
+target = "index.html"
+dist = "dist"
+locked = true
+# Local development runs at /. Pages overrides this with --public-url /XiToc/.
+public_url = "/"
