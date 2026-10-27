@@ -6,6 +6,7 @@ pub struct Tab<'a> {
     pub path: &'a str,
     pub kind: DocumentKind,
     pub read_only: bool,
+    pub dirty: bool,
 }
 pub enum TabAction {
     Activate(usize),
@@ -36,7 +37,12 @@ impl Tabs {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     for (index, tab) in documents.enumerate() {
-                        let title = tab.path.rsplit('/').next().unwrap_or(tab.path);
+                        let filename = tab.path.rsplit('/').next().unwrap_or(tab.path);
+                        let title = if tab.dirty {
+                            format!("● {filename}")
+                        } else {
+                            filename.to_owned()
+                        };
                         let width = (title.chars().count() as f32 * 7.0 + 62.0).clamp(128.0, 224.0);
                         let (rect, response) =
                             ui.allocate_exact_size(Vec2::new(width, 32.0), Sense::click());
@@ -75,7 +81,7 @@ impl Tabs {
                         );
                         ui.put(
                             text_rect,
-                            egui::Label::new(RichText::new(title).color(if selected {
+                            egui::Label::new(RichText::new(&title).color(if selected {
                                 p.text
                             } else {
                                 p.muted
@@ -88,7 +94,7 @@ impl Tabs {
                                 egui::Role::Tab,
                                 ui.is_enabled(),
                                 selected,
-                                title,
+                                &title,
                             )
                         });
                         let keyboard = response.has_focus()
@@ -106,7 +112,13 @@ impl Tabs {
                             "{}\n{}{}",
                             tab.path,
                             tab.kind.label(),
-                            if tab.read_only { " · Read-only" } else { "" }
+                            if tab.dirty {
+                                " · Unsaved drawing (memory only)"
+                            } else if tab.read_only {
+                                " · Read-only"
+                            } else {
+                                ""
+                            }
                         ));
                         let close_rect = Rect::from_center_size(
                             Pos2::new(rect.right() - 14.0, rect.center().y),
@@ -182,11 +194,13 @@ mod tests {
                                 path: "Page.pdf",
                                 kind: DocumentKind::Page,
                                 read_only: false,
+                                dirty: false,
                             },
                             Tab {
                                 path: "Board.pdf",
                                 kind: DocumentKind::Whiteboard,
                                 read_only: false,
+                                dirty: false,
                             },
                         ]
                         .into_iter(),
