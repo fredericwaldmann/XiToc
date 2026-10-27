@@ -1,6 +1,51 @@
 # Single-PDF native document format (proposed v1)
 
-This is a design specification for Codex to implement and test, not an already validated implementation.
+M0.5 implements the blank-document subset below. Drawing serialization and full edit round trips remain the M2 gate; the broader examples are still a design specification.
+
+## Implemented M0.5 blank-document subset
+
+Output is PDF 1.7: a Catalog, one Pages/Page tree, a conventional A4 MediaBox
+(595.276×841.89 pt), an empty content stream and a named embedded file. The same
+finite A4 page is a blank Whiteboard's ordinary-viewer fallback, not a limit on
+its XiToc canvas. Output is not claimed to be PDF/A.
+
+`/Root /Names /EmbeddedFiles` contains exactly one `XiToc/document.json` entry
+pointing to a Filespec whose `/EF /F` and `/EF /UF` reference the JSON stream.
+The stream has MIME `application/vnd.XiToc.document+json`. Paths are not identity
+and are not stored in the edit payload, so filesystem relocation requires no PDF
+rewrite. Example implemented Page payload:
+
+```json
+{
+  "schema_version": 1,
+  "document_id": "f0be46d4-b81e-4c41-a184-d70f5f46ab91",
+  "layout": { "kind": "page", "pages": [{ "width_mm": 210.0, "height_mm": 297.0 }] }
+}
+```
+
+A Whiteboard has `layout: { "kind": "whiteboard", "viewport": { "center": [0.0,
+0.0], "zoom": 1.0 }, "grid": true }`. There is no independently mutable kind or
+mode field. UUID and validated initial settings round-trip inside this one PDF.
+The broader `mode`/object example below is conceptual, not this implemented schema.
+
+No payload: classify a valid ordinary PDF as Page, read-only; content rendering
+and explicit conversion are deferred. A recognized but invalid/unknown schema,
+invalid geometry, duplicate edit payload or broken attachment tree is an error.
+Never overwrite the source. Recognized metadata alone is not proof that visible
+external edits are represented: any nonempty content stream, multiple visible
+pages or page annotations is treated conservatively as read-only in M0.5.
+Compressed empty streams may also be treated read-only. External edits that strip
+or alter payloads are not guaranteed to retain native editability.
+
+Creation on native uses a synced temporary file and atomic no-clobber publication.
+It never overwrites a filename collision. No updates to existing PDF content are
+offered in this milestone. Browser exports retain the original file bytes and
+require explicit download confirmation outside the app.
+
+M2 still must introduce/version stroke/object and camera snapshots, generate
+matching visible graphics, validate full semantic round trips, and implement
+safe trusted-model updates. The blank-only parser rejects unknown payload fields;
+it must not silently discard future drawing data.
 
 ## One PDF / two representations
 

@@ -11,6 +11,32 @@
   drawing and document persistence remain in later milestones. See
   `TEST_PLAN.md` for visual smoke checks; build success alone is not visual verification.
 
+## M0.5 — Document types, creation workflow and Explorer
+- Page Notes and Whiteboards are distinct document types chosen only at creation.
+  No editor-level type toggle or conversion action.
+- Shared versioned, UI-independent model: stable UUID, immutable typed layout,
+  A4 page geometry or whiteboard viewport/grid settings; location is a separate
+  workspace-relative locator and is never the document's identity.
+- Native: select a real workspace, display its actual folder hierarchy beneath
+  virtual Pages/Whiteboards sections, create a named blank PDF in the selected
+  folder, open/close tabs and refresh after external moves. No physical category
+  directories or duplicate files. Full rename/move/delete UI remains M3.
+- Web: explicit PDF import and export fallback, with session-only grouping and
+  honest download status; directory handles and real web workspace trees remain M5.
+- Minimum PDF gate: valid blank PDF 1.7 with one conventional A4 page and the named
+  `XiToc/document.json` attachment. Both kinds/UUID/settings survive reopen and
+  restart/reimport. Whiteboards use an A4 fallback page in ordinary viewers.
+- Page editor: A4 boundaries and page scrolling, with a list-based page layout.
+  Whiteboard: borderless grid, drag/space-drag pan, Ctrl/Cmd-wheel/pinch zoom.
+  Navigation is session-only; no content editing, camera save or conversion yet.
+- Ordinary PDFs default to read-only Page classification. Bad/unsupported XiToc
+  payloads fail explicitly. Visible external edits with recognized metadata are
+  also read-only; never render them as a blank editable note or rewrite them.
+- Acceptance: classification/identity/relocation/blank-PDF round trips, safe
+  creation/collision/failure/symlink tests and shared editor initialization pass;
+  independently parse/rasterize samples; native and WASM/Trunk builds pass.
+- This blank-document subset does not satisfy the M2 handwriting round-trip gate.
+
 ## M1 — Canvas + A4 pen
 - Device-independent logical coords; strokes and colors; pen, hand, erase entire stroke; zoom/pan; undo/redo; A4 page renderer.
 - Unit tests for coordinate transforms and undo operations.

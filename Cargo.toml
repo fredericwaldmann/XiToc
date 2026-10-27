@@ -5,10 +5,24 @@ edition = "2024"
 rust-version = "1.95"
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde", "js"] }
+pdf-writer = "0.15"
+lopdf = { version = "0.45", default-features = false, features = ["wasm_js"] }
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "file-handle-inner"] }
+
 egui = { version = "=0.37.0", default-features = false }
 eframe = { version = "=0.37.0", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["Document", "Element", "HtmlCanvasElement", "Window"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cap-std = "3"
+
+[dev-dependencies]
+tempfile = "3"
