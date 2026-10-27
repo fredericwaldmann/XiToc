@@ -13,6 +13,15 @@
   </head>
   <body>
     <canvas id="xitoc-canvas" aria-label="XiToc editor"></canvas>
+    <script>
+      // Set by Rust after drawing changes. No storage, uploads or background work.
+      window.addEventListener("beforeunload", (event) => {
+        if (window.xitocHasUnsavedChanges) {
+          event.preventDefault();
+          event.returnValue = "";
+        }
+      });
+    </script>
     <div id="loading" role="status">Loading XiToc…</div>
   </body>
 </html>

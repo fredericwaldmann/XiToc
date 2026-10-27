@@ -1,5 +1,7 @@
 mod app;
+mod canvas;
 mod document;
+mod drawing;
 mod editor;
 mod pdf;
 mod storage;

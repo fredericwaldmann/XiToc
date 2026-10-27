@@ -54,9 +54,29 @@
 - No drawing engine, PDF/schema changes, advanced filesystem features or saved
   UI preferences. M1 and later milestones retain their existing scope.
 
-## M1 — Canvas + A4 pen
-- Device-independent logical coords; strokes and colors; pen, hand, erase entire stroke; zoom/pan; undo/redo; A4 page renderer.
-- Unit tests for coordinate transforms and undo operations.
+## M1 — Shared drawing engine and basic handwriting
+- One mouse-input controller and vector renderer for Page Notes and Whiteboards.
+  Smooth freehand ink, rounded caps/joins, opaque color and logical pen thickness;
+  pressure-ready samples default to 1.0 for mouse input.
+- Stable stroke/document UUIDs, explicit page index or canvas ownership, f64 PDF-
+  point coordinates. A4 bounds are enforced; Whiteboards have no page bounds.
+  Transforms subtract world centers before screen conversion. Completed stroke
+  meshes are cached per transform/DPI; offscreen strokes are culled.
+- Whole-stroke swept eraser with a visible screen-space radius; one undo command
+  per eraser gesture. Reversible add/erase commands, multiple undo/redo operations
+  and branch truncation. Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z affect only the active tab.
+- Pen/Eraser/Hand, Ink settings, Undo/Redo and View zoom controls extend the M0.6
+  toolbar. Space-drag pans; Whiteboard also supports middle-drag. Ctrl/Cmd-wheel
+  or pinch zooms. A4 fits width at 100%; page scrolling is retained.
+- Ink is memory-only in M1. Dirty tabs/status, explicit discard confirmations for
+  tab close/workspace changes/native quit, and browser beforeunload warnings.
+  Refresh/reopen never silently replace unsaved ink. PDF export is disabled for
+  dirty documents; Ctrl/Cmd+S explains the M2 limitation, never claims a save.
+- Acceptance: stroke/model/transform/ownership/bounds/eraser/history tests, actual
+  pointer-event controller tests, discard/refresh/quit safeguards, existing tests,
+  native/WASM builds and browser drawing/zoom/erase/undo smoke verification.
+- No ink persistence, autosave/recovery, pressure hardware integration, selection,
+  text, partial erasing, multipage creation or advanced M4 Whiteboard features.
 
 ## M2 — One-file PDF roundtrip (hard gate)
 - Generate valid visible PDF with vector ink; embed JSON payload; import it back into same document model.

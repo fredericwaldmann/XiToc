@@ -151,3 +151,43 @@ Manual (desktop and WebGL2 browser):
 Browser screenshots verify actual rendering, not native platform startup. Native
 OS dialogs, high-DPI displays and Windows/macOS runtime still require matching
 machines; record precisely which checks were executed in each PR.
+
+## M1 drawing engine
+
+Automated gates: vector stroke identity/style/pressure/serde readiness; page and
+document ownership validation; transform round trips under zoom/pan/resize/DPI and
+large coordinates; swept eraser segment/dot hits; add/erase command undo/redo,
+stacking order and redo-branch truncation; document isolation. Actual ordered egui
+pointer events exercise both layouts, taps, erasing, keyboard shortcuts and A4
+margin excursions. Dirty-tab Escape, external replacement/deletion refresh and
+native close cancellation protect in-memory ink. Navigation ignores pre-press
+motion and layout retries; settings remain open during adjustments. Existing PDF/storage/UI tests
+must continue passing; no M1 test should claim PDF ink persistence.
+
+Manual browser/native:
+1. Create a Page Note. Draw curves, fast diagonals and dots using Pen. Change Ink
+   color/width. Check rounded caps/joins and continuous input. Draw across each
+   paper edge and back: no ink outside the page or bridge across the margin.
+2. Zoom in/out (View +/−, Ctrl/Cmd-wheel/pinch), scroll, resize and change UI scale.
+   Ink stays attached to paper. Select Hand/Space-drag to scroll without drawing.
+3. Erase a stroke and sweep across several; ring matches the eraser radius. Undo
+   restores the full gesture and original order; redo erases again. Undo several
+   pen strokes, redo, then draw after undo: the abandoned redo branch disappears.
+4. Create a Whiteboard and repeat drawing, erasing and undo. Hand, Space-drag and
+   middle-drag pan; zoom preserves world attachment. Switch tabs/Explorer: each
+   document retains independent ink, camera, style and history.
+5. Verify dirty dots/status, disabled dirty-PDF export and truthful Ctrl/Cmd+S.
+   Close a dirty tab: Keep editing/Escape retains it; explicit Discard closes it.
+   Reopen from Explorer: only the original blank PDF returns. Dirty native quit
+   and workspace replacement also warn. Canceling a folder picker preserves work.
+6. Externally replace/move/delete a source PDF, then Refresh: unsaved ink is never
+   overwritten or dropped. Missing-source tabs stay open until explicit discard.
+7. Browser reload/leave should request its standard warning after drawing. Prompt
+   availability depends on browser/user activation; forced termination cannot be
+   prevented. No crash recovery or ink persistence is claimed.
+8. External PDFs stay read-only, with preview unavailable; no drawing or rewrite.
+   Check narrow toolbar menus, both themes and high-DPI hardware where available.
+
+Capture actual Page/Whiteboard drawings and the discard dialog, and record the
+browser/native environments used. Physical stylus pressure, prolonged handwriting
+performance, OS dialog interaction and Windows/macOS startup require real devices.

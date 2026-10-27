@@ -52,6 +52,23 @@ system (`UI_DESIGN.md`). Appearance switches themes for the current session.
 Page Notes use white, subtly shadowed A4 pages in a neutral workspace; Whiteboards
 use a borderless surface with an optional session-only dot grid. Narrow toolbars
 collapse into menus. Status details expose complete errors and export caveats.
-Pen/eraser/undo/redo and later selection/text/shapes remain explicitly disabled;
-only implemented navigation, creation, opening and export actions are enabled.
-Tabs switch/close existing documents without conversion or fabricated dirty state.
+M0.6 left drawing tools disabled until their milestones; M1 enables the tools
+listed below. Tabs switch/close existing documents without conversion; M1 adds
+genuine dirty-state feedback for memory-only ink.
+
+## M1 handwriting behavior
+
+Both document types now share mouse freehand pen drawing, opaque color/width
+settings and whole-stroke erasing. The toolbar's Pen, Eraser, Hand, Ink, Undo/Redo
+and View controls are functional. Hold Space to pan without changing tools;
+Whiteboards also support middle-button panning. Ctrl/Cmd-wheel or pinch zooms;
+Page Notes also scroll and clip ink to their A4 page. Navigation and settings
+belong to each open tab. Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z redoes. Selection,
+text and shapes remain unavailable until M6.
+
+**Drawing changes are memory-only until M2.** A dirty tab and bottom status expose
+this limitation. Close/workspace replacement/native quit ask before discard;
+browser reload/leave requests the browser's standard unsaved-change warning.
+Forced shutdown and browsers that suppress prompts cannot be prevented. Original
+PDFs remain unchanged; exporting a dirty drawing is disabled. Ctrl/Cmd+S explains
+that saving ink is unavailable. Blank creation/import/export retain M0.5 behavior.
