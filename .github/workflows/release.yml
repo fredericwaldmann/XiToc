@@ -1,0 +1,174 @@
+name: Desktop release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to release (for example v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+      sha: ${{ steps.metadata.outputs.sha }}
+      binary: ${{ steps.metadata.outputs.binary }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Validate tag and discover Cargo binary
+        id: metadata
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: python3 scripts/release.py metadata --tag "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+      - run: cargo fmt --all -- --check
+      - name: Test packaging and validation failure paths
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            archive: XiToc-windows-x64.zip
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            archive: XiToc-linux-x64.tar.gz
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            archive: XiToc-macos-arm64.tar.gz
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            archive: XiToc-macos-x64.tar.gz
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+      BINARY: ${{ needs.prepare.outputs.binary }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - name: Install Linux windowing and OpenGL development libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential pkg-config libx11-dev libxi-dev libxrandr-dev \
+            libxcursor-dev libxinerama-dev libgl1-mesa-dev libegl1-mesa-dev \
+            libwayland-dev libxkbcommon-dev
+      - run: cargo test --locked --target "$TARGET"
+      - run: cargo clippy --locked --all-targets --target "$TARGET" -- -D warnings
+      - name: Build release executable
+        run: cargo build --locked --release --target "$TARGET" --bin "$BINARY"
+      - name: Package executable and verify archive contents and CPU
+        run: python scripts/release.py package --target "$TARGET"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.target }}
+          path: release-assets/${{ matrix.archive }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Ensure tag still points to the tested commit
+        run: test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify all four archives before creating a release
+        run: python3 scripts/release.py verify
+      - name: Create draft with all assets, then publish
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo '::error::Release already exists. Published releases are never overwritten. Delete an incomplete draft before rerunning.'
+            exit 1
+          fi
+          cat > "$RUNNER_TEMP/desktop-notes.md" <<'NOTES'
+          Desktop builds are unsigned. Windows SmartScreen or macOS Gatekeeper may show a warning. See the README for trusted-download guidance and launch instructions.
+
+          Linux: x86_64, Ubuntu 22.04 or newer compatible desktop with OpenGL and X11/Wayland libraries. macOS: 13 or newer; choose the archive matching your CPU. Archives contain standalone executables, not installers or .app bundles.
+          NOTES
+          prerelease=()
+          if [[ "${RELEASE_TAG%%+*}" == *-* ]]; then
+            prerelease+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" release-assets/* "${prerelease[@]}" \
+            --verify-tag --draft --title "$RELEASE_TAG" \
+            --generate-notes --notes-file "$RUNNER_TEMP/desktop-notes.md"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          result = subprocess.check_output([
+              'gh', 'release', 'view', os.environ['RELEASE_TAG'],
+              '--json', 'assets,isDraft',
+          ], text=True)
+          release = json.loads(result)
+          expected = {p.name: p.stat().st_size for p in Path('release-assets').iterdir()}
+          actual = {a['name']: a['size'] for a in release['assets']}
+          if not release['isDraft'] or len(release['assets']) != 4 or actual != expected:
+              raise SystemExit('Draft assets are incomplete; refusing to publish')
+          PY
+          gh release edit "$RELEASE_TAG" --draft=false
