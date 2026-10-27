@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>XiToc</title>
+    <link data-trunk rel="rust" data-bin="xitoc">
+    <style>
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #414141; }
+      canvas { width: 100%; height: 100%; display: block; }
+      #loading { position: absolute; top: 40%; width: 100%; text-align: center; color: white; font-family: sans-serif; }
+    </style>
+  </head>
+  <body>
+    <canvas id="xitoc-canvas" aria-label="XiToc editor"></canvas>
+    <div id="loading" role="status">Loading XiToc…</div>
+  </body>
+</html>
