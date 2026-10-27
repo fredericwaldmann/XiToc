@@ -1,6 +1,7 @@
 # XiToc
 
-Local-first Rust editor shell, shared by desktop and WASM. M0.5 adds distinct
+Local-first Rust editor shell, shared by desktop and WASM. M0.6 adds a consistent
+light/dark interface to the M0.5 foundation: distinct
 **Page Notes** and **Whiteboards**, real native workspace discovery/creation, and
 one-file blank PDF persistence. Uses pinned egui/eframe 0.37.0. No account,
 backend, handwriting tools or full drawing serialization exists yet.
@@ -60,7 +61,7 @@ live deployment must be verified on GitHub after pushing.
 ## Create and open documents (M0.5)
 
 On desktop, choose **Open workspace…** and select a real folder. The resizable
-Explorer groups actual PDFs under **▤ Pages** and **◇ Whiteboards**, preserving
+Explorer groups actual PDFs under **Pages** and **Whiteboards** with type icons, preserving
 the actual folder hierarchy. These are virtual views, not physical category
 folders. Select or right-click a folder and choose **New Document → New Page
 Note / New Whiteboard**; enter a filename. Creation writes a valid blank PDF
@@ -102,6 +103,21 @@ workspace picker uses an installed XDG desktop portal; no GTK dependency is adde
 Drawing, saved camera state, undo/redo, existing-document saves and multi-page
 creation remain later milestones. See the M0.5 checklist in
 [TEST_PLAN.md](docs/TEST_PLAN.md) for native/web/restart/ordinary-viewer tests.
+
+## Interface foundation (M0.6)
+
+Use **Appearance → Light / Dark** to change the session theme. The top sidebar
+button hides/shows the resizable Explorer. Document tabs show type icons, scroll
+horizontally, switch documents and close without deleting files. Hover truncated
+labels to see full paths; the bottom **…** button opens the complete status message.
+
+Whiteboards offer zoom, Reset view and an optional dot-grid toggle; camera/grid
+changes are session-only. Narrow toolbars put controls in Tools/View or a typed
+document menu. Pen, Eraser, Undo/Redo (M1), Select, Text and Shapes (M6) are visibly
+disabled with availability hints. No document conversion or fake save controls.
+
+See [the design system](docs/UI_DESIGN.md) for palette, spacing, typography,
+component boundaries and interaction conventions. UI changes must follow it.
 
 ## Checks
 

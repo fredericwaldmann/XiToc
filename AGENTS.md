@@ -2,6 +2,9 @@
 
 Read `docs/PRODUCT.md`, `docs/ARCHITECTURE.md`, `docs/PDF_FORMAT.md`, `docs/ROADMAP.md`, and `docs/TEST_PLAN.md` before changing architecture or storage.
 
+For UI changes, also read and follow `docs/UI_DESIGN.md`; keep centralized tokens
+and the documented design system in sync.
+
 ## Mission and non-negotiable requirements
 
 Build a local-first Rust note-taking app, with one shared editor for desktop (Windows, macOS, Linux) and web (WASM). Show a VS Code-style Explorer of real folders and `.pdf` files on the left. Support (1) A4 paginated documents and (2) an infinitely pannable/zoomable whiteboard. Both support freehand pen drawing with the same document model.

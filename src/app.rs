@@ -1,35 +1,20 @@
+#[cfg(target_arch = "wasm32")]
+use crate::document::pdf_filename;
 use crate::{
-    document::{DocumentData, DocumentKind, pdf_filename},
-    editor::{Editor, indicator},
+    document::DocumentData,
+    editor::Editor,
     storage::{Folder, Loaded},
+    ui::{
+        self, Action,
+        dialog::{Creation, Outcome},
+        style,
+    },
 };
-use egui::{self, Sense};
 
 struct Opened {
     loaded: Loaded,
     editor: Editor,
 }
-struct Creation {
-    kind: DocumentKind,
-    name: String,
-    folder: String,
-    error: Option<String>,
-    focus: bool,
-}
-
-enum Action {
-    #[cfg(not(target_arch = "wasm32"))]
-    Workspace,
-    #[cfg(not(target_arch = "wasm32"))]
-    Refresh,
-    New(DocumentKind, String),
-    Open(String),
-    #[cfg(target_arch = "wasm32")]
-    Import,
-    #[cfg(target_arch = "wasm32")]
-    Export,
-}
-
 pub struct XiTocApp {
     tree: Folder,
     documents: Vec<Opened>,
@@ -37,6 +22,8 @@ pub struct XiTocApp {
     selected_folder: String,
     creation: Option<Creation>,
     status: String,
+    chrome: ui::chrome::Chrome,
+    tabs: ui::tabs::Tabs,
     #[cfg(not(target_arch = "wasm32"))]
     workspace: Option<crate::storage::Workspace>,
     #[cfg(target_arch = "wasm32")]
@@ -54,6 +41,8 @@ impl Default for XiTocApp {
             tree: Folder::default(),
             documents: Vec::new(),
             active: None,
+            chrome: ui::chrome::Chrome::default(),
+            tabs: ui::tabs::Tabs::default(),
             selected_folder: String::new(),
             creation: None,
             status: "Create a Page Note or Whiteboard to get started.".into(),
@@ -77,84 +66,98 @@ impl XiTocApp {
     fn show(&mut self, ui: &mut egui::Ui) {
         #[cfg(target_arch = "wasm32")]
         self.poll_browser();
+        self.chrome.theme.apply(ui.ctx());
+        ui.set_style(ui.ctx().global_style());
+        self.chrome.top(ui);
+        let context = self
+            .active
+            .map(|index| self.documents[index].loaded.document.data.kind().label())
+            .unwrap_or("No document");
+        self.chrome.bottom(ui, &self.status, context);
         let mut action = None;
-        egui::Panel::left("explorer").resizable(true).default_size(250.0).size_range(170.0..=420.0)
-            .show(ui, |ui| {
-                ui.heading("Explorer");
-                #[cfg(not(target_arch = "wasm32"))]
-                ui.horizontal(|ui| {
-                    if ui.button("Open workspace…").clicked() { action = Some(Action::Workspace); }
-                    if ui.add_enabled(self.workspace.is_some(), egui::Button::new("Refresh")).clicked() { action = Some(Action::Refresh); }
-                });
-                #[cfg(target_arch = "wasm32")]
-                {
-                    if ui.button("Import PDF…").clicked() { action = Some(Action::Import); }
-                    ui.weak("Session files · no folder access. Export PDFs to keep them; reimport after reload.");
-                }
-                let enabled = self.can_create();
-                ui.add_enabled_ui(enabled, |ui| {
-                    ui.menu_button("+ New Document", |ui| new_choices(ui, &self.selected_folder, &mut action));
-                });
-                if !enabled { ui.weak("Open a workspace to create PDF documents."); }
-                #[cfg(not(target_arch = "wasm32"))]
-                if enabled { ui.weak(format!("New in: {}", if self.selected_folder.is_empty() { "workspace root" } else { &self.selected_folder })); }
-                ui.separator();
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for kind in [DocumentKind::Page, DocumentKind::Whiteboard] {
-                        egui::CollapsingHeader::new(match kind { DocumentKind::Page => "▤ Pages", DocumentKind::Whiteboard => "◇ Whiteboards" })
-                            .default_open(true).show(ui, |ui| {
-                                if self.tree.name.is_empty() { ui.weak("No documents"); }
-                                else { folder_ui(ui, &self.tree, kind, &mut self.selected_folder, &mut action, enabled); }
-                            });
-                    }
-                    show_problems(ui, &self.tree, &mut self.status);
-                });
-                let blank = ui.allocate_response(ui.available_size(), Sense::click());
-                blank.context_menu(|ui| {
-                    ui.add_enabled_ui(enabled, |ui| new_choices(ui, &self.selected_folder, &mut action));
-                });
-            });
-        egui::CentralPanel::default().show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.heading("XiToc");
-                if let Some(active) = self.active {
-                    ui.label(self.documents[active].loaded.document.location.name());
-                    ui.weak(indicator(self.documents[active].loaded.document.data.kind()));
-                }
-            });
-            let mut close = None;
-            ui.horizontal_wrapped(|ui| {
-                for (index, opened) in self.documents.iter().enumerate() {
-                    let path = opened.loaded.document.location.name();
-                    let title = path.rsplit('/').next().unwrap_or(path);
-                    if ui.selectable_label(self.active == Some(index), title).on_hover_text(format!("{path} · {} bytes", opened.loaded.bytes.len())).clicked() { self.active = Some(index); }
-                    if ui.small_button("×").on_hover_text(format!("Close {title}")).clicked() { close = Some(index); }
-                }
-            });
-            if let Some(index) = close { self.close(index); }
-            ui.separator();
-            ui.horizontal_wrapped(|ui| {
-                for tool in ["Pen", "Eraser", "Hand"] { ui.add_enabled(false, egui::Button::new(tool)); }
-                ui.weak("Drawing tools arrive in M1. Navigation is session-only.");
-                #[cfg(target_arch = "wasm32")]
-                if ui.add_enabled(self.active.is_some(), egui::Button::new("Export PDF…")).clicked() { action = Some(Action::Export); }
-            });
-            ui.label(&self.status);
-            ui.separator();
-            if let Some(active) = self.active {
-                let opened = &mut self.documents[active];
-                if opened.loaded.document.external {
-                    ui.heading(format!("PDF preview unavailable · read-only {}", opened.loaded.document.data.kind().label()));
-                    ui.label("PDF content rendering/import is not implemented yet. This file is not shown as a blank note and will not be rewritten.");
-                } else { opened.editor.show(ui, &opened.loaded.document.data); }
-            } else {
-                ui.centered_and_justified(|ui| ui.label("Open or create a document from the Explorer."));
-            }
-        });
+        self.show_explorer(ui, &mut action);
+        self.show_document_area(ui, &mut action);
         if let Some(action) = action {
             self.act(action, ui.ctx());
         }
         self.creation_dialog(ui.ctx());
+    }
+
+    fn show_explorer(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>) {
+        if self.chrome.explorer_hidden {
+            return;
+        }
+        let max_width = (ui.available_width() * 0.45).clamp(132.0, 360.0);
+        let can_create = self.can_create();
+        let active_path = self
+            .active
+            .map(|index| self.documents[index].loaded.document.location.name());
+        egui::Panel::left("explorer")
+            .resizable(true)
+            .default_size(248.0)
+            .size_range(132.0..=max_width)
+            .frame(style::frame(style::palette(ui).sidebar, 10, 10))
+            .show(ui, |ui| {
+                ui::explorer::Explorer {
+                    tree: &self.tree,
+                    selected_folder: &mut self.selected_folder,
+                    active_path,
+                    can_create,
+                    status: &mut self.status,
+                }
+                .show(ui, action);
+            });
+    }
+
+    fn show_document_area(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>) {
+        let p = style::palette(ui);
+        egui::CentralPanel::default()
+            .frame(style::frame(p.workspace, 0, 0))
+            .show(ui, |ui| {
+                let mut tab_action = None;
+                egui::Panel::top("document-tabs")
+                    .resizable(false)
+                    .exact_size(style::TAB)
+                    .frame(style::frame(p.shell, 4, 2))
+                    .show(ui, |ui| {
+                        let documents = self.documents.iter().map(|opened| ui::tabs::Tab {
+                            path: opened.loaded.document.location.name(),
+                            kind: opened.loaded.document.data.kind(),
+                            read_only: opened.loaded.document.external,
+                        });
+                        tab_action = self.tabs.show(ui, documents, self.active);
+                    });
+                if let Some(tab_action) = tab_action {
+                    match tab_action {
+                        ui::tabs::TabAction::Activate(index) => self.active = Some(index),
+                        ui::tabs::TabAction::Close(index) => self.close(index),
+                    }
+                }
+                egui::Panel::top("document-toolbar")
+                    .resizable(false)
+                    .exact_size(40.0)
+                    .frame(style::frame(p.surface, 8, 6))
+                    .show(ui, |ui| {
+                        let document = self.active.map(|index| {
+                            let opened = &mut self.documents[index];
+                            (&opened.loaded.document, &mut opened.editor)
+                        });
+                        ui::toolbar::show(ui, document, action);
+                    });
+                if let Some(index) = self.active {
+                    let opened = &mut self.documents[index];
+                    if opened.loaded.document.external {
+                        egui::Frame::new().inner_margin(24.0).show(ui, |ui| {
+                            ui.heading("Read-only PDF");
+                            ui.label("PDF preview is not available yet. The original file is preserved and will not be rewritten.");
+                        });
+                    } else {
+                        opened.editor.show(ui, &opened.loaded.document.data);
+                    }
+                } else {
+                    ui::chrome::empty(ui, self.can_create(), &self.selected_folder, action);
+                }
+            });
     }
 
     fn can_create(&self) -> bool {
@@ -325,64 +328,15 @@ impl XiTocApp {
         let Some(creation) = &mut self.creation else {
             return;
         };
-        let mut create = false;
-        let mut cancel = false;
-        egui::Window::new(format!("New {}", creation.kind.label()))
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                #[cfg(not(target_arch = "wasm32"))]
-                ui.label(format!(
-                    "Folder: {}",
-                    if creation.folder.is_empty() {
-                        "workspace root"
-                    } else {
-                        &creation.folder
-                    }
-                ));
-                #[cfg(target_arch = "wasm32")]
-                ui.label(
-                    "Browser session · export the PDF to choose where to keep it after reload.",
-                );
-                ui.label("Filename");
-                let field = ui.text_edit_singleline(&mut creation.name);
-                if creation.focus {
-                    field.request_focus();
-                    creation.focus = false;
-                }
-                if field.changed() {
-                    creation.error = None;
-                }
-                let valid = pdf_filename(&creation.name);
-                if let Err(error) = &valid {
-                    ui.weak(error);
-                }
-                if let Some(error) = &creation.error {
-                    ui.colored_label(egui::Color32::LIGHT_RED, error);
-                }
-                create = valid.is_ok()
-                    && field.has_focus()
-                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                cancel = ui.input(|i| i.key_pressed(egui::Key::Escape));
-                ui.horizontal(|ui| {
-                    create |= ui
-                        .add_enabled(
-                            valid.is_ok(),
-                            egui::Button::new(if cfg!(target_arch = "wasm32") {
-                                "Create & export PDF"
-                            } else {
-                                "Create"
-                            }),
-                        )
-                        .clicked();
-                    cancel |= ui.button("Cancel").clicked();
-                });
-            });
-        if cancel {
-            self.creation = None;
-            return;
+        match creation.show(ctx) {
+            Outcome::Pending => return,
+            Outcome::Cancel => {
+                self.creation = None;
+                return;
+            }
+            Outcome::Create => {}
         }
-        if create {
+        {
             let creation = self.creation.as_ref().unwrap();
             let data = DocumentData::blank(creation.kind);
             #[cfg(not(target_arch = "wasm32"))]
@@ -472,75 +426,6 @@ impl XiTocApp {
     }
 }
 
-fn new_choices(ui: &mut egui::Ui, folder: &str, action: &mut Option<Action>) {
-    for kind in [DocumentKind::Page, DocumentKind::Whiteboard] {
-        if ui.button(format!("New {}", kind.label())).clicked() {
-            *action = Some(Action::New(kind, folder.into()));
-            ui.close();
-        }
-    }
-}
-
-fn folder_ui(
-    ui: &mut egui::Ui,
-    folder: &Folder,
-    kind: DocumentKind,
-    selected: &mut String,
-    action: &mut Option<Action>,
-    can_create: bool,
-) {
-    let response = egui::CollapsingHeader::new(format!("▸ {}", folder.name))
-        .id_salt((kind.label(), &folder.path))
-        .default_open(true)
-        .show(ui, |ui| {
-            for child in &folder.folders {
-                folder_ui(ui, child, kind, selected, action, can_create);
-            }
-            for file in folder.files.iter().filter(|f| f.kind == Some(kind)) {
-                let title = file.path.rsplit('/').next().unwrap_or(&file.path);
-                let response = ui
-                    .push_id((&file.path, file.document_id), |ui| {
-                        ui.selectable_label(
-                            false,
-                            format!(
-                                "{} {title}",
-                                if kind == DocumentKind::Page {
-                                    "▤"
-                                } else {
-                                    "◇"
-                                }
-                            ),
-                        )
-                        .on_hover_text(&file.path)
-                    })
-                    .inner;
-                if response.clicked() {
-                    *selected = folder.path.clone();
-                    *action = Some(Action::Open(file.path.clone()));
-                }
-                response.context_menu(|ui| {
-                    ui.add_enabled_ui(can_create, |ui| new_choices(ui, &folder.path, action));
-                });
-            }
-        });
-    if response.header_response.clicked() {
-        *selected = folder.path.clone();
-    }
-    response.header_response.context_menu(|ui| {
-        *selected = folder.path.clone();
-        ui.label(if folder.path.is_empty() {
-            if cfg!(target_arch = "wasm32") {
-                "Browser session"
-            } else {
-                "Workspace root"
-            }
-        } else {
-            &folder.path
-        });
-        ui.add_enabled_ui(can_create, |ui| new_choices(ui, &folder.path, action));
-    });
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 fn collect_entries<'a>(folder: &'a Folder, entries: &mut Vec<&'a crate::storage::Entry>) {
     entries.extend(&folder.files);
@@ -549,25 +434,10 @@ fn collect_entries<'a>(folder: &'a Folder, entries: &mut Vec<&'a crate::storage:
     }
 }
 
-fn show_problems(ui: &mut egui::Ui, folder: &Folder, status: &mut String) {
-    for file in folder.files.iter().filter(|f| f.problem.is_some()) {
-        if ui
-            .button(format!("⚠ {}", file.path))
-            .on_hover_text("Unreadable PDF; original unchanged")
-            .clicked()
-        {
-            *status = file.problem.clone().unwrap_or_default();
-        }
-    }
-    for child in &folder.folders {
-        show_problems(ui, child, status);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::{Document, Location};
+    use crate::document::{Document, DocumentKind, Location};
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn refresh_tracks_a_real_move_and_closes_deleted_file_without_changing_kind() {
@@ -606,6 +476,51 @@ mod tests {
         app.refresh();
         assert!(app.documents.is_empty());
         assert_eq!(app.active, None);
+    }
+
+    #[test]
+    fn application_fits_resized_windows_and_scaled_themes() {
+        for theme in [style::Theme::Light, style::Theme::Dark] {
+            for scale in [1.0, 1.5, 2.0] {
+                for width in [320.0, 480.0, 800.0, 1200.0] {
+                    let mut app = XiTocApp::default();
+                    app.chrome.theme = theme;
+                    for kind in [DocumentKind::Page, DocumentKind::Whiteboard] {
+                        let data = DocumentData::blank(kind);
+                        app.open(Loaded {
+                            bytes: crate::pdf::encode(&data).unwrap().into(),
+                            document: Document {
+                                data,
+                                location: Location::new(format!(
+                                    "A long document filename {}.pdf",
+                                    kind.label()
+                                )),
+                                external: false,
+                            },
+                        });
+                    }
+                    let ctx = egui::Context::default();
+                    ctx.set_zoom_factor(scale);
+                    // Exercise both layouts after the theme/scale have settled.
+                    for active in [0, 1] {
+                        app.active = Some(active);
+                        for _ in 0..3 {
+                            let mut output = ctx.run_ui(egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 640.0))),
+                                ..Default::default()
+                            }, |ui| {
+                                let viewport = ui.max_rect();
+                                app.show(ui);
+                                assert!(ui.min_rect().right() <= viewport.right() + 1.0,
+                                    "horizontal overflow at {width}/{scale}/{theme:?}: {:?} vs {viewport:?}", ui.min_rect());
+                                assert!(ui.min_rect().bottom() <= viewport.bottom() + 1.0);
+                            });
+                            output.textures_delta.clear();
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

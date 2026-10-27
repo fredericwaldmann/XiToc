@@ -121,3 +121,33 @@ Manual web check (`trunk serve`, WebGL2 browser):
 M0.5 does not implement content editing, existing-PDF updates, saved camera changes,
 auto-restoring workspace handles, background scans, filesystem mutation controls,
 or browser directory handles. Those stay in their later milestones.
+
+## M0.6 UI foundation
+
+Automated regression coverage includes metadata-derived page/board rendering,
+transient view controls preserving document data, pointer activation of tab filenames,
+and application layout at
+narrow/wide logical sizes with both themes and display scaling.
+
+Manual (desktop and WebGL2 browser):
+1. Open/create Page and Whiteboard PDFs using the M0.5 flows above. Capture an
+   Explorer-visible screenshot, a Page screenshot and a Whiteboard screenshot.
+   Check neutral paper workspace, centered A4 edge/shadow and borderless dots.
+2. Open several long filenames. Switch by tab and Explorer, close active/inactive
+   tabs, reopen from Explorer. Types stay fixed; closing does not delete anything.
+3. Expand/collapse category and folder chevrons; select a nested creation folder;
+   use New/context menus. Drag the Explorer divider, hide/show Explorer.
+4. Resize from 1100×800 through 800×600 to 480×640. Check scrolling tabs, toolbar
+   overflow menus, file truncation, status details and the creation dialog. At
+   narrow sizes hide Explorer for more workspace. No overlapping controls.
+5. Switch Light/Dark; repeat at 150% and 200% scaling. White paper remains white,
+   labels readable, focus/hover/selection distinct. Use Tab/Enter/Space to reach
+   tabs, close buttons, sidebar toggle, menus and zoom; inspect focus outlines.
+6. Disabled tools never edit content. Whiteboard +/−, Reset and grid toggle work;
+   pan/zoom still works. Reopen restores PDF metadata, not transient navigation.
+7. Import an external PDF: read-only explanation, no fake blank preview. Export
+   cancellation never claims a permanent save; long messages remain accessible.
+
+Browser screenshots verify actual rendering, not native platform startup. Native
+OS dialogs, high-DPI displays and Windows/macOS runtime still require matching
+machines; record precisely which checks were executed in each PR.

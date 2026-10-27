@@ -43,3 +43,15 @@ MVP: pressure-agnostic freehand points, stroke width/color, erase a whole stroke
 
 ## Privacy and scope
 No backend, login, collaboration, cloud sync, PDF OCR, handwriting recognition, or mobile support in first release. No automatic upload of note content. Browser-delivered app assets may be fetched from GitHub Pages, but notes are handled locally.
+
+## M0.6 interface foundation
+
+The application area, resizable/hideable Explorer, horizontally scrolling typed
+tabs, compact document toolbar and bottom status line share a light/dark design
+system (`UI_DESIGN.md`). Appearance switches themes for the current session.
+Page Notes use white, subtly shadowed A4 pages in a neutral workspace; Whiteboards
+use a borderless surface with an optional session-only dot grid. Narrow toolbars
+collapse into menus. Status details expose complete errors and export caveats.
+Pen/eraser/undo/redo and later selection/text/shapes remain explicitly disabled;
+only implemented navigation, creation, opening and export actions are enabled.
+Tabs switch/close existing documents without conversion or fabricated dirty state.

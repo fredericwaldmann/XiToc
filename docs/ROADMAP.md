@@ -37,6 +37,23 @@
   independently parse/rasterize samples; native and WASM/Trunk builds pass.
 - This blank-document subset does not satisfy the M2 handwriting round-trip gate.
 
+## M0.6 — UI/UX design foundation
+- Shared light/dark design tokens and original vector icons, documented in
+  `UI_DESIGN.md`. Compact application area, Explorer, scrollable typed tabs,
+  document toolbar, editor and bottom status bar.
+- Resizable/hideable Explorer with virtual typed categories, folder selection,
+  existing creation/context menus, hover/active feedback and truthful empty states.
+- Tabs activate/close existing documents; no fabricated dirty state or type switch.
+- Future drawing tools disabled with milestone hints; existing view/export controls
+  work. Narrow layouts use menus rather than overlapping controls.
+- Centered white A4 pages, neutral background, margins and subtle shadow;
+  borderless Whiteboard with optional session-only dot grid.
+- Acceptance: existing document/storage/PDF tests plus UI regression checks,
+  fmt/Clippy/native/WASM/Trunk pass. Open the real app and capture Explorer,
+  Page and Whiteboard screenshots; check resize, scaling and both themes.
+- No drawing engine, PDF/schema changes, advanced filesystem features or saved
+  UI preferences. M1 and later milestones retain their existing scope.
+
 ## M1 — Canvas + A4 pen
 - Device-independent logical coords; strokes and colors; pen, hand, erase entire stroke; zoom/pan; undo/redo; A4 page renderer.
 - Unit tests for coordinate transforms and undo operations.
