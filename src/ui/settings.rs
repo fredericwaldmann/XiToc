@@ -56,7 +56,19 @@ impl SettingsDialog {
                             super::drawing_controls::show(ui, &mut prefs.drawing.color,
                                 &mut prefs.drawing.width, &mut prefs.drawing.eraser_radius);
                             ui.add_space(style::GAP);
-                            ui.weak("Whole-stroke erasing is available. Smoothing strength and partial erasing settings will arrive with those features.");
+                            ui.strong("Stroke Smoothing");
+                            ui.label("Applies to new strokes in every open tab.");
+                            ui.spacing_mut().slider_width = style::SMOOTHING_SLIDER_WIDTH.min(ui.available_width() - 70.0);
+                            ui.scope(|ui| {
+                                let p = style::palette(ui);
+                                ui.visuals_mut().widgets.inactive.bg_fill = p.border;
+                                ui.add(egui::Slider::new(&mut prefs.drawing.smoothing_strength, 0..=100)
+                                    .suffix("%")
+                                    .trailing_fill(true)
+                                    .text("Strength"));
+                            });
+                            ui.weak("0% Off · 25% Light · 50% Medium · 75% Strong · 100% Maximum");
+                            ui.weak("Partial-erasing settings will arrive with that feature.");
                         }
                         Section::Input => {
                             ui.strong("Navigation");

@@ -6,6 +6,7 @@ mod editor;
 mod eraser_index;
 mod pdf;
 mod settings;
+mod smoothing;
 mod storage;
 mod ui;
 

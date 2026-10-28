@@ -98,6 +98,18 @@
 - Gates: menu/open/close and live preference tests, restart round trip, drawing
   default/document isolation and input behavior tests, native/WASM/Trunk builds.
 
+## M1.1 — Configurable stroke smoothing (#12)
+- Local corner-aware filtering and quadratic interpolation in document points;
+  exact endpoints, true 0% raw input, 50% default and a persistent 0–100% slider.
+- Capture a versioned algorithm/strength per stroke; preserve raw editable samples,
+  pressure-ready data, identity/style and existing ink when preferences change.
+- Incremental trailing geometry and reusable mesh chunks for responsive preview;
+  identical release geometry. Preserve the indexed eraser and undo/redo behavior.
+- Gates: strength/jitter/corners/dots/endpoints, coordinate independence,
+  incremental/final equality and bounded work, cache reuse, raw JSON round trips,
+  settings migration/persistence, actual controller/history, native/WASM/Trunk.
+- No pressure input, new tools, partial erasing or PDF ink persistence.
+
 ## M2 — One-file PDF roundtrip (hard gate)
 - Generate valid visible PDF with vector ink; embed JSON payload; import it back into same document model.
 - Independent PDF parsing validation; zero sidecars, even across reopen and autosave.

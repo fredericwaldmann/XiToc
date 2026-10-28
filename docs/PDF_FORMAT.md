@@ -102,3 +102,13 @@ vector paths with round caps/joins, and validate full drawing round trips. Never
 feed an ink-bearing snapshot into the blank encoder or claim original blank PDF
 bytes represent current edits. Add atomic update failure/recovery tests and a
 saved revision marker before enabling Save or dirty-document export.
+
+## M1.1 smoothing metadata (preparation for M2)
+
+In-memory strokes retain editable raw samples and a serde-ready per-stroke
+processing tag: `Legacy` or `AdaptiveV1 { strength: 0..100 }`. Strength is captured
+at pointer-down; rendering and erasing reconstruct the same deterministic vector
+path. JSON round trips preserve f64 samples exactly. Future M2 encoding must
+version the PDF payload and serialize the raw vectors/processing metadata with
+matching visible graphics. The existing blank-PDF schema remains unchanged and
+cannot save handwriting; no sidecar format is created.

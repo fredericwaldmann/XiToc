@@ -27,6 +27,16 @@ impl InkPoint {
     }
 }
 
+/// Versioned per-stroke processing; missing metadata retains the original M1 path.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum Smoothing {
+    #[default]
+    Legacy,
+    AdaptiveV1 {
+        strength: u8,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Stroke {
     pub id: Uuid,
@@ -36,6 +46,8 @@ pub struct Stroke {
     pub color: [u8; 4],
     /// PDF points (1/72 inch), independent of display pixels and zoom.
     pub width: f64,
+    #[serde(default)]
+    pub smoothing: Smoothing,
 }
 impl Stroke {
     pub fn new(document_id: Uuid, surface: Surface, color: [u8; 4], width: f64) -> Self {
@@ -46,6 +58,13 @@ impl Stroke {
             points: Vec::new(),
             color,
             width,
+            smoothing: Smoothing::Legacy,
+        }
+    }
+    pub fn path(&self) -> Vec<[f64; 2]> {
+        match self.smoothing {
+            Smoothing::Legacy => smooth(&self.points),
+            Smoothing::AdaptiveV1 { strength } => crate::smoothing::path(&self.points, strength),
         }
     }
     pub fn push(&mut self, position: [f64; 2]) {
@@ -187,6 +206,7 @@ impl Drawing {
     pub fn add(&mut self, stroke: Stroke) -> bool {
         if stroke.document_id != self.owner
             || stroke.id.is_nil()
+            || matches!(stroke.smoothing, Smoothing::AdaptiveV1 { strength } if strength > 100)
             || stroke.points.is_empty()
             || !stroke.width.is_finite()
             || !(0.1..=24.0).contains(&stroke.width)
@@ -365,6 +385,31 @@ mod tests {
         assert!(!drawing.add(a));
         assert!(drawing.dirty());
     }
+    #[test]
+    fn adaptive_metadata_retains_raw_pressure_style_and_legacy_geometry() {
+        let data = DocumentData::blank(DocumentKind::Page);
+        let mut ink = stroke(
+            &data,
+            Surface::Page(0),
+            &[[2.0, 4.0], [10.0, 4.2], [18.0, 4.0]],
+        );
+        ink.points[1].pressure = 0.4;
+        ink.smoothing = Smoothing::AdaptiveV1 { strength: 75 };
+        let original = ink.clone();
+        let path = ink.path();
+        assert_eq!(ink, original);
+        let restored: Stroke = serde_json::from_slice(&serde_json::to_vec(&ink).unwrap()).unwrap();
+        assert_eq!(restored, ink);
+        assert_eq!(restored.path(), path);
+        let mut value = serde_json::to_value(&ink).unwrap();
+        value.as_object_mut().unwrap().remove("smoothing");
+        let legacy: Stroke = serde_json::from_value(value).unwrap();
+        assert_eq!(legacy.smoothing, Smoothing::Legacy);
+        assert_eq!(legacy.path(), smooth(&ink.points));
+        ink.smoothing = Smoothing::AdaptiveV1 { strength: 101 };
+        assert!(!Drawing::new(&data).add(ink));
+    }
+
     #[test]
     fn transformations_round_trip_at_zoom_pan_resize_and_large_origins() {
         for scale in [0.1, 1.0, 2.75, 8.0] {

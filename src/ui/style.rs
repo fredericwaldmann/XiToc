@@ -8,6 +8,7 @@ pub const GAP: f32 = 8.0;
 pub const PAGE_GAP: f32 = 24.0;
 
 pub use crate::settings::Theme;
+pub const SMOOTHING_SLIDER_WIDTH: f32 = 200.0;
 pub const SETTINGS_WIDTH: f32 = 520.0;
 
 #[derive(Clone, Copy)]

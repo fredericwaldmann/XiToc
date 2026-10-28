@@ -267,7 +267,7 @@ Manual native and browser:
    session behavior. Clearing site data resets defaults. Native disk errors are
    logged by eframe. Inspect the OS app.ron / localStorage preference key to
    confirm that it contains no document content or workspace paths.
-6. No enabled smoothing-strength, pressure or partial-erasing controls appear.
+6. Stroke Smoothing is enabled as of #12; pressure and partial-erasing controls remain unavailable.
 
 Local validation for this change: fmt, Clippy with warnings denied, 42 tests
 passed (the existing eraser benchmark is ignored), native build, WASM check and
@@ -276,3 +276,54 @@ modal, all four sections, theme/Explorer live changes, Drawing width adjustment,
 Input Devices, and localStorage restoration after reload. Native platform restart
 and Windows/macOS runtime checks remain manual; app reconstruction/storage-hook
 round trips are covered automatically.
+
+## M1.1 stroke smoothing (#12)
+
+Automated gates cover raw 0% geometry, dots/two-point strokes, 25/50/75/100%
+strengths, monotonically reduced jitter (including improvement over the original
+M1 curve at the default), exact endpoints and 90-degree corners/tiny hooks,
+convex bounds, far-origin precision and zoom/pan/resize transforms. Every prefix
+of a 1,000-sample stream must match the final reconstruction, rewrite only bounded
+trailing geometry, and perform no work for unchanged input. A 1,200-sample actual
+controller test verifies stable mesh reuse during drawing/idle/release. Both
+surfaces at 0.1×/1×/8× verify capture at pointer-down, preview/release equality,
+raw JSON/geometry round trip, settings changes affecting only future strokes,
+and undo/redo. Eraser reference comparisons include legacy and adaptive paths.
+Preferences tests cover schema-1 migration, every strength and range validation.
+
+Repeat `cargo test --release smoothing_performance -- --ignored --nocapture` for
+CPU geometry timings on 100- and 100,000-sample streams. It reports incremental
+append processing and a single full reconstruction separately. Timings exclude
+input delivery, GPU drawing and display latency. CI uses deterministic bounded
+work/cache-identity assertions rather than wall-clock thresholds.
+
+Manual native/WebGL2 browser:
+1. Create a Page Note or Whiteboard. Draw the same shallow zigzag, loops/cursive,
+   circles, corners, tiny hooks, dots and long continuous line at 0%, 25%, 50%,
+   75% and 100% through Edit → Settings → Drawing → Stroke Smoothing.
+2. Check that the endpoint follows the pointer, turns stay deliberate, and mouse
+   release does not refit the stroke. Compare how jitter changes with strength.
+3. Change strength with existing ink present: previous strokes must stay exactly
+   as drawn. Repeat after zoom/pan/resize and in another tab/document type.
+4. Undo/redo drawing and erasing. Eraser alignment and responsiveness must remain
+   consistent with visible strokes. No partial-erasing behavior is added.
+5. Reload/restart to verify the preference. Draw again to verify its effect;
+   existing note ink is still memory-only until M2 and will not survive restart.
+
+Local validation: formatting, Clippy (`-D warnings`), 50 passing tests (two manual
+benchmarks ignored by default), native build, WASM check and Trunk release build.
+The release smoothing benchmark passed separately: 100 samples took 0.200 ms
+incrementally / 0.080 ms for one rebuild; 100,000 samples took 129.149 ms
+incrementally / 49.616 ms for one rebuild (about 1.3 µs per appended sample).
+These are local geometry CPU measurements, not GPU/frame/input latency guarantees.
+
+Firefox headless/WebGL2 smoke drew matching shallow zigzags at 50%, 0% and 100%
+in one Whiteboard while retaining earlier ink. Visual comparison showed raw
+corners at 0% and increasingly rounded small irregularities at higher strengths;
+a separate right-angle stroke remained sharp at 100%. Slider interaction and
+keyboard undo/redo worked. After discarding the generated scratch ink and
+reloading, localStorage/preferences schema 2 retained 100% smoothing. Automated
+controller tests cover Page Notes and all five strength/persistence levels.
+Physical handwriting latency, native graphical smoke and Windows/macOS runtime
+still require matching devices. Local comparison screenshot:
+`/tmp/xitoc-smoothing-comparison.png` (not a repository artifact).
