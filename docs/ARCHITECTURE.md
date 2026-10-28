@@ -126,3 +126,23 @@ M1 deliberately leaves `DocumentData`'s blank schema and `pdf.rs` unchanged. PDF
 export of dirty tabs is blocked rather than exporting stale blank bytes. M2 must
 version a complete document snapshot, write conventional visible ink plus matching
 embedded edit data, and implement safe writes/round trips and a saved revision.
+
+## M1.1 eraser performance
+
+`eraser_index.rs` maintains a balanced bounds hierarchy over immutable strokes,
+keyed by the drawing's committed revision. The first eraser sample after an edit
+rebuilds it; subsequent samples query swept document-space bounds without query
+allocations. Raw-point bounds conservatively contain the smoothed path and include
+ink half-width. Only candidates reach cached smoothed-path intersection tests;
+already-erased IDs are skipped. Segment clipping against expanded bounds keeps
+long diagonal sweeps from selecting their entire bounding rectangle. Segment bounds reject distant geometry before
+distance calculations. The screen-space eraser radius still divides by zoom.
+
+Movement changes only the gesture's ID set; the document/history changes once on
+release. Erase/redo compacts the stroke vector once and undo merges backwards once,
+preserving identity and stacking order with shared stroke references. Empty erase
+gestures do not scan history or prune caches. Existing completed-stroke meshes stay
+cached during erasing; pointer movement does not invalidate their transform/DPI.
+The hierarchy is transient, shared by both layouts and targets; no PDF/schema or
+partial-erasing behavior changes. Future partial erasing should reuse this broad
+phase and invalidate the committed revision when replacing stroke geometry.

@@ -78,6 +78,17 @@
 - No ink persistence, autosave/recovery, pressure hardware integration, selection,
   text, partial erasing, multipage creation or advanced M4 Whiteboard features.
 
+## M1.1 — Eraser performance (#14)
+- Reuse a revision-keyed spatial bounds hierarchy for swept eraser candidates;
+  skip already-erased strokes and reject distant segments before exact tests.
+- Preserve whole-stroke behavior and one command per gesture; erase/restore in
+  linear passes while retaining original identities and stacking order.
+- Regression gates compare against the original full scan for 1/100/10,000
+  strokes on both layouts at 0.1×/1×/8× zoom. Include sparse-query pruning,
+  large-coordinate tangency and native/WASM builds.
+- Release benchmark compares the original scan and indexed pointer sampling.
+  Manual desktop/browser responsiveness remains a device-dependent check.
+
 ## M2 — One-file PDF roundtrip (hard gate)
 - Generate valid visible PDF with vector ink; embed JSON payload; import it back into same document model.
 - Independent PDF parsing validation; zero sidecars, even across reopen and autosave.

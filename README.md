@@ -141,6 +141,13 @@ PDF creation and original-PDF export still work. No sidecars or alternative note
 format are written. Discard/restart loses drawing; M2 will add synchronized visible
 PDF graphics and embedded editable strokes, safe updates and full round trips.
 
+M1.1 accelerates whole-stroke erasing with spatial candidate filtering and batched
+undo/redo updates. To repeat the synthetic original-versus-indexed benchmark:
+
+```sh
+cargo test --release eraser_performance -- --ignored --nocapture
+```
+
 ## Checks
 
 ```sh

@@ -85,9 +85,16 @@ impl Command {
         match self {
             Self::Insert { index, stroke } => strokes.insert(*index, stroke.clone()),
             Self::Erase(removed) => {
-                for (index, _) in removed.iter().rev() {
-                    strokes.remove(*index);
-                }
+                let mut removed = removed.iter().peekable();
+                let mut index = 0;
+                strokes.retain(|_| {
+                    let keep = removed.peek().is_none_or(|(target, _)| *target != index);
+                    if !keep {
+                        removed.next();
+                    }
+                    index += 1;
+                    keep
+                });
             }
         }
     }
@@ -97,8 +104,19 @@ impl Command {
                 strokes.remove(*index);
             }
             Self::Erase(removed) => {
-                for (index, stroke) in removed {
-                    strokes.insert(*index, stroke.clone());
+                // Merge backwards in linear time instead of shifting the tail
+                // once per restored stroke. All slots contain valid Arcs.
+                let original_len = strokes.len();
+                strokes.extend(removed.iter().map(|(_, stroke)| stroke.clone()));
+                let mut source = original_len;
+                let mut removed = removed.iter().rev().peekable();
+                for target in (0..strokes.len()).rev() {
+                    if removed.peek().is_some_and(|(index, _)| *index == target) {
+                        strokes[target] = removed.next().unwrap().1.clone();
+                    } else {
+                        source -= 1;
+                        strokes[target] = strokes[source].clone();
+                    }
                 }
             }
         }
@@ -111,6 +129,7 @@ pub struct Drawing {
     strokes: Vec<Arc<Stroke>>,
     history: Vec<Command>,
     cursor: usize,
+    revision: u64,
 }
 impl Drawing {
     pub fn new(data: &DocumentData) -> Self {
@@ -120,7 +139,12 @@ impl Drawing {
             strokes: Vec::new(),
             history: Vec::new(),
             cursor: 0,
+            revision: 0,
         }
+    }
+    /// Changes only when committed ink changes; invalidates derived spatial data.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
     pub fn owner(&self) -> Uuid {
         self.owner
@@ -182,6 +206,9 @@ impl Drawing {
         true
     }
     pub fn erase(&mut self, ids: &std::collections::HashSet<Uuid>) {
+        if ids.is_empty() {
+            return;
+        }
         let removed: Vec<_> = self
             .strokes
             .iter()
@@ -198,10 +225,12 @@ impl Drawing {
         command.apply(&mut self.strokes);
         self.history.push(command);
         self.cursor += 1;
+        self.revision += 1;
     }
     pub fn undo(&mut self) {
         if self.can_undo() {
             self.cursor -= 1;
+            self.revision += 1;
             self.history[self.cursor].revert(&mut self.strokes);
         }
     }
@@ -209,6 +238,7 @@ impl Drawing {
         if self.can_redo() {
             self.history[self.cursor].apply(&mut self.strokes);
             self.cursor += 1;
+            self.revision += 1;
         }
     }
 }
@@ -256,6 +286,39 @@ fn point_segment(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
 }
 /// Swept eraser hit-test against the same smoothed centerline as rendering.
 pub fn hit_path(path: &[[f64; 2]], from: [f64; 2], to: [f64; 2], radius: f64) -> bool {
+    if path.len() == 1 {
+        return point_segment(path[0], from, to) <= radius;
+    }
+    path.windows(2).any(|pair| {
+        let (a, b) = (pair[0], pair[1]);
+        if (0..2).any(|i| {
+            (a[i].max(b[i]) + radius).next_up() < from[i].min(to[i])
+                || (from[i].max(to[i]) + radius).next_up() < a[i].min(b[i])
+        }) {
+            return false;
+        }
+        let intersects = cross(a, b, from) * cross(a, b, to) < 0.0
+            && cross(from, to, a) * cross(from, to, b) < 0.0;
+        intersects
+            || [
+                point_segment(from, a, b),
+                point_segment(to, a, b),
+                point_segment(a, from, to),
+                point_segment(b, from, to),
+            ]
+            .into_iter()
+            .any(|d| d <= radius)
+    })
+}
+
+// Original M1 exact test retained as an independent regression/benchmark oracle.
+#[cfg(test)]
+pub(crate) fn reference_hit_path(
+    path: &[[f64; 2]],
+    from: [f64; 2],
+    to: [f64; 2],
+    radius: f64,
+) -> bool {
     if path.len() == 1 {
         return point_segment(path[0], from, to) <= radius;
     }
