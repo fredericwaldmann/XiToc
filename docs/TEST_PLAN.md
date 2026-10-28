@@ -191,3 +191,53 @@ Manual browser/native:
 Capture actual Page/Whiteboard drawings and the discard dialog, and record the
 browser/native environments used. Physical stylus pressure, prolonged handwriting
 performance, OS dialog interaction and Windows/macOS startup require real devices.
+
+## M1.1 eraser performance (#14)
+
+Automated: compare indexed erasing with the original smoothed-path full scan
+for 1, 100 and 10,000 strokes (dots and curves, varying widths), both document
+types and 0.1×/1×/8× zoom. Verify complete gesture undo/redo, original stacking
+order and index invalidation after history changes. A deterministic sparse-query
+test verifies only one candidate out of 10,000, surface isolation and inclusive
+width tangency at coordinates near 1e12. A diagonal sweep through a 100×100
+stroke grid selects the 100 diagonal candidates rather than all 10,000. Existing ordered pointer-event and
+keyboard undo/redo tests still cover the real controller.
+
+Run `cargo test --release eraser_performance -- --ignored --nocapture` for timings.
+The test uses 100-point strokes, reports the original full-scan hot path versus
+indexed sampling for 200 pointer samples, index construction separately, and a
+long sweep plus commit. These are CPU sampling timings, not end-to-end frame
+latency or universal performance thresholds. Regular CI uses correctness/work
+counts rather than flaky wall-clock limits.
+
+Manual native and WebGL2 browser:
+1. Create a Page Note and a Whiteboard, draw small and dense sets of strokes.
+2. Select Eraser; move through empty areas, repeatedly over already erased ink,
+   and sweep quickly across several strokes. Check the ring stays responsive
+   and only intersected whole strokes disappear, including dots and thick ink.
+3. Repeat zoomed out/in using Ctrl/Cmd-wheel or View controls and after panning;
+   check ring/hit alignment. Undo once restores the complete sweep in original
+   order; redo erases it again. Draw after undo to exercise branch truncation.
+4. Switch tabs and repeat; check isolation and drawing after erasing.
+
+Ink remains memory-only until M2; these tests do not imply PDF ink persistence.
+
+Local release-mode reference results (Linux, synthetic CPU-only workload; timings
+vary with host load):
+
+| Workload | 100 strokes | 10,000 strokes |
+| --- | ---: | ---: |
+| Original scan, 200 empty-space samples | 245.7 ms | 43,127.7 ms |
+| Index construction | 0.115 ms | 14.607 ms |
+| Indexed, 200 warm empty-space samples | 0.017 ms | 0.017 ms |
+| Original half erase + undo (selection excluded) | 0.005 ms | 10.038 ms |
+| Batched half erase + undo (selection included) | 0.012 ms | 8.741 ms |
+| Indexed long diagonal sweep + commit, including rebuild | 0.115 ms | 40.312 ms |
+
+The diagonal sweep covers 20,000 document points on each axis. The original
+algorithm is retained as a test-only oracle so the same fixture can compare it
+with the indexed implementation. These sampling measurements exclude rendering.
+The hierarchy's segment clipping reduced the 10,000-stroke diagonal case from
+527.6 ms in the initial rectangle-only implementation to 40.3 ms in the final
+run (host load varies). Interactive native/browser smoke tests were not performed
+in this run; follow the manual procedure above on actual devices.

@@ -60,6 +60,7 @@ pub struct Canvas {
     gesture: Option<Gesture>,
     gesture_transform: Option<Transform>,
     cache: HashMap<Uuid, Cached>,
+    eraser_index: crate::eraser_index::EraserIndex,
     frame: Option<u64>,
     processed: Vec<Surface>,
 }
@@ -74,6 +75,7 @@ impl Canvas {
             gesture: None,
             gesture_transform: None,
             cache: HashMap::new(),
+            eraser_index: Default::default(),
             frame: None,
             processed: Vec::new(),
         }
@@ -90,7 +92,13 @@ impl Canvas {
             Some(Gesture::Pen(stroke)) => {
                 self.drawing.add(stroke);
             }
-            Some(Gesture::Eraser(erase)) => self.drawing.erase(&erase.ids),
+            Some(Gesture::Eraser(erase)) => {
+                if erase.ids.is_empty() {
+                    self.gesture_transform = None;
+                    return;
+                }
+                self.drawing.erase(&erase.ids);
+            }
             None => return,
         }
         self.gesture_transform = None;
@@ -304,25 +312,28 @@ impl Canvas {
                 }
             }
             Some(Gesture::Eraser(erase)) => {
-                for stroke in self
-                    .drawing
-                    .strokes()
-                    .iter()
-                    .filter(|s| s.surface == surface)
-                {
-                    let cached = self
-                        .cache
-                        .entry(stroke.id)
-                        .or_insert_with(|| Cached::new(stroke));
-                    if drawing::hit_path(
-                        &cached.path,
-                        erase.previous,
-                        point,
-                        self.eraser_radius / scale + stroke.width * 0.5,
-                    ) {
-                        erase.ids.insert(stroke.id);
-                    }
-                }
+                self.eraser_index
+                    .sync(self.drawing.revision(), self.drawing.strokes());
+                let radius = self.eraser_radius / scale;
+                self.eraser_index
+                    .query(surface, erase.previous, point, radius, |index| {
+                        let stroke = &self.drawing.strokes()[index];
+                        if erase.ids.contains(&stroke.id) {
+                            return;
+                        }
+                        let cached = self
+                            .cache
+                            .entry(stroke.id)
+                            .or_insert_with(|| Cached::new(stroke));
+                        if drawing::hit_path(
+                            &cached.path,
+                            erase.previous,
+                            point,
+                            radius + stroke.width * 0.5,
+                        ) {
+                            erase.ids.insert(stroke.id);
+                        }
+                    });
                 erase.previous = point;
             }
             None => {}
@@ -424,6 +435,197 @@ fn rounded_shapes(path: &[[f64; 2]], transform: Transform, stroke: &Stroke) -> V
 mod tests {
     use super::*;
     use crate::document::DocumentKind;
+
+    #[test]
+    #[ignore = "manual release-mode performance comparison"]
+    fn eraser_performance() {
+        use std::time::Instant;
+        for count in [100, 10_000] {
+            let data = DocumentData::blank(DocumentKind::Whiteboard);
+            let mut canvas = Canvas::new(&data);
+            for i in 0..count {
+                let mut stroke = Stroke::new(data.id(), Surface::Canvas, [0, 0, 0, 255], 2.5);
+                for j in 0..100 {
+                    stroke.push([
+                        (i % 100) as f64 * 200.0 + j as f64,
+                        (i / 100) as f64 * 200.0 + (j as f64 * 0.2).sin(),
+                    ]);
+                }
+                assert!(canvas.drawing.add(stroke));
+            }
+            // Match a rendered document's warm logical geometry cache.
+            for stroke in canvas.drawing.strokes() {
+                canvas.cache.insert(stroke.id, Cached::new(stroke));
+            }
+            let start = Instant::now();
+            let mut previous = [-100.0, -100.0];
+            let mut ids = HashSet::new();
+            for i in 0..200 {
+                let point = [i as f64 * 0.25, -50.0];
+                // Original M1 hot path: full scan, including already hit strokes.
+                for stroke in canvas.drawing.strokes() {
+                    if drawing::reference_hit_path(
+                        &canvas.cache[&stroke.id].path,
+                        previous,
+                        point,
+                        14.0 + stroke.width * 0.5,
+                    ) {
+                        ids.insert(stroke.id);
+                    }
+                }
+                previous = point;
+            }
+            std::hint::black_box(ids);
+            eprintln!(
+                "{count} strokes, 200 original samples: {:?}",
+                start.elapsed()
+            );
+            let start = Instant::now();
+            canvas
+                .eraser_index
+                .sync(canvas.drawing.revision(), canvas.drawing.strokes());
+            eprintln!("{count} strokes, index build: {:?}", start.elapsed());
+            canvas.gesture = Some(Gesture::Eraser(Erasing {
+                surface: Surface::Canvas,
+                previous: [-100.0, -100.0],
+                ids: HashSet::new(),
+            }));
+            let start = Instant::now();
+            for i in 0..200 {
+                canvas.sample(Surface::Canvas, [i as f64 * 0.25, -50.0], 1.0);
+            }
+            eprintln!("{count} strokes, 200 warm samples: {:?}", start.elapsed());
+            // Separately compare bulk command application/undo with the old
+            // vector shifting. The old loop excludes ID selection; the new
+            // public command includes it. Both exclude fixture setup.
+            let removed: Vec<_> = canvas
+                .drawing
+                .strokes()
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| i % 2 == 0)
+                .map(|(i, s)| (i, s.clone()))
+                .collect();
+            let mut old = canvas.drawing.strokes().to_vec();
+            let start = Instant::now();
+            for (i, _) in removed.iter().rev() {
+                old.remove(*i);
+            }
+            for (i, s) in &removed {
+                old.insert(*i, s.clone());
+            }
+            std::hint::black_box(old);
+            eprintln!(
+                "{count} strokes, original half erase + undo: {:?}",
+                start.elapsed()
+            );
+            let ids = removed.iter().map(|(_, s)| s.id).collect();
+            let start = Instant::now();
+            canvas.drawing.erase(&ids);
+            canvas.drawing.undo();
+            eprintln!(
+                "{count} strokes, batched half erase + undo: {:?}",
+                start.elapsed()
+            );
+            let start = Instant::now();
+            canvas.sample(Surface::Canvas, [20_000.0, 20_000.0], 1.0);
+            canvas.finish();
+            eprintln!(
+                "{count} strokes, long sweep + commit: {:?}",
+                start.elapsed()
+            );
+        }
+    }
+
+    #[test]
+    fn indexed_eraser_matches_full_scan_at_zoom_and_restores_order() {
+        for (kind, surface) in [
+            (DocumentKind::Page, Surface::Page(0)),
+            (DocumentKind::Whiteboard, Surface::Canvas),
+        ] {
+            for count in [1, 100, 10_000] {
+                for scale in [0.1, 1.0, 8.0] {
+                    let data = DocumentData::blank(kind);
+                    let mut canvas = Canvas::new(&data);
+                    for i in 0..count {
+                        let mut stroke =
+                            Stroke::new(data.id(), surface, [0, 0, 0, 255], 0.1 + (i % 24) as f64);
+                        let x = (i % 100) as f64 * 5.0;
+                        let y = (i / 100) as f64 * 5.0;
+                        stroke.push([x, y]);
+                        if i % 3 != 0 {
+                            stroke.push([x + 2.0, y + 10.0]);
+                            stroke.push([x + 4.0, y]);
+                        }
+                        assert!(canvas.drawing.add(stroke));
+                    }
+                    let original = canvas.drawing.strokes().to_vec();
+                    let sweep = [[-10.0, 30.0], [300.0, 30.0], [300.0, 400.0], [0.0, 0.0]];
+                    let mut expected = HashSet::new();
+                    for pair in sweep.windows(2) {
+                        for stroke in &original {
+                            if drawing::reference_hit_path(
+                                &drawing::smooth(&stroke.points),
+                                pair[0],
+                                pair[1],
+                                14.0 / scale + stroke.width * 0.5,
+                            ) {
+                                expected.insert(stroke.id);
+                            }
+                        }
+                    }
+                    canvas.gesture = Some(Gesture::Eraser(Erasing {
+                        surface,
+                        previous: sweep[0],
+                        ids: HashSet::new(),
+                    }));
+                    for point in &sweep[1..] {
+                        canvas.sample(surface, *point, scale);
+                    }
+                    let Some(Gesture::Eraser(erase)) = &canvas.gesture else {
+                        panic!()
+                    };
+                    assert_eq!(erase.ids, expected);
+                    canvas.finish();
+                    assert_eq!(
+                        canvas
+                            .drawing
+                            .strokes()
+                            .iter()
+                            .map(|s| s.id)
+                            .collect::<Vec<_>>(),
+                        original
+                            .iter()
+                            .filter(|s| !expected.contains(&s.id))
+                            .map(|s| s.id)
+                            .collect::<Vec<_>>()
+                    );
+                    canvas.undo();
+                    assert_eq!(canvas.drawing.strokes(), original);
+                    canvas.redo();
+                    assert!(
+                        canvas
+                            .drawing
+                            .strokes()
+                            .iter()
+                            .all(|s| !expected.contains(&s.id))
+                    );
+                    // Rebuild after redo/undo, then erase a restored dot.
+                    canvas.undo();
+                    canvas.gesture = Some(Gesture::Eraser(Erasing {
+                        surface,
+                        previous: [0.0, 0.0],
+                        ids: HashSet::new(),
+                    }));
+                    canvas.sample(surface, [0.0, 0.0], scale);
+                    let Some(Gesture::Eraser(erase)) = &canvas.gesture else {
+                        panic!()
+                    };
+                    assert!(erase.ids.contains(&original[0].id));
+                }
+            }
+        }
+    }
 
     fn button(pos: Pos2, pressed: bool) -> Event {
         Event::PointerButton {

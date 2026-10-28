@@ -3,6 +3,7 @@ mod canvas;
 mod document;
 mod drawing;
 mod editor;
+mod eraser_index;
 mod pdf;
 mod storage;
 mod ui;
