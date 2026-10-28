@@ -5,6 +5,7 @@ mod drawing;
 mod editor;
 mod eraser_index;
 mod pdf;
+mod settings;
 mod storage;
 mod ui;
 
@@ -18,7 +19,7 @@ fn main() -> eframe::Result {
                 .with_min_inner_size([480.0, 360.0]),
             ..Default::default()
         },
-        Box::new(|_cc| Ok(Box::new(app::XiTocApp::default()))),
+        Box::new(|cc| Ok(Box::new(app::XiTocApp::new(cc.storage)))),
     )
 }
 
@@ -37,7 +38,7 @@ fn main() {
             .start(
                 canvas,
                 eframe::WebOptions::default(),
-                Box::new(|_cc| Ok(Box::new(app::XiTocApp::default()))),
+                Box::new(|cc| Ok(Box::new(app::XiTocApp::new(cc.storage)))),
             )
             .await;
         if let Some(status) = document.get_element_by_id("loading") {

@@ -23,6 +23,11 @@ enum Pending {
 }
 
 pub struct XiTocApp {
+    preferences: crate::settings::Preferences,
+    settings_dialog: ui::settings::SettingsDialog,
+    preferences_writable: bool,
+    preferences_changed_at: Option<f64>,
+    preferences_warning: Option<String>,
     tree: Folder,
     documents: Vec<Opened>,
     active: Option<usize>,
@@ -47,6 +52,11 @@ pub struct XiTocApp {
 impl Default for XiTocApp {
     fn default() -> Self {
         Self {
+            preferences: Default::default(),
+            settings_dialog: Default::default(),
+            preferences_writable: true,
+            preferences_changed_at: None,
+            preferences_warning: None,
             tree: Folder::default(),
             documents: Vec::new(),
             active: None,
@@ -68,12 +78,77 @@ impl Default for XiTocApp {
 }
 
 impl eframe::App for XiTocApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.show(ui);
+        self.persist_preferences(ui.ctx(), frame.storage_mut());
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if self.preferences_writable {
+            self.preferences.store(storage);
+        }
+    }
+    fn persist_egui_memory(&self) -> bool {
+        false
     }
 }
 
 impl XiTocApp {
+    fn persist_preferences(
+        &mut self,
+        ctx: &egui::Context,
+        storage: Option<&mut (dyn eframe::Storage + 'static)>,
+    ) {
+        if self
+            .preferences_changed_at
+            .is_some_and(|time| !self.settings_dialog.open || ctx.input(|i| i.time) - time >= 0.5)
+        {
+            if let Some(storage) = storage {
+                let stored = self.preferences.store(storage);
+                storage.flush();
+                self.preferences_warning = if stored {
+                    None
+                } else {
+                    Some(
+                        "Preferences could not be stored. Browser storage may be blocked or full."
+                            .into(),
+                    )
+                };
+            } else {
+                self.preferences_warning = Some(
+                    "Preference storage is unavailable; changes last for this session.".into(),
+                );
+            }
+            self.preferences_changed_at = None;
+        }
+        if let Some(time) = self.preferences_changed_at {
+            let delay = (0.5 - (ctx.input(|i| i.time) - time)).max(0.01);
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(delay));
+        }
+    }
+    pub fn new(storage: Option<&dyn eframe::Storage>) -> Self {
+        let mut app = Self::default();
+        match crate::settings::Preferences::load(storage) {
+            Ok(preferences) => app.preferences = preferences,
+            Err(error) => {
+                app.preferences_writable = false;
+                app.preferences_warning = Some(format!(
+                    "{error} Using defaults until you change a preference."
+                ));
+            }
+        }
+        if storage.is_none() {
+            app.preferences_warning =
+                Some("Preference storage is unavailable; changes last for this session.".into());
+        }
+        app
+    }
+    fn editor(&self, data: &DocumentData) -> Editor {
+        let mut editor = Editor::new(data);
+        self.preferences.apply_drawing(&mut editor.canvas);
+        editor.middle_button_pan = self.preferences.middle_button_pan;
+        editor
+    }
     fn show(&mut self, ui: &mut egui::Ui) {
         #[cfg(target_arch = "wasm32")]
         self.poll_browser();
@@ -83,7 +158,9 @@ impl XiTocApp {
                 .send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.pending = Some(Pending::Quit);
         }
-        if self.pending.is_some() {
+        let before = self.preferences.clone();
+        let settings_open = self.settings_dialog.open;
+        if self.pending.is_some() || settings_open {
             ui.disable();
         }
         if !ui.ctx().text_edit_focused()
@@ -97,9 +174,10 @@ impl XiTocApp {
             self.status =
                 "Drawing save is unavailable until M2. Unsaved ink remains in memory only.".into();
         }
-        self.chrome.theme.apply(ui.ctx());
+        self.preferences.theme.apply(ui.ctx());
         ui.set_style(ui.ctx().global_style());
-        self.chrome.top(ui);
+        let mut action = None;
+        self.chrome.top(ui, &mut self.preferences, &mut action);
         let context = self
             .active
             .map(|index| self.documents[index].loaded.document.data.kind().label())
@@ -113,14 +191,33 @@ impl XiTocApp {
             self.status.clone()
         };
         self.chrome.bottom(ui, &status, context);
-        let mut action = None;
         self.show_explorer(ui, &mut action);
         self.show_document_area(ui, &mut action);
         if let Some(action) = action {
             self.act(action, ui.ctx());
         }
         self.creation_dialog(ui.ctx());
+        if self.pending.is_none() {
+            self.settings_dialog.show(
+                ui.ctx(),
+                &mut self.preferences,
+                self.preferences_warning.as_deref(),
+            );
+            if self.settings_dialog.open
+                && let Some(warning) = &self.preferences_warning
+            {
+                self.status = warning.clone();
+            }
+        }
         self.discard_dialog(ui.ctx());
+        if self.preferences != before {
+            self.preferences_writable = true;
+            self.preferences_changed_at = Some(ui.input(|i| i.time));
+            self.preferences.theme.apply(ui.ctx());
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(500));
+            ui.ctx().request_repaint();
+        }
         #[cfg(target_arch = "wasm32")]
         {
             // beforeunload in index.html consumes this flag. Browsers may suppress
@@ -179,7 +276,7 @@ impl XiTocApp {
     }
 
     fn show_explorer(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>) {
-        if self.chrome.explorer_hidden {
+        if !self.preferences.explorer_visible {
             return;
         }
         let max_width = (ui.available_width() * 0.45).clamp(132.0, 360.0);
@@ -248,6 +345,7 @@ impl XiTocApp {
                             ui.label("PDF preview is not available yet. The original file is preserved and will not be rewritten.");
                         });
                     } else {
+                        opened.editor.middle_button_pan = self.preferences.middle_button_pan;
                         opened.editor.show(ui, &opened.loaded.document.data);
                     }
                 } else {
@@ -279,7 +377,7 @@ impl XiTocApp {
                 self.status = "External PDF changed; unsaved drawing retained. Close/discard this tab before reloading.".into();
             } else if self.documents[index].loaded.bytes != loaded.bytes {
                 self.documents[index] = Opened {
-                    editor: Editor::new(&loaded.document.data),
+                    editor: self.editor(&loaded.document.data),
                     loaded,
                 };
             }
@@ -289,7 +387,7 @@ impl XiTocApp {
         if let Some(active) = self.active {
             self.documents[active].editor.canvas.finish();
         }
-        let editor = Editor::new(&loaded.document.data);
+        let editor = self.editor(&loaded.document.data);
         self.documents.push(Opened { loaded, editor });
         self.active = Some(self.documents.len() - 1);
     }
@@ -321,6 +419,12 @@ impl XiTocApp {
 
     fn act(&mut self, action: Action, _ctx: &egui::Context) {
         match action {
+            Action::Settings => {
+                if let Some(index) = self.active {
+                    self.documents[index].editor.canvas.finish();
+                }
+                self.settings_dialog.open = true;
+            }
             Action::New(kind, folder) => {
                 self.creation = Some(Creation {
                     kind,
@@ -443,6 +547,7 @@ impl XiTocApp {
                             } else {
                                 if loaded.document.data != opened.loaded.document.data {
                                     opened.editor = Editor::new(&loaded.document.data);
+                                    self.preferences.apply_drawing(&mut opened.editor.canvas);
                                 }
                                 opened.loaded = loaded;
                             }
@@ -579,6 +684,135 @@ fn collect_entries<'a>(folder: &'a Folder, entries: &mut Vec<&'a crate::storage:
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn settings_open_through_edit_change_appearance_and_close() {
+        use crate::ui::settings::tests::{pointer, render};
+        let ctx = egui::Context::default();
+        let mut app = XiTocApp::default();
+        fn click(ctx: &egui::Context, app: &mut XiTocApp, label: &str) {
+            render(ctx, vec![], |ui| app.show(ui));
+            let labels = render(ctx, vec![], |ui| app.show(ui));
+            let pos = *labels
+                .get(label)
+                .unwrap_or_else(|| panic!("Missing {label}: {:?}", labels.keys()));
+            render(ctx, pointer(pos, true), |ui| app.show(ui));
+            render(ctx, pointer(pos, false), |ui| app.show(ui));
+        }
+        click(&ctx, &mut app, "Edit");
+        click(&ctx, &mut app, "Settings…");
+        assert!(app.settings_dialog.open);
+        click(&ctx, &mut app, "Appearance");
+        click(&ctx, &mut app, "Dark");
+        assert_eq!(app.preferences.theme, crate::settings::Theme::Dark);
+        assert!(ctx.global_style().visuals.dark_mode);
+        click(&ctx, &mut app, "General");
+        click(&ctx, &mut app, "Show Explorer");
+        assert!(!app.preferences.explorer_visible);
+        click(&ctx, &mut app, "Done");
+        assert!(!app.settings_dialog.open);
+        app.act(Action::Settings, &ctx);
+        render(
+            &ctx,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            |ui| app.show(ui),
+        );
+        assert!(!app.settings_dialog.open);
+    }
+
+    #[test]
+    fn preferences_restore_on_restart_and_defaults_do_not_change_ink() {
+        use crate::settings::{Preferences, Theme, tests::MemoryStorage};
+        let mut storage = MemoryStorage::default();
+        let mut app = XiTocApp::new(Some(&storage));
+        app.preferences.theme = Theme::Dark;
+        app.preferences.explorer_visible = false;
+        app.preferences.middle_button_pan = false;
+        app.preferences.drawing.width = 8.0;
+        app.preferences.drawing.color = [10, 20, 30, 255];
+        app.preferences.drawing.eraser_radius = 32.0;
+        eframe::App::save(&mut app, &mut storage);
+        let restarted = XiTocApp::new(Some(&storage));
+        assert_eq!(restarted.preferences, app.preferences);
+        for kind in [
+            crate::document::DocumentKind::Page,
+            crate::document::DocumentKind::Whiteboard,
+        ] {
+            let data = DocumentData::blank(kind);
+            let snapshot = serde_json::to_vec(&data).unwrap();
+            let mut editor = restarted.editor(&data);
+            assert_eq!(editor.canvas.width, 8.0);
+            assert_eq!(editor.canvas.color, [10, 20, 30, 255]);
+            assert_eq!(editor.canvas.eraser_radius, 32.0);
+            assert!(!editor.middle_button_pan);
+            assert!(!editor.canvas.dirty());
+            let surface = if kind == crate::document::DocumentKind::Page {
+                crate::drawing::Surface::Page(0)
+            } else {
+                crate::drawing::Surface::Canvas
+            };
+            let mut stroke = crate::drawing::Stroke::new(
+                data.id(),
+                surface,
+                editor.canvas.color,
+                editor.canvas.width,
+            );
+            stroke.push([10.0, 10.0]);
+            assert!(editor.canvas.drawing.add(stroke));
+            let original = editor.canvas.drawing.strokes()[0].clone();
+            app.preferences = Preferences::default();
+            assert_eq!(editor.canvas.drawing.strokes()[0], original);
+            assert_eq!(serde_json::to_vec(&data).unwrap(), snapshot);
+        }
+    }
+
+    #[test]
+    fn preferences_debounce_flush_on_close_and_report_unavailable_storage() {
+        use crate::settings::{STORAGE_KEY, tests::MemoryStorage};
+        use eframe::Storage;
+        let ctx = egui::Context::default();
+        let mut storage = MemoryStorage::default();
+        let mut app = XiTocApp::default();
+        app.settings_dialog.open = true;
+        app.preferences_changed_at = Some(ctx.input(|i| i.time));
+        app.persist_preferences(&ctx, Some(&mut storage));
+        assert!(storage.get_string(STORAGE_KEY).is_none());
+        app.preferences_changed_at = Some(ctx.input(|i| i.time) - 1.0);
+        app.persist_preferences(&ctx, Some(&mut storage));
+        assert!(storage.get_string(STORAGE_KEY).is_some());
+        app.preferences.theme = crate::settings::Theme::Dark;
+        app.settings_dialog.open = false;
+        app.preferences_changed_at = Some(ctx.input(|i| i.time));
+        app.persist_preferences(&ctx, Some(&mut storage));
+        assert_eq!(
+            XiTocApp::new(Some(&storage)).preferences.theme,
+            crate::settings::Theme::Dark
+        );
+        app.preferences_changed_at = Some(0.0);
+        app.persist_preferences(&ctx, None);
+        assert!(app.preferences_warning.is_some());
+    }
+
+    #[test]
+    fn unreadable_preferences_are_not_overwritten_on_automatic_save() {
+        use crate::settings::{STORAGE_KEY, tests::MemoryStorage};
+        use eframe::Storage;
+        let mut storage = MemoryStorage::default();
+        storage.set_string(STORAGE_KEY, r#"{"schema_version":999}"#.into());
+        let mut app = XiTocApp::new(Some(&storage));
+        assert!(app.preferences_warning.is_some());
+        eframe::App::save(&mut app, &mut storage);
+        assert_eq!(
+            storage.get_string(STORAGE_KEY).unwrap(),
+            r#"{"schema_version":999}"#
+        );
+    }
+
     use super::*;
     use crate::document::{Document, DocumentKind, Location};
     #[cfg(not(target_arch = "wasm32"))]
@@ -743,7 +977,7 @@ mod tests {
             for scale in [1.0, 1.5, 2.0] {
                 for width in [320.0, 480.0, 800.0, 1200.0] {
                     let mut app = XiTocApp::default();
-                    app.chrome.theme = theme;
+                    app.preferences.theme = theme;
                     for kind in [DocumentKind::Page, DocumentKind::Whiteboard] {
                         let data = DocumentData::blank(kind);
                         app.open(Loaded {

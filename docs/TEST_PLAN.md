@@ -241,3 +241,38 @@ The hierarchy's segment clipping reduced the 10,000-stroke diagonal case from
 527.6 ms in the initial rectangle-only implementation to 40.3 ms in the final
 run (host load varies). Interactive native/browser smoke tests were not performed
 in this run; follow the manual procedure above on actual devices.
+
+## M1.1 Settings (#6)
+
+Automated: open via Edit → Settings, change theme and Explorer visibility, close
+with Done and Escape; serialize/save/recreate the app with every implemented
+preference; apply drawing defaults to both document types without changing
+existing ink or PDF metadata; test middle-button pan enabled/disabled using real
+pointer events. Validate ranges/opacity, malformed and future JSON, missing-field
+defaults, and preservation of unsupported settings on automatic save.
+
+Manual native and browser:
+1. Open Edit → Settings without opening a note. Visit all four sections using
+   pointer and Tab/Enter. Change theme and Show Explorer; close using Done and
+   Escape, reopen. Check narrow windows, both themes and 150%/200% UI scaling.
+2. Set default color, width and eraser radius, then create/open a Page Note and
+   Whiteboard. Draw and erase; the default style/radius should be used. Change
+   defaults again: newly opened tabs inherit them, existing ink is preserved.
+3. Toggle middle-button pan off/on in an existing Whiteboard; verify navigation
+   changes immediately. Hand/Space-drag and Ctrl/Cmd-wheel zoom still work.
+4. Close/restart native XiToc or reload/reopen the browser at the same origin.
+   All preferences should survive; notes and workspace handles are not restored.
+   Browser note ink remains memory-only until M2.
+5. Block browser localStorage or fill its quota: check the Settings warning and
+   session behavior. Clearing site data resets defaults. Native disk errors are
+   logged by eframe. Inspect the OS app.ron / localStorage preference key to
+   confirm that it contains no document content or workspace paths.
+6. No enabled smoothing-strength, pressure or partial-erasing controls appear.
+
+Local validation for this change: fmt, Clippy with warnings denied, 42 tests
+passed (the existing eraser benchmark is ignored), native build, WASM check and
+Trunk release build. Firefox headless/WebGL2 smoke verified opening the actual
+modal, all four sections, theme/Explorer live changes, Drawing width adjustment,
+Input Devices, and localStorage restoration after reload. Native platform restart
+and Windows/macOS runtime checks remain manual; app reconstruction/storage-hook
+round trips are covered automatically.

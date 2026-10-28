@@ -8,13 +8,16 @@ use egui::{Align, Layout, RichText};
 
 #[derive(Default)]
 pub struct Chrome {
-    pub theme: Theme,
-    pub explorer_hidden: bool,
     details: bool,
 }
 
 impl Chrome {
-    pub fn top(&mut self, ui: &mut egui::Ui) {
+    pub fn top(
+        &mut self,
+        ui: &mut egui::Ui,
+        prefs: &mut crate::settings::Preferences,
+        action: &mut Option<Action>,
+    ) {
         let p = style::palette(ui);
         egui::Panel::top("application-bar")
             .resizable(false)
@@ -26,13 +29,19 @@ impl Chrome {
                         ui,
                         Icon::Sidebar,
                         "Show or hide Explorer",
-                        !self.explorer_hidden,
+                        prefs.explorer_visible,
                     )
                     .clicked()
                     {
-                        self.explorer_hidden = !self.explorer_hidden;
+                        prefs.explorer_visible = !prefs.explorer_visible;
                     }
                     ui.label(RichText::new("XiToc").size(16.0).strong());
+                    ui.menu_button("Edit", |ui| {
+                        if ui.button("Settings…").clicked() {
+                            *action = Some(Action::Settings);
+                            ui.close();
+                        }
+                    });
                     if ui.available_width() > 360.0 {
                         ui.add_space(8.0);
                         ui.label(
@@ -47,8 +56,9 @@ impl Chrome {
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.menu_button("Appearance", |ui| {
-                            let light = ui.selectable_value(&mut self.theme, Theme::Light, "Light");
-                            let dark = ui.selectable_value(&mut self.theme, Theme::Dark, "Dark");
+                            let light =
+                                ui.selectable_value(&mut prefs.theme, Theme::Light, "Light");
+                            let dark = ui.selectable_value(&mut prefs.theme, Theme::Dark, "Dark");
                             if light.changed() || dark.changed() {
                                 ui.ctx().request_repaint();
                             }

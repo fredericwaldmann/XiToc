@@ -11,6 +11,7 @@ pub struct Editor {
     viewport: Viewport,
     pub canvas: Canvas,
     grid_visible: bool,
+    pub middle_button_pan: bool,
     navigation_frame: Option<u64>,
     pan: Option<(egui::PointerButton, Pos2)>,
 }
@@ -20,6 +21,7 @@ impl Editor {
         Self {
             canvas: Canvas::new(data),
             navigation_frame: None,
+            middle_button_pan: true,
             pan: None,
             grid_visible: matches!(data.layout(), Layout::Whiteboard { grid: true, .. }),
             viewport: match data.layout() {
@@ -179,7 +181,7 @@ impl Editor {
                         && ui.clip_rect().contains(pos)
                         && ui.is_enabled()
                         && ui.ctx().layer_id_at(pos) == Some(ui.layer_id())
-                        && (button == egui::PointerButton::Middle
+                        && ((button == egui::PointerButton::Middle && self.middle_button_pan)
                             || (button == egui::PointerButton::Primary
                                 && (self.canvas.tool == Tool::Pan
                                     || ui.input(|i| i.key_down(egui::Key::Space))))) =>
@@ -308,6 +310,56 @@ mod tests {
         }
         assert_eq!(editor.viewport.center, [-100.0, -40.0]);
         assert!(!editor.canvas.dirty());
+    }
+
+    #[test]
+    fn middle_button_pan_preference_changes_navigation() {
+        for enabled in [false, true] {
+            let ctx = egui::Context::default();
+            let mut editor = Editor::new(&DocumentData::blank(DocumentKind::Whiteboard));
+            let data = DocumentData::blank(DocumentKind::Whiteboard);
+            editor.middle_button_pan = enabled;
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Middle,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            for events in [
+                vec![egui::Event::PointerMoved(egui::pos2(50.0, 50.0))],
+                vec![
+                    egui::Event::PointerMoved(egui::pos2(500.0, 300.0)),
+                    button(egui::pos2(500.0, 300.0), true),
+                    egui::Event::PointerMoved(egui::pos2(600.0, 340.0)),
+                    button(egui::pos2(600.0, 340.0), false),
+                ],
+            ] {
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            Pos2::ZERO,
+                            egui::vec2(700.0, 500.0),
+                        )),
+                        focused: true,
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        editor.show(ui, &data);
+                        if ui.ctx().current_pass_index() == 0 {
+                            ui.ctx()
+                                .request_discard("verify navigation is not applied twice");
+                        }
+                    },
+                );
+                output.textures_delta.clear();
+            }
+            assert_eq!(
+                editor.viewport.center,
+                if enabled { [-100.0, -40.0] } else { [0.0, 0.0] }
+            );
+            assert!(!editor.canvas.dirty());
+        }
     }
 
     #[test]

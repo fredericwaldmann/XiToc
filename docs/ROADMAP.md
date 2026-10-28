@@ -89,6 +89,15 @@
 - Release benchmark compares the original scan and indexed pointer sampling.
   Manual desktop/browser responsiveness remains a device-dependent check.
 
+## M1.1 — Application Settings (#6)
+- Edit → Settings modal, General/Appearance/Drawing/Input Devices sections.
+- Persist Explorer visibility, theme, drawing defaults and middle-button pan
+  through eframe desktop/browser storage, separate from document contents.
+- Share ink controls; validate versioned preferences; preserve unreadable/future
+  preferences until explicit changes. No new smoothing/pressure/eraser-mode UI.
+- Gates: menu/open/close and live preference tests, restart round trip, drawing
+  default/document isolation and input behavior tests, native/WASM/Trunk builds.
+
 ## M2 — One-file PDF roundtrip (hard gate)
 - Generate valid visible PDF with vector ink; embed JSON payload; import it back into same document model.
 - Independent PDF parsing validation; zero sidecars, even across reopen and autosave.

@@ -148,6 +148,22 @@ undo/redo updates. To repeat the synthetic original-versus-indexed benchmark:
 cargo test --release eraser_performance -- --ignored --nocapture
 ```
 
+## Settings
+
+Open **Edit → Settings**. General controls Explorer visibility; Appearance chooses
+Light/Dark; Drawing sets the pen color, width and eraser radius for newly opened
+or created tabs; Input Devices controls middle-button panning on Whiteboards.
+Changes apply automatically. Use **Done** or **Escape** to close. Existing Ink
+controls still adjust individual tabs.
+
+Application preferences persist separately from notes via eframe storage:
+Linux `$XDG_DATA_HOME/xitoc/app.ron` (default `~/.local/share/xitoc/app.ron`),
+macOS `~/Library/Application Support/XiToc/app.ron`, Windows
+`%APPDATA%/XiToc/data/app.ron`; web uses the same-origin localStorage key
+`XiToc/preferences`. Clearing browser site data resets preferences. Browser
+storage restrictions or native storage failures can prevent persistence.
+Smoothing strength, partial erasing and pressure settings await those features.
+
 ## Checks
 
 ```sh

@@ -48,7 +48,7 @@ No backend, login, collaboration, cloud sync, PDF OCR, handwriting recognition, 
 
 The application area, resizable/hideable Explorer, horizontally scrolling typed
 tabs, compact document toolbar and bottom status line share a light/dark design
-system (`UI_DESIGN.md`). Appearance switches themes for the current session.
+system (`UI_DESIGN.md`). Appearance switches themes using persistent application preferences.
 Page Notes use white, subtly shadowed A4 pages in a neutral workspace; Whiteboards
 use a borderless surface with an optional session-only dot grid. Narrow toolbars
 collapse into menus. Status details expose complete errors and export caveats.
@@ -72,3 +72,13 @@ browser reload/leave requests the browser's standard unsaved-change warning.
 Forced shutdown and browsers that suppress prompts cannot be prevented. Original
 PDFs remain unchanged; exporting a dirty drawing is disabled. Ctrl/Cmd+S explains
 that saving ink is unavailable. Blank creation/import/export retain M0.5 behavior.
+
+## Application Settings (M1.1)
+
+Edit → Settings provides General (Explorer visibility/editor behavior), Appearance
+(Light/Dark), Drawing (default pen color, width and eraser radius) and Input Devices
+(middle-button Whiteboard panning). Done or Escape closes it. Preferences apply
+automatically and persist on the device, independently of workspace PDFs. Drawing
+defaults initialize newly created/opened tabs; Ink continues to adjust individual
+tabs. The Appearance menu and Explorer button use the same persisted preferences.
+Smoothing-strength, partial-erasing and pressure controls await their features.

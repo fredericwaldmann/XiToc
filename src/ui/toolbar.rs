@@ -70,48 +70,16 @@ fn tools(ui: &mut egui::Ui, doc: &Document, editor: &mut Editor) {
                 }
             }
             menu(ui, "Ink", |ui| {
-                let mut color = egui::Color32::from_rgb(
-                    editor.canvas.color[0],
-                    editor.canvas.color[1],
-                    editor.canvas.color[2],
+                let old_color = editor.canvas.color;
+                super::drawing_controls::show(
+                    ui,
+                    &mut editor.canvas.color,
+                    &mut editor.canvas.width,
+                    &mut editor.canvas.eraser_radius,
                 );
-                ui.horizontal(|ui| {
-                    let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
-                    ui.painter().rect_filled(rect, 3.0, color);
-                    ui.label("Pen color");
-                });
-                // Inline expansion avoids opening a second root popup from a menu.
-                // egui's color-button popup would replace the settings popup.
-                egui::CollapsingHeader::new("Edit color").show(ui, |ui| {
-                    ui.spacing_mut().slider_width = 210.0;
-                    if egui::color_picker::color_picker_color32(
-                        ui,
-                        &mut color,
-                        egui::color_picker::Alpha::Opaque,
-                    ) {
-                        editor.canvas.finish();
-                        editor.canvas.color = [color.r(), color.g(), color.b(), 255];
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Width");
-                    ui.add(
-                        egui::DragValue::new(&mut editor.canvas.width)
-                            .range(0.25..=12.0)
-                            .speed(0.1)
-                            .suffix(" pt"),
-                    );
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Eraser radius");
-                    ui.add(
-                        egui::DragValue::new(&mut editor.canvas.eraser_radius)
-                            .range(4.0..=48.0)
-                            .speed(1.0)
-                            .suffix(" screen pt"),
-                    );
-                });
+                if editor.canvas.color != old_color {
+                    editor.canvas.finish();
+                }
                 ui.separator();
                 ui.horizontal(|ui| {
                     for name in ["Select", "Text", "Shapes"] {

@@ -7,12 +7,8 @@ pub const TAB: f32 = 36.0;
 pub const GAP: f32 = 8.0;
 pub const PAGE_GAP: f32 = 24.0;
 
-#[derive(Clone, Copy, Default, Debug, PartialEq)]
-pub enum Theme {
-    #[default]
-    Light,
-    Dark,
-}
+pub use crate::settings::Theme;
+pub const SETTINGS_WIDTH: f32 = 520.0;
 
 #[derive(Clone, Copy)]
 pub struct Palette {

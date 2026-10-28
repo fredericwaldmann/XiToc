@@ -34,8 +34,8 @@ document-type switch: layout comes from immutable document metadata.
 | Board | #F6F8FA | #1B212A | Borderless Whiteboard |
 | Dot | #C6CFD9 | #404C5C | Whiteboard grid |
 
-Appearance menu selects Light or Dark. Light is the initial default; theme and
-Explorer visibility are session preferences, not PDF data. Pages remain white in
+Appearance menu and Settings select Light or Dark. Light is the initial default;
+theme and Explorer visibility are persisted application preferences, separate from PDF data. Pages remain white in
 both themes. Use egui's semantic error color for errors, never color alone to
 explain a failure. Avoid hard-coded colors outside tokens except white paper,
 its neutral edge and shadow.
@@ -126,3 +126,23 @@ derived document surfaces and maintains transient navigation. Domain/PDF/storage
 remain independent. Add small components as needed, not a framework or parallel
 editor implementations. Verify narrow/wide windows, both themes and scaling when
 extending this layout; see `TEST_PLAN.md`.
+
+## Settings (M1.1, #6)
+
+Edit → Settings opens a centered modal with General, Appearance, Drawing and
+Input Devices sections. Section selectors wrap at narrow widths; the content
+scrolls independently so Done remains accessible. `SETTINGS_WIDTH` is 520 logical
+points; the modal leaves 24 points of outer clearance. Reuse the standard surface,
+heading, separators, spacing and focus styles. Done and Escape close the dialog.
+The editor beneath is disabled while the dialog is open.
+
+General includes editor behavior (Show Explorer). Appearance reuses Light/Dark.
+Drawing reuses the Ink color picker and width/radius controls for defaults applied
+to newly created/opened tabs. Input Devices includes middle-button Whiteboard
+panning. Hand/Space navigation remains available. Changes apply automatically;
+preferences persist locally with a short write debounce. Appearance menu and
+Explorer button edit the same preferences. Persistence warnings appear in Settings.
+
+Future smoothing-strength, partial-erasing and pressure controls are explanatory
+text only until their behaviors exist. Do not expose working-looking controls for
+them. Preferences never modify existing stroke objects or PDF contents.
