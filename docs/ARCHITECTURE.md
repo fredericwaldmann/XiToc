@@ -82,8 +82,8 @@ icons. `chrome`, `explorer`, `tabs`, `toolbar` and `dialog` are small presentati
 components. They return actions; IO and document creation remain coordinated by
 `app.rs`. The app assembles panels instead of one large rendering function.
 `editor.rs` remains the shared metadata-driven renderer/navigation controller.
-Theme, Explorer visibility and the Whiteboard grid toggle are session-only UI
-state. No domain, PDF payload, canonical storage or save lifecycle changes.
+Theme and Explorer visibility are application preferences as of M1.1; the
+Whiteboard grid toggle remains session-only UI state. No domain, PDF payload, canonical storage or save lifecycle changes.
 Follow `UI_DESIGN.md` for dimensions, palette, interaction and responsiveness.
 
 ## M1 drawing boundaries
@@ -146,3 +146,31 @@ cached during erasing; pointer movement does not invalidate their transform/DPI.
 The hierarchy is transient, shared by both layouts and targets; no PDF/schema or
 partial-erasing behavior changes. Future partial erasing should reuse this broad
 phase and invalidate the committed revision when replacing stroke geometry.
+
+## M1.1 application preferences (#6)
+
+`settings.rs` owns versioned, validated `Preferences` and `DrawingPreferences`,
+separate from `DocumentData`. `ui/settings.rs` owns modal presentation/navigation.
+`ui/drawing_controls.rs` shares the existing Ink controls with Drawing defaults.
+The app owns all application preferences and initializes each opened editor's
+pen style/eraser radius from defaults. Existing tabs keep their tool selections;
+input navigation preferences apply on every editor frame. Document/PDF schemas
+and the current rendering interpolation remain unchanged.
+
+Enable eframe's built-in persistence feature. Startup reads JSON from the
+`XiToc/preferences` key in `CreationContext::storage`. Desktop eframe stores it
+inside its app.ron in the OS application-data directory; web uses same-origin
+localStorage. Changes debounce for 500 ms or flush on dialog close; eframe's
+save hook also saves on normal shutdown/periodic autosave. Generic egui memory
+persistence is disabled. No workspace paths, document contents or ink are stored.
+The browser read-back check detects blocked/quota-failed writes; native disk
+failures are reported by eframe's logging (its Storage trait has no write Result).
+Forced termination may interrupt a pending write. Clearing browser site data
+removes preferences. Unknown/malformed versions use defaults with a warning and
+remain untouched until the user explicitly changes a preference.
+
+Future smoothing strength, pressure options and eraser modes belong in typed
+preference groups with validation/defaults and an explicit schema migration.
+Add behavior and effective controls together; do not add unused strength/pressure
+fields now. Smoothing changes must share renderer/eraser geometry and invalidate
+geometry caches; application defaults remain independent from raw document ink.

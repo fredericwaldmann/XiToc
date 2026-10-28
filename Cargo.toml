@@ -13,7 +13,7 @@ lopdf = { version = "0.45", default-features = false, features = ["wasm_js"] }
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "file-handle-inner"] }
 
 egui = { version = "=0.37.0", default-features = false }
-eframe = { version = "=0.37.0", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+eframe = { version = "=0.37.0", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "persistence"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"

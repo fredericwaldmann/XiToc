@@ -1,8 +1,10 @@
 //! Presentation components and view-only state. No filesystem or PDF operations.
 pub mod chrome;
 pub mod dialog;
+pub mod drawing_controls;
 pub mod explorer;
 pub mod icons;
+pub mod settings;
 pub mod style;
 pub mod tabs;
 pub mod toolbar;
@@ -10,6 +12,7 @@ pub mod toolbar;
 use crate::document::DocumentKind;
 
 pub enum Action {
+    Settings,
     #[cfg(not(target_arch = "wasm32"))]
     Workspace,
     #[cfg(not(target_arch = "wasm32"))]
