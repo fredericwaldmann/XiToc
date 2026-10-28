@@ -81,4 +81,14 @@ Edit → Settings provides General (Explorer visibility/editor behavior), Appear
 automatically and persist on the device, independently of workspace PDFs. Drawing
 defaults initialize newly created/opened tabs; Ink continues to adjust individual
 tabs. The Appearance menu and Explorer button use the same persisted preferences.
-Smoothing-strength, partial-erasing and pressure controls await their features.
+Partial-erasing and pressure controls await their features.
+
+## Handwriting smoothing (M1.1)
+
+Settings → Drawing → Stroke Smoothing provides a persistent 0–100% strength
+slider (default 50%). Off preserves raw input, Light/Medium/Strong/Maximum
+progressively reduce small irregularities while retaining sharp turns. It affects
+new strokes in all open Page Notes and Whiteboards. Existing strokes retain their
+captured strength, raw editable samples, identity/style and undo/redo history.
+The preview follows the pointer and uses the same geometry after release.
+Handwriting remains memory-only until M2; this does not add PDF ink saving.

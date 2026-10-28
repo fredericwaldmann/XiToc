@@ -162,7 +162,10 @@ macOS `~/Library/Application Support/XiToc/app.ron`, Windows
 `%APPDATA%/XiToc/data/app.ron`; web uses the same-origin localStorage key
 `XiToc/preferences`. Clearing browser site data resets preferences. Browser
 storage restrictions or native storage failures can prevent persistence.
-Smoothing strength, partial erasing and pressure settings await those features.
+**Stroke Smoothing** in Settings → Drawing controls new strokes in all open tabs:
+0% Off, 25% Light, 50% Medium (default), 75% Strong and 100% Maximum. It reduces
+small irregularities while preserving sharp turns and endpoints. Existing ink
+keeps its captured strength. Partial erasing and pressure settings remain future work.
 
 ## Checks
 

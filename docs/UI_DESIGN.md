@@ -143,6 +143,16 @@ panning. Hand/Space navigation remains available. Changes apply automatically;
 preferences persist locally with a short write debounce. Appearance menu and
 Explorer button edit the same preferences. Persistence warnings appear in Settings.
 
-Future smoothing-strength, partial-erasing and pressure controls are explanatory
-text only until their behaviors exist. Do not expose working-looking controls for
+Partial-erasing and pressure controls remain explanatory text until their
+behaviors exist. Do not expose working-looking controls for
 them. Preferences never modify existing stroke objects or PDF contents.
+
+### Stroke Smoothing (#12)
+
+Settings → Drawing contains a Stroke Smoothing group and a 0–100% Strength slider.
+`SMOOTHING_SLIDER_WIDTH` is 200 logical points, constrained by available width.
+Use the Border token for its visible rail and the standard selection trailing fill.
+Show the scale: 0% Off, 25% Light, 50% Medium, 75% Strong, 100% Maximum. Default
+50% balances jitter reduction and detail. State that it applies to new strokes
+in every open tab. Persist it with other preferences. Existing ink is never
+reshaped by this control. Retain the shared spacing, typography and colors.

@@ -345,6 +345,7 @@ impl XiTocApp {
                             ui.label("PDF preview is not available yet. The original file is preserved and will not be rewritten.");
                         });
                     } else {
+                        opened.editor.canvas.smoothing_strength = self.preferences.drawing.smoothing_strength;
                         opened.editor.middle_button_pan = self.preferences.middle_button_pan;
                         opened.editor.show(ui, &opened.loaded.document.data);
                     }

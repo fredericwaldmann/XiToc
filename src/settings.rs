@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const STORAGE_KEY: &str = "XiToc/preferences";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Theme {
@@ -17,6 +17,7 @@ pub struct DrawingPreferences {
     pub color: [u8; 4],
     pub width: f64,
     pub eraser_radius: f64,
+    pub smoothing_strength: u8,
 }
 impl Default for DrawingPreferences {
     fn default() -> Self {
@@ -24,11 +25,12 @@ impl Default for DrawingPreferences {
             color: [37, 99, 200, 255],
             width: 2.5,
             eraser_radius: 14.0,
+            smoothing_strength: 50,
         }
     }
 }
 
-// Future smoothing strength, eraser modes and pressure options belong in typed
+// Future eraser modes and pressure options belong in typed
 // groups here, with validation and schema migration when their behavior exists.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -55,8 +57,12 @@ impl Preferences {
         if json.len() > 16 * 1024 {
             return Err("Preferences exceed the supported size.".into());
         }
-        let prefs: Self =
+        let mut prefs: Self =
             serde_json::from_str(json).map_err(|e| format!("Cannot read preferences: {e}"))?;
+        // Version 1 had no strength field; serde supplies the handwriting default.
+        if prefs.schema_version == 1 {
+            prefs.schema_version = VERSION;
+        }
         if prefs.schema_version != VERSION {
             return Err("Unsupported preferences version.".into());
         }
@@ -64,6 +70,7 @@ impl Preferences {
             || !(0.25..=12.0).contains(&prefs.drawing.width)
             || !prefs.drawing.eraser_radius.is_finite()
             || !(4.0..=48.0).contains(&prefs.drawing.eraser_radius)
+            || prefs.drawing.smoothing_strength > 100
             || prefs.drawing.color[3] != 255
         {
             return Err("Invalid drawing preferences.".into());
@@ -85,6 +92,7 @@ impl Preferences {
         canvas.color = self.drawing.color;
         canvas.width = self.drawing.width;
         canvas.eraser_radius = self.drawing.eraser_radius;
+        canvas.smoothing_strength = self.drawing.smoothing_strength;
     }
 }
 
@@ -106,6 +114,22 @@ pub(crate) mod tests {
         fn flush(&mut self) {}
     }
     #[test]
+    fn smoothing_preferences_migrate_and_persist_every_strength() {
+        let old = Preferences::decode(r#"{"schema_version":1,"drawing":{"width":6.0}}"#).unwrap();
+        assert_eq!(old.schema_version, VERSION);
+        assert_eq!(old.drawing.smoothing_strength, 50);
+        assert_eq!(old.drawing.width, 6.0);
+        for strength in [0, 25, 50, 75, 100] {
+            let mut prefs = old.clone();
+            prefs.drawing.smoothing_strength = strength;
+            let mut storage = MemoryStorage::default();
+            prefs.store(&mut storage);
+            assert_eq!(Preferences::load(Some(&storage)).unwrap(), prefs);
+        }
+        assert!(Preferences::decode(r#"{"drawing":{"smoothing_strength":101}}"#).is_err());
+    }
+
+    #[test]
     fn preferences_round_trip_and_reject_invalid_or_future_data() {
         let mut storage = MemoryStorage::default();
         assert_eq!(
@@ -120,6 +144,7 @@ pub(crate) mod tests {
                 width: 8.0,
                 color: [2, 3, 4, 255],
                 eraser_radius: 32.0,
+                smoothing_strength: 75,
             },
             ..Default::default()
         };
@@ -127,7 +152,7 @@ pub(crate) mod tests {
         assert_eq!(Preferences::load(Some(&storage)).unwrap(), prefs);
         for json in [
             "broken",
-            r#"{"schema_version":2}"#,
+            r#"{"schema_version":3}"#,
             r#"{"drawing":{"width":0.0}}"#,
             r#"{"drawing":{"eraser_radius":49.0}}"#,
             r#"{"drawing":{"color":[0,0,0,0]}}"#,

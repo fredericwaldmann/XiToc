@@ -28,12 +28,13 @@ enum Gesture {
 }
 struct Cached {
     path: Vec<[f64; 2]>,
-    mesh: Option<(Transform, f32, Arc<egui::Mesh>)>,
+    view: Option<(Transform, f32)>,
+    meshes: Vec<Arc<egui::Mesh>>,
     bounds: ([f64; 2], [f64; 2]),
 }
 impl Cached {
     fn new(stroke: &Stroke) -> Self {
-        let path = drawing::smooth(&stroke.points);
+        let path = stroke.path();
         let mut min = [f64::INFINITY; 2];
         let mut max = [f64::NEG_INFINITY; 2];
         for p in &path {
@@ -44,11 +45,55 @@ impl Cached {
         }
         Self {
             path,
-            mesh: None,
+            view: None,
+            meshes: Vec::new(),
             bounds: (min, max),
         }
     }
+    fn paint(
+        &mut self,
+        ui: &egui::Ui,
+        painter: &egui::Painter,
+        transform: Transform,
+        stroke: &Stroke,
+    ) {
+        let ppp = ui.ctx().pixels_per_point();
+        if self.view != Some((transform, ppp)) {
+            self.meshes.clear();
+            self.view = Some((transform, ppp));
+        }
+        let chunks = self
+            .path
+            .len()
+            .saturating_sub(1)
+            .div_ceil(MESH_SEGMENTS)
+            .max(1);
+        for index in self.meshes.len()..chunks {
+            let start = index * MESH_SEGMENTS;
+            let end = (start + MESH_SEGMENTS + 1).min(self.path.len());
+            let shapes = rounded_shapes(&self.path[start..end], transform, stroke, index > 0);
+            let primitives = ui.ctx().tessellate(
+                shapes
+                    .into_iter()
+                    .map(|shape| egui::epaint::ClippedShape::new(Rect::EVERYTHING, shape))
+                    .collect(),
+                ppp,
+            );
+            let mut mesh = egui::Mesh::default();
+            for primitive in primitives {
+                if let egui::epaint::Primitive::Mesh(part) = primitive.primitive {
+                    mesh.append(part);
+                }
+            }
+            self.meshes.push(Arc::new(mesh));
+        }
+        for mesh in &self.meshes {
+            painter.add(egui::Shape::Mesh(mesh.clone()));
+        }
+    }
 }
+
+const MESH_SEGMENTS: usize = 128;
 
 pub struct Canvas {
     pub drawing: Drawing,
@@ -57,6 +102,8 @@ pub struct Canvas {
     pub width: f64,
     /// Eraser radius in logical screen points, shown at its actual hit-test size.
     pub eraser_radius: f64,
+    pub smoothing_strength: u8,
+    preview: crate::smoothing::Preview,
     gesture: Option<Gesture>,
     gesture_transform: Option<Transform>,
     cache: HashMap<Uuid, Cached>,
@@ -72,6 +119,8 @@ impl Canvas {
             color: [37, 99, 200, 255],
             width: 2.5,
             eraser_radius: 14.0,
+            smoothing_strength: 50,
+            preview: Default::default(),
             gesture: None,
             gesture_transform: None,
             cache: HashMap::new(),
@@ -90,7 +139,9 @@ impl Canvas {
     pub fn finish(&mut self) {
         match self.gesture.take() {
             Some(Gesture::Pen(stroke)) => {
+                self.update_preview(&stroke);
                 self.drawing.add(stroke);
+                self.preview = Default::default();
             }
             Some(Gesture::Eraser(erase)) => {
                 if erase.ids.is_empty() {
@@ -200,6 +251,10 @@ impl Canvas {
                         if self.tool == Tool::Pen {
                             let mut stroke =
                                 Stroke::new(self.drawing.owner(), surface, self.color, self.width);
+                            stroke.smoothing = drawing::Smoothing::AdaptiveV1 {
+                                strength: self.smoothing_strength,
+                            };
+                            self.preview = Default::default();
                             stroke.push(point);
                             self.gesture = Some(Gesture::Pen(stroke));
                         } else {
@@ -339,6 +394,36 @@ impl Canvas {
             None => {}
         }
     }
+    fn update_preview(&mut self, stroke: &Stroke) {
+        let cached = self.cache.entry(stroke.id).or_insert_with(|| Cached {
+            path: Vec::new(),
+            view: None,
+            meshes: Vec::new(),
+            bounds: ([0.0; 2], [0.0; 2]),
+        });
+        let drawing::Smoothing::AdaptiveV1 { strength } = stroke.smoothing else {
+            unreachable!()
+        };
+        if let Some(changed) = self
+            .preview
+            .update(&stroke.points, strength, &mut cached.path)
+        {
+            cached
+                .meshes
+                .truncate(changed.saturating_sub(1) / MESH_SEGMENTS);
+        }
+        // Completion does not change geometry. Bounds are needed only once the
+        // stroke joins the committed drawing's normal culling pipeline.
+        let mut min = [f64::INFINITY; 2];
+        let mut max = [f64::NEG_INFINITY; 2];
+        for p in &cached.path {
+            for axis in 0..2 {
+                min[axis] = min[axis].min(p[axis]);
+                max[axis] = max[axis].max(p[axis]);
+            }
+        }
+        cached.bounds = (min, max);
+    }
     fn paint(&mut self, ui: &egui::Ui, bounds: Rect, surface: Surface, transform: Transform) {
         let painter = ui
             .painter()
@@ -367,43 +452,39 @@ impl Canvas {
             if !screen_bounds.intersects(painter.clip_rect()) {
                 continue;
             }
-            let ppp = ui.ctx().pixels_per_point();
-            if cached
-                .mesh
-                .as_ref()
-                .is_none_or(|(old, dpi, _)| *old != transform || *dpi != ppp)
-            {
-                let shapes = rounded_shapes(&cached.path, transform, stroke);
-                let primitives = ui.ctx().tessellate(
-                    shapes
-                        .into_iter()
-                        .map(|shape| egui::epaint::ClippedShape::new(Rect::EVERYTHING, shape))
-                        .collect(),
-                    ppp,
-                );
-                let mut mesh = egui::Mesh::default();
-                for primitive in primitives {
-                    if let egui::epaint::Primitive::Mesh(part) = primitive.primitive {
-                        mesh.append(part);
-                    }
-                }
-                cached.mesh = Some((transform, ppp, Arc::new(mesh)));
-            }
-            painter.add(egui::Shape::Mesh(cached.mesh.as_ref().unwrap().2.clone()));
+            cached.paint(ui, &painter, transform, stroke);
         }
         if let Some(Gesture::Pen(stroke)) = &self.gesture
             && stroke.surface == surface
         {
-            painter.extend(rounded_shapes(
-                &drawing::smooth(&stroke.points),
-                transform,
-                stroke,
-            ));
+            let cached = self.cache.entry(stroke.id).or_insert_with(|| Cached {
+                path: Vec::new(),
+                view: None,
+                meshes: Vec::new(),
+                bounds: ([0.0; 2], [0.0; 2]),
+            });
+            let drawing::Smoothing::AdaptiveV1 { strength } = stroke.smoothing else {
+                unreachable!()
+            };
+            if let Some(changed) = self
+                .preview
+                .update(&stroke.points, strength, &mut cached.path)
+            {
+                cached
+                    .meshes
+                    .truncate(changed.saturating_sub(1) / MESH_SEGMENTS);
+            }
+            cached.paint(ui, &painter, transform, stroke);
         }
     }
 }
 
-fn rounded_shapes(path: &[[f64; 2]], transform: Transform, stroke: &Stroke) -> Vec<egui::Shape> {
+fn rounded_shapes(
+    path: &[[f64; 2]],
+    transform: Transform,
+    stroke: &Stroke,
+    skip_first_cap: bool,
+) -> Vec<egui::Shape> {
     let color = Color32::from_rgba_unmultiplied(
         stroke.color[0],
         stroke.color[1],
@@ -425,7 +506,7 @@ fn rounded_shapes(path: &[[f64; 2]], transform: Transform, stroke: &Stroke) -> V
             Line::new(width, color),
         ));
     }
-    for point in points {
+    for point in points.into_iter().skip(usize::from(skip_first_cap)) {
         shapes.push(egui::Shape::circle_filled(point, width * 0.5, color));
     }
     shapes
@@ -550,6 +631,11 @@ mod tests {
                     for i in 0..count {
                         let mut stroke =
                             Stroke::new(data.id(), surface, [0, 0, 0, 255], 0.1 + (i % 24) as f64);
+                        if i % 6 != 0 {
+                            stroke.smoothing = drawing::Smoothing::AdaptiveV1 {
+                                strength: ((i % 5) * 25) as u8,
+                            };
+                        }
                         let x = (i % 100) as f64 * 5.0;
                         let y = (i / 100) as f64 * 5.0;
                         stroke.push([x, y]);
@@ -565,7 +651,7 @@ mod tests {
                     for pair in sweep.windows(2) {
                         for stroke in &original {
                             if drawing::reference_hit_path(
-                                &drawing::smooth(&stroke.points),
+                                &stroke.path(),
                                 pair[0],
                                 pair[1],
                                 14.0 / scale + stroke.width * 0.5,
@@ -636,6 +722,25 @@ mod tests {
         }
     }
     fn frame(ctx: &egui::Context, canvas: &mut Canvas, surface: Surface, events: Vec<Event>) {
+        frame_transform(
+            ctx,
+            canvas,
+            surface,
+            events,
+            Transform {
+                origin: [0.0; 2],
+                center: [0.0; 2],
+                scale: 1.0,
+            },
+        );
+    }
+    fn frame_transform(
+        ctx: &egui::Context,
+        canvas: &mut Canvas,
+        surface: Surface,
+        events: Vec<Event>,
+        transform: Transform,
+    ) {
         let mut output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(700.0, 500.0))),
@@ -647,21 +752,149 @@ mod tests {
                 canvas.begin_frame(ui);
                 let (rect, _) =
                     ui.allocate_exact_size(egui::vec2(600.0, 400.0), egui::Sense::click_and_drag());
-                canvas.surface(
-                    ui,
-                    rect,
-                    surface,
-                    Transform {
-                        origin: [0.0; 2],
-                        center: [0.0; 2],
-                        scale: 1.0,
-                    },
-                );
+                canvas.surface(ui, rect, surface, transform);
                 canvas.end_frame(ui);
             },
         );
         output.textures_delta.clear();
     }
+    #[test]
+    fn smoothing_is_captured_on_press_matches_preview_and_survives_history() {
+        for (kind, surface) in [
+            (DocumentKind::Page, Surface::Page(0)),
+            (DocumentKind::Whiteboard, Surface::Canvas),
+        ] {
+            for scale in [0.1, 1.0, 8.0] {
+                for strength in [0, 50, 100] {
+                    let data = DocumentData::blank(kind);
+                    let mut canvas = Canvas::new(&data);
+                    canvas.smoothing_strength = strength;
+                    let ctx = egui::Context::default();
+                    let transform = Transform {
+                        origin: [100.0; 2],
+                        center: [0.0; 2],
+                        scale,
+                    };
+                    let screen = |p| {
+                        let s = transform.to_screen(p);
+                        Pos2::new(s[0] as f32, s[1] as f32)
+                    };
+                    let a = screen([10.0, 10.0]);
+                    let b = screen([20.0, 10.3]);
+                    let c = screen([30.0, 9.7]);
+                    let d = screen([40.0, 10.0]);
+                    frame_transform(&ctx, &mut canvas, surface, vec![], transform);
+                    frame_transform(
+                        &ctx,
+                        &mut canvas,
+                        surface,
+                        vec![button(a, true), Event::PointerMoved(b)],
+                        transform,
+                    );
+                    // A setting change during drawing affects only the next stroke.
+                    canvas.smoothing_strength = 100 - strength;
+                    frame_transform(
+                        &ctx,
+                        &mut canvas,
+                        surface,
+                        vec![Event::PointerMoved(c), Event::PointerMoved(d)],
+                        transform,
+                    );
+                    let Some(Gesture::Pen(live)) = &canvas.gesture else {
+                        panic!()
+                    };
+                    let id = live.id;
+                    let preview = canvas.cache[&id].path.clone();
+                    frame_transform(
+                        &ctx,
+                        &mut canvas,
+                        surface,
+                        vec![button(d, false)],
+                        transform,
+                    );
+                    let stroke = canvas.drawing.strokes()[0].clone();
+                    assert_eq!(stroke.id, id);
+                    assert_eq!(
+                        stroke.smoothing,
+                        drawing::Smoothing::AdaptiveV1 { strength }
+                    );
+                    assert_eq!(stroke.points.len(), 4);
+                    assert_eq!(preview, stroke.path());
+                    assert_eq!(canvas.cache[&id].path, preview);
+                    let json = serde_json::to_vec(stroke.as_ref()).unwrap();
+                    let decoded: Stroke = serde_json::from_slice(&json).unwrap();
+                    assert_eq!(&decoded, stroke.as_ref());
+                    assert_eq!(decoded.path(), preview);
+                    canvas.undo();
+                    assert!(canvas.drawing.strokes().is_empty());
+                    canvas.redo();
+                    assert_eq!(canvas.drawing.strokes()[0], stroke);
+                    frame_transform(&ctx, &mut canvas, surface, vec![], transform);
+                    assert_eq!(canvas.cache[&id].path, preview);
+                    frame_transform(
+                        &ctx,
+                        &mut canvas,
+                        surface,
+                        vec![button(a, true), button(a, false)],
+                        transform,
+                    );
+                    assert_eq!(
+                        canvas.drawing.strokes()[1].smoothing,
+                        drawing::Smoothing::AdaptiveV1 {
+                            strength: 100 - strength
+                        }
+                    );
+                    assert_eq!(canvas.drawing.strokes()[0], stroke);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn long_live_strokes_reuse_stable_meshes_and_idle_frames_allocate_no_new_meshes() {
+        let ctx = egui::Context::default();
+        let mut canvas = Canvas::new(&DocumentData::blank(DocumentKind::Whiteboard));
+        frame(&ctx, &mut canvas, Surface::Canvas, vec![]);
+        let point = |i| Pos2::new(50.0 + i as f32 * 0.3, 50.0 + (i as f32 * 0.1).sin());
+        let mut events = vec![button(point(0), true)];
+        events.extend((1..1000).map(|i| Event::PointerMoved(point(i))));
+        frame(&ctx, &mut canvas, Surface::Canvas, events);
+        let Some(Gesture::Pen(live)) = &canvas.gesture else {
+            panic!()
+        };
+        let id = live.id;
+        let first = canvas.cache[&id].meshes[0].clone();
+        frame(
+            &ctx,
+            &mut canvas,
+            Surface::Canvas,
+            (1000..1200)
+                .map(|i| Event::PointerMoved(point(i)))
+                .collect(),
+        );
+        assert!(Arc::ptr_eq(&first, &canvas.cache[&id].meshes[0]));
+        let meshes = canvas.cache[&id].meshes.clone();
+        frame(&ctx, &mut canvas, Surface::Canvas, vec![]);
+        assert!(
+            meshes
+                .iter()
+                .zip(&canvas.cache[&id].meshes)
+                .all(|(a, b)| Arc::ptr_eq(a, b))
+        );
+        frame(
+            &ctx,
+            &mut canvas,
+            Surface::Canvas,
+            vec![button(point(1199), false)],
+        );
+        assert!(
+            meshes
+                .iter()
+                .zip(&canvas.cache[&id].meshes)
+                .all(|(a, b)| Arc::ptr_eq(a, b))
+        );
+    }
+
     #[test]
     fn ordered_events_draw_erase_and_keyboard_undo_redo_on_both_surfaces() {
         for (kind, surface) in [

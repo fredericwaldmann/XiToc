@@ -169,8 +169,55 @@ Forced termination may interrupt a pending write. Clearing browser site data
 removes preferences. Unknown/malformed versions use defaults with a warning and
 remain untouched until the user explicitly changes a preference.
 
-Future smoothing strength, pressure options and eraser modes belong in typed
-preference groups with validation/defaults and an explicit schema migration.
-Add behavior and effective controls together; do not add unused strength/pressure
+Smoothing strength is implemented in #12 below. Future pressure options and
+eraser modes belong in typed preference groups with validation/defaults and an explicit schema migration.
+Add behavior and effective controls together; do not add unused pressure
 fields now. Smoothing changes must share renderer/eraser geometry and invalidate
 geometry caches; application defaults remain independent from raw document ink.
+
+## M1.1 configurable smoothing (#12)
+
+`Stroke` retains raw `InkPoint` samples, pressure, identity, surface and style.
+A serde-defaulted `Smoothing` field records `Legacy` (the original M1 midpoint
+path) or `AdaptiveV1 { strength }` (0–100). Missing stroke metadata selects Legacy,
+so old semantic stroke JSON does not change appearance. New controller strokes
+capture AdaptiveV1 at pointer-down. `Stroke::path()` deterministically reconstructs
+the render/hit-test polyline from raw input and this versioned metadata. Enable
+serde_json's float_roundtrip feature so arbitrary f64 input coordinates survive
+semantic JSON round trips exactly. This does not enable PDF ink persistence.
+
+`smoothing.rs` uses a local convex three-point filter followed by trimmed quadratic
+Bézier joins. Strength increases both filtering and curve trimming; 0 returns the
+original polyline exactly. Turn-angle adaptation fades both operations to zero
+at 75 degrees, retaining intentional corners/reversals and small sharp hooks.
+First/last points always remain exact. Calculations use relative f64 document
+coordinates, independent of zoom, DPI and camera. Convex combinations keep the
+path within raw input bounds, preserving A4 clipping and the eraser bounds index.
+Pressure samples remain untouched for future pressure interpolation/input work.
+
+The approach draws on quadratic corner-cutting rather than a temporal low-pass
+filter. Background: [Chaikin/quadratic spline notes](https://www.cs.unc.edu/~dm/UNC/COMP258/LECTURES/Chaikins-Algorithm.pdf).
+We also evaluated the [1€ filter](https://gery.casiez.net/publications/CHI2012-casiez.pdf),
+which trades jitter against temporal lag; spatial local processing fits the
+current ordered position-only input without inventing per-sample timestamps.
+Our angle adaptation and prefilter are application choices, not a claim to
+implement the unmodified Chaikin subdivision algorithm.
+
+`Preview` retains per-vertex path offsets. Appending a sample revises at most the
+previous three vertices plus new input; unchanged input does no geometry work.
+The current pointer point is always visible while only the trailing geometry
+settles as samples arrive. Release uses exactly the same path, with no new fitting
+pass. Paths/meshes are cached for committed strokes. Mesh chunks cover 128 path
+segments with shared endpoint caps drawn once; only changed trailing chunks are
+retessellated during drawing. Stable chunks reuse Arc meshes; the completed cache
+is retained at release. View/DPI changes invalidate mesh coordinates, not stroke
+geometry. The eraser pipeline/index/radius/history semantics are unchanged and
+consume the same per-stroke path as rendering.
+
+Preferences schema 2 adds `drawing.smoothing_strength` (50 by default), migrates
+schema 1 with the new default while preserving other preferences, and keeps the
+existing eframe storage mechanisms. It applies to every open tab's next stroke;
+changing it never invalidates existing geometry. M2 must version the PDF payload
+separately and preserve raw points plus processing metadata (or exact generated
+vectors) alongside matching visible PDF graphics. Unknown future smoothing
+algorithms must not be silently reinterpreted. No note sidecars are introduced.
