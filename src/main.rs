@@ -10,6 +10,8 @@ mod settings;
 mod smoothing;
 mod storage;
 mod ui;
+#[cfg(target_arch = "wasm32")]
+mod web_pressure;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
@@ -40,7 +42,10 @@ fn main() {
             .start(
                 canvas,
                 eframe::WebOptions::default(),
-                Box::new(|cc| Ok(Box::new(app::XiTocApp::new(cc.storage)))),
+                Box::new(|cc| {
+                    web_pressure::install(cc.egui_ctx.clone());
+                    Ok(Box::new(app::XiTocApp::new(cc.storage)))
+                }),
             )
             .await;
         if let Some(status) = document.get_element_by_id("loading") {

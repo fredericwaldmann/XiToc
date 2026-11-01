@@ -81,7 +81,7 @@ Edit → Settings provides General (Explorer visibility/editor behavior), Appear
 automatically and persist on the device, independently of workspace PDFs. Drawing
 defaults initialize newly created/opened tabs; Ink continues to adjust individual
 tabs. The Appearance menu and Explorer button use the same persisted preferences.
-Pressure controls await their feature.
+Pressure controls are available under Drawing; see the pressure input section below.
 
 ## Handwriting smoothing (M1.1)
 
@@ -108,3 +108,13 @@ strokes is one undo operation; undo restores the exact original objects and
 stacking order, and redo restores the same fragment IDs/geometry. Both document
 types, navigation and smoothing remain supported. Ink is still memory-only until
 M2; no PDF serialization or note sidecars are added.
+
+## Pressure-sensitive handwriting (M1.1, #15)
+
+New pen strokes vary thickness using normalized device force when available.
+Drawing settings persist enable/strength/minimum width and affect future strokes,
+while existing ink retains its captured response. Mouse input stays constant-width.
+Both layouts, smoothing, both erasers and undo/redo retain editable pressure data.
+Browser pen PointerEvents and Windows winit pen-force input have a supported code
+path; native Linux/macOS tablets currently use constant-width fallback. Physical
+hardware is unverified. See PRESSURE_INPUT.md. Saving ink remains the M2 milestone.

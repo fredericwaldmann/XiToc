@@ -267,7 +267,7 @@ Manual native and browser:
    session behavior. Clearing site data resets defaults. Native disk errors are
    logged by eframe. Inspect the OS app.ron / localStorage preference key to
    confirm that it contains no document content or workspace paths.
-6. Stroke Smoothing (#12) and eraser modes (#13) are enabled; pressure controls remain unavailable.
+6. Stroke Smoothing (#12) and eraser modes (#13) are enabled; pressure controls are documented in the #15 section below.
 
 Local validation for this change: fmt, Clippy with warnings denied, 42 tests
 passed (the existing eraser benchmark is ignored), native build, WASM check and
@@ -396,3 +396,54 @@ by automated preference round trips. Local screenshot
 `/tmp/xitoc-partial-eraser.png` is a session artifact, not a note format or repo file.
 Native graphical/physical-device and Windows/macOS runtime checks remain manual;
 both layouts and pan/zoom/far-origin behavior have automated controller coverage.
+
+## M1.1 pressure-sensitive input (#15)
+
+Automated: finite/clamped/invalid/absent/zero pressure; old numeric and missing
+sample/style JSON; mouse/disabled/0%-strength constant-width fallback; increasing
+width and round cap radii; exact local smoothing pressure interpolation and
+bounded incremental reconstruction; actual ordered synthetic force/pointer events
+on Page and Whiteboard at 0.25×/1×/4×; preview/release/cache equality; local-width
+whole/partial erasing, interpolated surviving fragments and exact undo/redo;
+randomized tapered clipping versus independent distance samples; settings schema
+1–3 migration, range validation, restart persistence and application to new ink.
+Existing eraser-index pruning, mesh reuse and smoothing tests remain required.
+
+Manual browser and compatible Windows hardware:
+1. Create Page and Whiteboard notes. In Drawing enable pressure, strength 100%,
+   minimum 20%. Draw slowly varying light/heavy curves and dots. Check continuous
+   rounded thickness, endpoint response, and no release refit. Mouse stays constant.
+2. Try 0/50/100% strength, 1/20/100% minimum, enable off/on and smoothing
+   0/50/100%. Existing ink must retain its exact appearance. Change settings via
+   keyboard and in a narrow dialog with both themes and UI display scaling.
+3. Zoom/pan, draw far from origin, erase thin and thick portions with both modes,
+   undo/redo and repeat cuts. Eraser ring alignment and responsiveness must hold.
+4. Test pen leaving canvas, release outside, contact cancellation, focus loss,
+   switching tabs and finger/mouse navigation. Secondary contacts must not supply
+   force to the primary stroke. Test browser UI zoom as well as document zoom.
+5. Reload/restart only after discarding scratch ink. Preferences must persist;
+   note ink remains memory-only until M2. Verify constant-width tablet fallback
+   on Linux/macOS and Windows drivers delivering only mouse/legacy touch events.
+
+Physical device pressure/latency and Windows/macOS runtime are unverified here.
+Synthetic pressure does not certify hardware, driver support or display latency.
+
+Local validation for #15: fmt, Clippy with warnings denied, 68 tests passed
+(four manual benchmarks ignored), native build, WASM check and Trunk release
+build. Both existing release partial-erasing benchmarks passed separately:
+10,000-stroke index build 8.43 ms, 2,000 partial samples 3.72 ms, commit 8.04 ms;
+100,000-segment index setup 3.09 ms, 2,000 local samples 9.03 ms. Host load varies;
+these are CPU measurements, not hardware handwriting/display latency guarantees.
+
+Firefox 157 headless/WebGL2 smoke created a scratch Whiteboard, adjusted ink
+width, and rendered a synthetic DOM pen stream ramping from 0 to 1 pressure.
+Visual inspection confirmed a smooth thin-to-thick curve and round caps; the
+queue drained and the unsaved-ink guard activated. Firefox BiDi does not implement
+pen pointerMove, so the DOM test temporarily stubbed setPointerCapture for its
+synthetic pointer ID; genuine pointer capture and hardware were not exercised.
+Drawing pressure sliders changed persisted strength/minimum to 48%/49%; the same
+schema-4 localStorage values survived discarding the generated session on reload.
+Settings and drawing screenshots are local session artifacts in `/tmp`, not PDFs
+or repository fixtures. Automated controller tests cover both document types,
+whole/partial erasure/history, secondary-contact isolation and cancellation.
+Native Windows/macOS runtime and physical pen testing remain outstanding.

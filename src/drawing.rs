@@ -15,15 +15,57 @@ pub enum Surface {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InkPoint {
     pub position: [f64; 2],
-    /// Reserved for future stylus input. Mouse uses 1.0; M1 renders constant width.
-    pub pressure: f32,
+    /// Normalized hardware measurement; None means unavailable (including mouse).
+    #[serde(default)]
+    pub pressure: Option<f32>,
 }
 impl InkPoint {
     pub fn mouse(position: [f64; 2]) -> Self {
         Self {
             position,
-            pressure: 1.0,
+            pressure: None,
         }
+    }
+}
+
+pub fn normalize_pressure(value: Option<f32>) -> Option<f32> {
+    value.filter(|v| v.is_finite()).map(|v| v.clamp(0.0, 1.0))
+}
+pub fn mix_pressure(a: Option<f32>, b: Option<f32>, t: f32) -> Option<f32> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a + (b - a) * t),
+        _ => None,
+    }
+}
+
+/// Captured at pointer-down; old strokes keep their constant-width appearance.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PressureStyle {
+    pub enabled: bool,
+    pub strength: u8,
+    pub minimum: u8,
+}
+impl Default for PressureStyle {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            strength: 100,
+            minimum: 20,
+        }
+    }
+}
+impl PressureStyle {
+    pub fn factor(self, pressure: Option<f32>) -> f64 {
+        if !self.enabled {
+            return 1.0;
+        }
+        let Some(p) = pressure else {
+            return 1.0;
+        };
+        let minimum = f64::from(self.minimum) / 100.0;
+        let response = minimum + (1.0 - minimum) * f64::from(p);
+        1.0 + (response - 1.0) * f64::from(self.strength) / 100.0
     }
 }
 
@@ -56,6 +98,8 @@ pub enum Smoothing {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Stroke {
+    #[serde(default)]
+    pub pressure_style: PressureStyle,
     pub id: Uuid,
     pub document_id: Uuid,
     pub surface: Surface,
@@ -69,6 +113,7 @@ pub struct Stroke {
 impl Stroke {
     pub fn new(document_id: Uuid, surface: Surface, color: [u8; 4], width: f64) -> Self {
         Self {
+            pressure_style: PressureStyle::default(),
             id: Uuid::new_v4(),
             document_id,
             surface,
@@ -85,10 +130,21 @@ impl Stroke {
             Smoothing::AdaptiveV1 { strength } => crate::smoothing::path(&self.points, strength),
         }
     }
+    pub fn push_pressure(&mut self, position: [f64; 2], pressure: Option<f32>) {
+        let pressure = normalize_pressure(pressure);
+        if pressure.is_none() {
+            self.push(position);
+            return;
+        }
+        let point = InkPoint { position, pressure };
+        if self.points.last() != Some(&point) {
+            self.points.push(point);
+        }
+    }
     pub fn push(&mut self, position: [f64; 2]) {
-        // Keep all distinct input samples; interpolation is presentation-only.
-        if self.points.last().is_none_or(|p| p.position != position) {
-            self.points.push(InkPoint::mouse(position));
+        let point = InkPoint::mouse(position);
+        if self.points.last() != Some(&point) {
+            self.points.push(point);
         }
     }
 }
@@ -248,13 +304,15 @@ impl Drawing {
         stroke.document_id == self.owner
             && !stroke.id.is_nil()
             && !matches!(stroke.smoothing, Smoothing::AdaptiveV1 { strength } if strength > 100)
+            && stroke.pressure_style.strength <= 100
+            && (1..=100).contains(&stroke.pressure_style.minimum)
             && !stroke.points.is_empty()
             && stroke.width.is_finite()
             && (0.1..=24.0).contains(&stroke.width)
             && stroke.points.iter().all(|p| {
                 self.contains(stroke.surface, p.position)
-                    && p.pressure.is_finite()
-                    && (0.0..=1.0).contains(&p.pressure)
+                    && p.pressure
+                        .is_none_or(|p| p.is_finite() && (0.0..=1.0).contains(&p))
             })
     }
     pub fn add(&mut self, stroke: Stroke) -> bool {
@@ -301,6 +359,7 @@ impl Drawing {
                         || s.surface != source.surface
                         || s.color != source.color
                         || s.width != source.width
+                        || s.pressure_style != source.pressure_style
                         || s.smoothing != Smoothing::PolylineV1
                         || !ids.insert(s.id)
                 })
@@ -461,12 +520,44 @@ mod tests {
         stroke
     }
     #[test]
+    fn pressure_normalization_mapping_and_legacy_compatibility() {
+        assert_eq!(normalize_pressure(None), None);
+        assert_eq!(normalize_pressure(Some(f32::NAN)), None);
+        assert_eq!(normalize_pressure(Some(f32::INFINITY)), None);
+        assert_eq!(normalize_pressure(Some(-1.0)), Some(0.0));
+        assert_eq!(normalize_pressure(Some(2.0)), Some(1.0));
+        assert_eq!(mix_pressure(Some(0.0), Some(1.0), 0.25), Some(0.25));
+        assert_eq!(mix_pressure(None, Some(1.0), 0.5), None);
+        let point: InkPoint = serde_json::from_str(r#"{"position":[1,2],"pressure":1.0}"#).unwrap();
+        assert_eq!(point.pressure, Some(1.0));
+        let missing: InkPoint = serde_json::from_str(r#"{"position":[1,2]}"#).unwrap();
+        assert_eq!(missing.pressure, None);
+        for strength in [0, 25, 50, 100] {
+            let style = PressureStyle {
+                enabled: true,
+                strength,
+                minimum: 20,
+            };
+            assert_eq!(style.factor(None), 1.0);
+            assert_eq!(style.factor(Some(1.0)), 1.0);
+            assert!(style.factor(Some(0.0)) <= style.factor(Some(0.5)));
+            assert!((0.19..=1.0).contains(&style.factor(Some(0.0))));
+        }
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        let ink = stroke(&data, Surface::Canvas, &[[1.0, 2.0]]);
+        let mut json = serde_json::to_value(&ink).unwrap();
+        json.as_object_mut().unwrap().remove("pressure_style");
+        let old: Stroke = serde_json::from_value(json).unwrap();
+        assert!(!old.pressure_style.enabled);
+    }
+
+    #[test]
     fn strokes_have_identity_pressure_and_serializable_vector_samples() {
         let data = DocumentData::blank(DocumentKind::Page);
         let a = stroke(&data, Surface::Page(0), &[[1.0, 2.0], [30.0, 40.0]]);
         let b = stroke(&data, Surface::Page(0), &[[1.0, 2.0]]);
         assert_ne!(a.id, b.id);
-        assert_eq!(a.points[0].pressure, 1.0);
+        assert_eq!(a.points[0].pressure, None);
         let bytes = serde_json::to_vec(&a).unwrap();
         assert_eq!(serde_json::from_slice::<Stroke>(&bytes).unwrap(), a);
         let mut drawing = Drawing::new(&data);
@@ -482,7 +573,7 @@ mod tests {
             Surface::Page(0),
             &[[2.0, 4.0], [10.0, 4.2], [18.0, 4.0]],
         );
-        ink.points[1].pressure = 0.4;
+        ink.points[1].pressure = Some(0.4);
         ink.smoothing = Smoothing::AdaptiveV1 { strength: 75 };
         let original = ink.clone();
         let path = ink.path();

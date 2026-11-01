@@ -98,6 +98,109 @@ pub fn clip_segment(
     result
 }
 
+/// Intersect a tapered segment with a swept disk. Distance to the sweep is
+/// piecewise quadratic; splitting at its end projections gives exact local
+/// radii without subdividing or scanning the complete stroke.
+pub(crate) fn clip_tapered(
+    a: [f64; 2],
+    b: [f64; 2],
+    from: [f64; 2],
+    to: [f64; 2],
+    radius: f64,
+    radii: [f64; 2],
+) -> Option<(f64, f64)> {
+    let expanded = radius + radii[0].max(radii[1]);
+    if (0..2).any(|i| {
+        (a[i].max(b[i]) + expanded).next_up() < from[i].min(to[i])
+            || (from[i].max(to[i]) + expanded).next_up() < a[i].min(b[i])
+    }) {
+        return None;
+    }
+    let delta = sub(b, a);
+    let sweep = sub(to, from);
+    let length = sweep[0].hypot(sweep[1]);
+    let unit = if length > 0.0 {
+        sweep.map(|v| v / length)
+    } else {
+        [0.0; 2]
+    };
+    let projection = dot(sub(a, from), unit);
+    let velocity = dot(delta, unit);
+    let mut breaks = [0.0, 1.0, 0.0, 0.0];
+    let mut break_count = 2;
+    if velocity != 0.0 {
+        for edge in [0.0, length] {
+            let t = (edge - projection) / velocity;
+            if t > 0.0 && t < 1.0 {
+                breaks[break_count] = t;
+                break_count += 1;
+            }
+        }
+    }
+    let breaks = &mut breaks[..break_count];
+    breaks.sort_by(f64::total_cmp);
+    let r = radius + radii[0];
+    let dr = radii[1] - radii[0];
+    let mut result: Option<(f64, f64)> = None;
+    for interval in breaks.windows(2) {
+        let mid = (interval[0] + interval[1]) * 0.5;
+        let along = projection + velocity * mid;
+        let (offset, direction) = if length == 0.0 || along <= 0.0 {
+            (sub(a, from), delta)
+        } else if along >= length {
+            (sub(a, to), delta)
+        } else {
+            let normal = [-unit[1], unit[0]];
+            ([dot(sub(a, from), normal), 0.0], [dot(delta, normal), 0.0])
+        };
+        let qa = dot(direction, direction) - dr * dr;
+        let qb = 2.0 * (dot(offset, direction) - r * dr);
+        let qc = dot(offset, offset) - r * r;
+        let value = |t: f64| (qa * t + qb) * t + qc;
+        let mut candidates = [interval[0], interval[1], f64::NAN, f64::NAN];
+        if qa == 0.0 {
+            if qb != 0.0 {
+                candidates[2] = -qc / qb;
+            }
+        } else {
+            let discriminant = qb * qb - 4.0 * qa * qc;
+            if discriminant >= 0.0 {
+                let q = -0.5 * (qb + discriminant.sqrt().copysign(qb));
+                if q != 0.0 {
+                    candidates[2] = q / qa;
+                    candidates[3] = qc / q;
+                } else {
+                    candidates[2] = -qb / (2.0 * qa);
+                }
+            }
+        }
+        let mut count = 0;
+        for i in 0..candidates.len() {
+            let t = candidates[i];
+            if t.is_finite() && t >= interval[0] && t <= interval[1] {
+                candidates[count] = t;
+                count += 1;
+            }
+        }
+        let candidates = &mut candidates[..count];
+        candidates.sort_by(f64::total_cmp);
+        let mut include = |lo: f64, hi: f64| {
+            result = Some(result.map_or((lo, hi), |old| (old.0.min(lo), old.1.max(hi))));
+        };
+        for &t in candidates.iter() {
+            if value(t) <= 0.0 {
+                include(t, t);
+            }
+        }
+        for pair in candidates.windows(2) {
+            if value((pair[0] + pair[1]) * 0.5) <= 0.0 {
+                include(pair[0], pair[1]);
+            }
+        }
+    }
+    result
+}
+
 #[derive(Default)]
 pub struct Cuts(pub Vec<(f64, f64)>);
 impl Cuts {
@@ -160,14 +263,28 @@ pub struct PartialCut {
     pub cuts: Cuts,
     index: EraserIndex,
     width: f64,
+    radii: Option<Vec<f64>>,
 }
 impl PartialCut {
     pub fn new(path: &[[f64; 2]], width: f64, surface: Surface) -> Self {
         Self {
             cuts: Cuts::default(),
             width,
+            radii: None,
             index: EraserIndex::for_path(path, width, surface),
         }
+    }
+    pub fn with_pressure(path: &[[f64; 2]], stroke: &Stroke, pressures: &[Option<f32>]) -> Self {
+        let mut cut = Self::new(path, stroke.width, stroke.surface);
+        if stroke.pressure_style.enabled && pressures.iter().any(Option::is_some) {
+            cut.radii = Some(
+                pressures
+                    .iter()
+                    .map(|p| stroke.width * 0.5 * stroke.pressure_style.factor(*p))
+                    .collect(),
+            );
+        }
+        cut
     }
     pub fn sweep(
         &mut self,
@@ -189,7 +306,19 @@ impl PartialCut {
             {
                 let a = path[index];
                 let b = path[(index + 1).min(path.len() - 1)];
-                if let Some((lo, hi)) = clip_segment(a, b, from, to, radius + self.width * 0.5) {
+                let hit = if let Some(radii) = &self.radii {
+                    clip_tapered(
+                        a,
+                        b,
+                        from,
+                        to,
+                        radius,
+                        [radii[index], radii[(index + 1).min(path.len() - 1)]],
+                    )
+                } else {
+                    clip_segment(a, b, from, to, radius + self.width * 0.5)
+                };
+                if let Some((lo, hi)) = hit {
                     let range = (index as f64 + lo, index as f64 + hi);
                     if self.cuts.insert(range) {
                         any = true;
@@ -227,9 +356,9 @@ pub fn visit_piece(path: &[[f64; 2]], start: f64, end: f64, mut point: impl FnMu
     }
 }
 
-/// Interpolate existing pressure along normalized raw/rendered arc length. M1
-/// still renders constant width; no hardware pressure support is introduced.
-fn path_pressures(stroke: &Stroke, path: &[[f64; 2]]) -> Option<Vec<f32>> {
+/// Match pressure to the visible path. Adaptive ink uses the identical local
+/// smoothing weights; legacy ink uses its historical arc-length mapping.
+pub(crate) fn path_pressures(stroke: &Stroke, path: &[[f64; 2]]) -> Option<Vec<Option<f32>>> {
     // Mouse ink has uniform pressure; do not allocate arc-length/pressure maps.
     if stroke
         .points
@@ -237,6 +366,11 @@ fn path_pressures(stroke: &Stroke, path: &[[f64; 2]]) -> Option<Vec<f32>> {
         .all(|p| p.pressure == stroke.points[0].pressure)
     {
         return None;
+    }
+    if let Smoothing::AdaptiveV1 { strength } = stroke.smoothing {
+        let mut preview = crate::smoothing::Preview::default();
+        preview.update(&stroke.points, strength, &mut Vec::new());
+        return Some(preview.pressures);
     }
     let cumulative = |points: &[[f64; 2]]| {
         let mut distances = Vec::with_capacity(points.len());
@@ -270,8 +404,7 @@ fn path_pressures(stroke: &Stroke, path: &[[f64; 2]]) -> Option<Vec<f32>> {
                 } else {
                     0.0
                 };
-                stroke.points[i].pressure
-                    + t * (stroke.points[next].pressure - stroke.points[i].pressure)
+                drawing::mix_pressure(stroke.points[i].pressure, stroke.points[next].pressure, t)
             })
             .collect(),
     )
@@ -291,15 +424,20 @@ pub fn fragments(stroke: &Stroke, path: &[[f64; 2]], cuts: &Cuts) -> Vec<Stroke>
             stroke.width,
         );
         piece.smoothing = Smoothing::PolylineV1;
+        piece.pressure_style = stroke.pressure_style;
         visit_piece(path, start, end, |position, t| {
             let pressure = if let Some(pressures) = &pressures {
                 let i = (t.floor() as usize).min(pressures.len() - 1);
                 let next = (i + 1).min(pressures.len() - 1);
-                pressures[i] + (t - i as f64) as f32 * (pressures[next] - pressures[i])
+                drawing::mix_pressure(pressures[i], pressures[next], (t - i as f64) as f32)
             } else {
                 stroke.points[0].pressure
             };
-            if piece.points.last().is_none_or(|p| p.position != position) {
+            if piece
+                .points
+                .last()
+                .is_none_or(|p| p.position != position || p.pressure != pressure)
+            {
                 piece.points.push(InkPoint { position, pressure });
             }
         });
@@ -321,11 +459,11 @@ mod tests {
         stroke.points = vec![
             InkPoint {
                 position: [0.0, 0.0],
-                pressure: 0.2,
+                pressure: Some(0.2),
             },
             InkPoint {
                 position: [100.0, 0.0],
-                pressure: 0.8,
+                pressure: Some(0.8),
             },
         ];
         stroke
@@ -339,6 +477,43 @@ mod tests {
     fn close(a: f64, b: f64) {
         assert!((a - b).abs() < 1e-8, "{a} != {b}");
     }
+    #[test]
+    fn tapered_clipping_matches_independent_distance_samples() {
+        let mut seed = 891u64;
+        let mut random = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % 10000) as f64 / 100.0 - 50.0
+        };
+        for _ in 0..1000 {
+            let a = [random(), random()];
+            let b = [random(), random()];
+            let from = [random(), random()];
+            let to = [random(), random()];
+            let radius = random().abs() / 5.0 + 0.1;
+            let radii = [random().abs() / 10.0 + 0.1, random().abs() / 10.0 + 0.1];
+            let interval = clip_tapered(a, b, from, to, radius, radii);
+            for i in 0..101 {
+                let t = i as f64 / 100.0;
+                let expected = drawing::hit_path(
+                    &[mix(a, b, t)],
+                    from,
+                    to,
+                    radius + radii[0] + t * (radii[1] - radii[0]),
+                );
+                assert_eq!(
+                    expected,
+                    interval.is_some_and(|(lo, hi)| t >= lo && t <= hi)
+                );
+            }
+        }
+        for radii in [[0.2, 4.0], [4.0, 0.2]] {
+            assert!(clip_tapered([0.0; 2], [0.0; 2], [0.0; 2], [0.0; 2], 1.0, radii).is_some());
+            assert!(clip_tapered([0.0; 2], [0.0; 2], [10.0; 2], [10.0; 2], 1.0, radii).is_none());
+        }
+    }
+
     #[test]
     fn capsule_intersections_include_disks_strip_and_stationary_sweeps() {
         for (from, to, radius, expected) in [
@@ -378,7 +553,7 @@ mod tests {
                     piece
                         .points
                         .iter()
-                        .all(|p| (0.2..=0.8).contains(&p.pressure))
+                        .all(|p| p.pressure.is_some_and(|v| (0.2..=0.8).contains(&v)))
                 );
             }
             assert_ne!(pieces[0].id, pieces[1].id);

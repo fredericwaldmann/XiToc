@@ -78,6 +78,11 @@ impl Default for XiTocApp {
 }
 
 impl eframe::App for XiTocApp {
+    #[cfg(target_arch = "wasm32")]
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        crate::web_pressure::inject(ctx, raw);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.show(ui);
         self.persist_preferences(ui.ctx(), frame.storage_mut());
@@ -346,6 +351,7 @@ impl XiTocApp {
                         });
                     } else {
                         opened.editor.canvas.smoothing_strength = self.preferences.drawing.smoothing_strength;
+                        opened.editor.canvas.pressure_style = self.preferences.drawing.pressure;
                         opened.editor.middle_button_pan = self.preferences.middle_button_pan;
                         opened.editor.show(ui, &opened.loaded.document.data);
                     }
