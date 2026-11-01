@@ -47,7 +47,7 @@ was performed. Native Linux compilation, simulated scaling tests and GitHub CI
 cover build compatibility separately; they do not prove hardware latency or
 platform startup. M1 drawings are deliberately not saved/reloaded from PDF.
 
-## M1.3 actual browser captures
+## Archived M1.3 bottom-palette captures (superseded)
 
 Firefox 157 / WebGL2 running the Trunk release build on Linux, November 2026.
 These are app screenshots, not mockups. The browser uses explicit import/export
@@ -64,3 +64,22 @@ fallback, so Explorer contains session PDFs rather than a permissioned disk tree
 Native Linux executable launched successfully; native screenshot capture was
 unavailable in this environment. Windows/macOS and physical pen checks remain
 manual. No comparison screenshot from Apple's application is included.
+
+## M1.3 top toolbar and presets — current design
+
+Actual Firefox 157 / WebGL2 Trunk-release application screenshots, Linux,
+November 2, 2026. These supersede the bottom-toolbar captures above.
+
+- [A4 Page Note, dark](m1.3-presets/page.png)
+- [Whiteboard with Monoline ink and translucent highlighting, light](m1.3-presets/whiteboard.png)
+- [Preset settings, dark](m1.3-presets/settings-dark.png)
+- [New custom preset opens its editor, light](m1.3-presets/new-preset.png)
+- [Reorder/delete/restore controls, dark](m1.3-presets/management-dark.png)
+- [Inline color picker](m1.3-presets/color-picker.png)
+- [480×360 top toolbar](m1.3-presets/small.png)
+- [480×360 scrollable preset popover](m1.3-presets/small-popover.png)
+
+The toolbar remains below tabs in every capture. Only the contextual popover
+overlays content. Browser Explorer shows session imports/exports; native real
+folder behavior remains unchanged. The native Linux executable also launched
+without startup errors; physical stylus and Windows/macOS runtime remain manual.

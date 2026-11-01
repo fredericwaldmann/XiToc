@@ -423,6 +423,7 @@ pub fn fragments(stroke: &Stroke, path: &[[f64; 2]], cuts: &Cuts) -> Vec<Stroke>
             stroke.color,
             stroke.width,
         );
+        piece.pen_type = stroke.pen_type;
         piece.smoothing = Smoothing::PolylineV1;
         piece.pressure_style = stroke.pressure_style;
         visit_piece(path, start, end, |position, t| {

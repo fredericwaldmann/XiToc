@@ -152,12 +152,18 @@ remains future work with constant-width fallback. See PRESSURE_INPUT.md.
 Synthetic tests cover geometry, erasers, history, smoothing and zoom; physical
 hardware has not been tested. M2 PDF serialization remains a separate milestone.
 
-## M1.3 — Freeform-inspired drawing workspace
+## M1.3 — Top drawing toolbar, pen types and presets
 
-Compact floating Hand/Pen/Eraser palette inside both editor surfaces, contextual
-settings sharing existing tab/preferences state, retained Explorer/tabs/menu/Settings
-and header history/View controls. New Document (+) beside tabs addresses #9.
-No drawing-engine, PDF schema, storage or persistence changes. Opacity and creative
-tools remain planned; proposed issue briefs/dependencies: `CREATIVE_TOOLS.md`.
-Acceptance: `UI_DESIGN.md`, palette input-isolation regression, existing cache and
-controller tests, native/WASM builds and actual app visual smoke at narrow/wide sizes.
+Supersedes the previous bottom-floating-palette design. Keep drawing controls in
+a compact top panel immediately under document tabs; preserve Explorer, tabs,
+menus and Settings. Selection remains disabled pending its own object milestone.
+Implement Monoline, Pressure Pen and semi-transparent Highlighter using shared
+input/smoothing/erasers/history and cached vector rendering. No realistic textures.
+
+Persist a bounded local preset library with five defaults, stable IDs, selection,
+create/edit/delete-custom/reorder/restore operations and full style snapshots.
+Migrate preferences 1–4 to 5; Settings and toolbar share one library. Tests cover
+migration/validation/lifecycle, pressure fallback/type behavior, alpha joins/cache,
+partial erasing/history and actual UI interactions. Gates: fmt/Clippy/tests,
+native/WASM/Trunk and narrow/wide visual smoke in both layouts/themes.
+No PDF persistence or note sidecars; M2 must version stroke pen type and opacity.

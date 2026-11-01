@@ -283,8 +283,11 @@ source-verified egui/winit pen-force path; native Linux/macOS tablets currently
 fall back to constant width. No physical pen hardware was tested. Platform details
 and future native integration: [Pressure input](docs/PRESSURE_INPUT.md).
 
-M1.3 drawing workspace: use the bottom-center Hand/Pen/Eraser palette. Click Pen
-or Eraser for contextual settings; header Undo/Redo and View retain navigation.
-The + beside document tabs creates either immutable document type. Ink remains
-memory-only until M2. See [UI specification](docs/UI_DESIGN.md) and
+M1.3 drawing workspace: tools stay in the **top toolbar directly below tabs**.
+Select a pen preset with one click; use Pen settings to edit its name, Monoline /
+Pressure Pen / Highlighter type, color, width, opacity, smoothing and pressure.
+Use + to create a custom copy, or manage ordering/deletion/defaults in the popover.
+Settings → Drawing shares the same locally persisted preset library. Hand,
+both erasers, history and zoom remain available. Selection is planned/disabled.
+Ink remains memory-only until M2. See [UI specification](docs/UI_DESIGN.md) and
 [future creative tool dependencies](docs/CREATIVE_TOOLS.md).

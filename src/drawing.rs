@@ -99,6 +99,8 @@ pub enum Smoothing {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Stroke {
     #[serde(default)]
+    pub pen_type: crate::pen::PenType,
+    #[serde(default)]
     pub pressure_style: PressureStyle,
     pub id: Uuid,
     pub document_id: Uuid,
@@ -113,6 +115,7 @@ pub struct Stroke {
 impl Stroke {
     pub fn new(document_id: Uuid, surface: Surface, color: [u8; 4], width: f64) -> Self {
         Self {
+            pen_type: crate::pen::PenType::Monoline,
             pressure_style: PressureStyle::default(),
             id: Uuid::new_v4(),
             document_id,
@@ -357,6 +360,7 @@ impl Drawing {
                 && pieces.iter().any(|s| {
                     !self.valid_stroke(s)
                         || s.surface != source.surface
+                        || s.pen_type != source.pen_type
                         || s.color != source.color
                         || s.width != source.width
                         || s.pressure_style != source.pressure_style

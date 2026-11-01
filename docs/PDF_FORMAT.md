@@ -133,3 +133,14 @@ minimum response. Partial fragments keep explicit interpolated pressure and the
 same style. M2 must version and serialize all these fields, emit matching visible
 variable-width vector graphics, and verify edit/viewer round trips. Schema 1 and
 the blank PDF codec remain unchanged; this feature does not save ink to PDFs.
+
+## M1.3 pen types and preset snapshots (M2 preparation)
+
+In-memory strokes now capture semantic PenType (Monoline/Pressure/Highlighter),
+RGBA alpha, width, smoothing and effective PressureStyle. Partial erasing retains
+type/style. Preset identity/configuration is a separate application preference,
+never needed to interpret existing ink. Old semantic stroke JSON without a type
+remains Monoline-tagged while its captured pressure behavior remains unchanged.
+Unknown type tags fail explicitly. M2 must version the payload, preserve these
+values and match visible PDF transparency/flat translucent nibs and rounded opaque
+geometry. The blank PDF codec/schema still cannot store ink and remains unchanged.
