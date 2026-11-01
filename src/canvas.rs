@@ -1,7 +1,7 @@
 //! Shared pointer controller and rounded vector renderer for every surface.
 use crate::{
     document::DocumentData,
-    drawing::{self, Drawing, Stroke, Surface, Transform},
+    drawing::{self, Drawing, EraserMode, Stroke, Surface, Transform},
 };
 use egui::{Color32, Event, PointerButton, Pos2, Rect, Stroke as Line};
 use std::{
@@ -21,6 +21,12 @@ struct Erasing {
     surface: Surface,
     previous: [f64; 2],
     ids: HashSet<Uuid>,
+    mode: EraserMode,
+    partials: HashMap<Uuid, PartialPreview>,
+}
+struct PartialPreview {
+    cut: crate::partial_erase::PartialCut,
+    meshes: HashMap<usize, (Transform, f32, Arc<egui::Mesh>)>,
 }
 enum Gesture {
     Pen(Stroke),
@@ -50,13 +56,7 @@ impl Cached {
             bounds: (min, max),
         }
     }
-    fn paint(
-        &mut self,
-        ui: &egui::Ui,
-        painter: &egui::Painter,
-        transform: Transform,
-        stroke: &Stroke,
-    ) {
+    fn prepare_meshes(&mut self, ui: &egui::Ui, transform: Transform, stroke: &Stroke) {
         let ppp = ui.ctx().pixels_per_point();
         if self.view != Some((transform, ppp)) {
             self.meshes.clear();
@@ -87,8 +87,75 @@ impl Cached {
             }
             self.meshes.push(Arc::new(mesh));
         }
+    }
+    fn paint(
+        &mut self,
+        ui: &egui::Ui,
+        painter: &egui::Painter,
+        transform: Transform,
+        stroke: &Stroke,
+    ) {
+        self.prepare_meshes(ui, transform, stroke);
         for mesh in &self.meshes {
             painter.add(egui::Shape::Mesh(mesh.clone()));
+        }
+    }
+    fn paint_partial(
+        &mut self,
+        ui: &egui::Ui,
+        painter: &egui::Painter,
+        transform: Transform,
+        stroke: &Stroke,
+        partial: &mut PartialPreview,
+    ) {
+        use crate::partial_erase as cut;
+        if partial.cut.cuts.covers(cut::end(&self.path)) {
+            return;
+        }
+        self.prepare_meshes(ui, transform, stroke);
+        let dpi = ui.ctx().pixels_per_point();
+        for (index, original) in self.meshes.iter().enumerate() {
+            let start = (index * MESH_SEGMENTS) as f64;
+            let end = ((index + 1) * MESH_SEGMENTS).min(self.path.len().saturating_sub(1)) as f64;
+            if !partial.cut.cuts.touches(start, end) {
+                painter.add(egui::Shape::Mesh(original.clone()));
+                continue;
+            }
+            // Cache empty chunks too: repeated movement/idle frames must not
+            // regenerate geometry that has already been completely erased.
+            if partial
+                .meshes
+                .get(&index)
+                .is_none_or(|cached| cached.0 != transform || cached.1 != dpi)
+            {
+                let mut shapes = Vec::new();
+                partial.cut.cuts.visit_visible(start, end, |lo, hi| {
+                    let mut points = Vec::new();
+                    cut::visit_piece(&self.path, lo, hi, |p, _| points.push(p));
+                    let skip_cap =
+                        index > 0 && lo == start && partial.cut.cuts.connected_before(start);
+                    shapes.extend(rounded_shapes(&points, transform, stroke, skip_cap));
+                });
+                let mut mesh = egui::Mesh::default();
+                for primitive in ui.ctx().tessellate(
+                    shapes
+                        .into_iter()
+                        .map(|s| egui::epaint::ClippedShape::new(Rect::EVERYTHING, s))
+                        .collect(),
+                    dpi,
+                ) {
+                    if let egui::epaint::Primitive::Mesh(part) = primitive.primitive {
+                        mesh.append(part);
+                    }
+                }
+                partial
+                    .meshes
+                    .insert(index, (transform, dpi, Arc::new(mesh)));
+            }
+            let mesh = &partial.meshes[&index].2;
+            if !mesh.vertices.is_empty() {
+                painter.add(egui::Shape::Mesh(mesh.clone()));
+            }
         }
     }
 }
@@ -103,6 +170,7 @@ pub struct Canvas {
     /// Eraser radius in logical screen points, shown at its actual hit-test size.
     pub eraser_radius: f64,
     pub smoothing_strength: u8,
+    pub eraser_mode: EraserMode,
     preview: crate::smoothing::Preview,
     gesture: Option<Gesture>,
     gesture_transform: Option<Transform>,
@@ -120,6 +188,7 @@ impl Canvas {
             width: 2.5,
             eraser_radius: 14.0,
             smoothing_strength: 50,
+            eraser_mode: EraserMode::Stroke,
             preview: Default::default(),
             gesture: None,
             gesture_transform: None,
@@ -148,7 +217,25 @@ impl Canvas {
                     self.gesture_transform = None;
                     return;
                 }
-                self.drawing.erase(&erase.ids);
+                if erase.mode == EraserMode::Stroke {
+                    self.drawing.erase(&erase.ids);
+                } else {
+                    let replacements = self
+                        .drawing
+                        .strokes()
+                        .iter()
+                        .filter(|s| erase.ids.contains(&s.id))
+                        .map(|stroke| {
+                            let partial = &erase.partials[&stroke.id];
+                            let path = &self.cache[&stroke.id].path;
+                            (
+                                stroke.id,
+                                crate::partial_erase::fragments(stroke, path, &partial.cut.cuts),
+                            )
+                        })
+                        .collect();
+                    self.drawing.replace_partial(replacements);
+                }
             }
             None => return,
         }
@@ -262,6 +349,8 @@ impl Canvas {
                                 surface,
                                 previous: point,
                                 ids: HashSet::new(),
+                                mode: self.eraser_mode,
+                                partials: HashMap::new(),
                             }));
                             self.sample(surface, point, transform.scale);
                         }
@@ -373,20 +462,52 @@ impl Canvas {
                 self.eraser_index
                     .query(surface, erase.previous, point, radius, |index| {
                         let stroke = &self.drawing.strokes()[index];
-                        if erase.ids.contains(&stroke.id) {
+                        if erase.mode == EraserMode::Stroke && erase.ids.contains(&stroke.id) {
                             return;
                         }
                         let cached = self
                             .cache
                             .entry(stroke.id)
                             .or_insert_with(|| Cached::new(stroke));
-                        if drawing::hit_path(
-                            &cached.path,
-                            erase.previous,
-                            point,
-                            radius + stroke.width * 0.5,
-                        ) {
-                            erase.ids.insert(stroke.id);
+                        if erase.mode == EraserMode::Stroke {
+                            if drawing::hit_path(
+                                &cached.path,
+                                erase.previous,
+                                point,
+                                radius + stroke.width * 0.5,
+                            ) {
+                                erase.ids.insert(stroke.id);
+                            }
+                        } else {
+                            let partial =
+                                erase
+                                    .partials
+                                    .entry(stroke.id)
+                                    .or_insert_with(|| PartialPreview {
+                                        cut: crate::partial_erase::PartialCut::new(
+                                            &cached.path,
+                                            stroke.width,
+                                            surface,
+                                        ),
+                                        meshes: HashMap::new(),
+                                    });
+                            let meshes = &mut partial.meshes;
+                            if partial.cut.sweep(
+                                &cached.path,
+                                surface,
+                                erase.previous,
+                                point,
+                                radius,
+                                |lo, hi| {
+                                    let first = (lo as usize / MESH_SEGMENTS).saturating_sub(1);
+                                    let last = hi as usize / MESH_SEGMENTS + 1;
+                                    for chunk in first..=last {
+                                        meshes.remove(&chunk);
+                                    }
+                                },
+                            ) {
+                                erase.ids.insert(stroke.id);
+                            }
                         }
                     });
                 erase.previous = point;
@@ -428,16 +549,22 @@ impl Canvas {
         let painter = ui
             .painter()
             .with_clip_rect(bounds.intersect(ui.clip_rect()));
-        let erased = match &self.gesture {
-            Some(Gesture::Eraser(e)) => Some(&e.ids),
+        let mut erasing = match &mut self.gesture {
+            Some(Gesture::Eraser(e)) => Some(e),
             _ => None,
         };
         for stroke in self
             .drawing
             .strokes()
             .iter()
-            .filter(|s| s.surface == surface && !erased.is_some_and(|ids| ids.contains(&s.id)))
+            .filter(|s| s.surface == surface)
         {
+            if erasing
+                .as_ref()
+                .is_some_and(|e| e.mode == EraserMode::Stroke && e.ids.contains(&stroke.id))
+            {
+                continue;
+            }
             let cached = self
                 .cache
                 .entry(stroke.id)
@@ -452,7 +579,14 @@ impl Canvas {
             if !screen_bounds.intersects(painter.clip_rect()) {
                 continue;
             }
-            cached.paint(ui, &painter, transform, stroke);
+            if let Some(partial) = erasing
+                .as_mut()
+                .and_then(|e| e.partials.get_mut(&stroke.id))
+            {
+                cached.paint_partial(ui, &painter, transform, stroke, partial);
+            } else {
+                cached.paint(ui, &painter, transform, stroke);
+            }
         }
         if let Some(Gesture::Pen(stroke)) = &self.gesture
             && stroke.surface == surface
@@ -570,6 +704,8 @@ mod tests {
                 surface: Surface::Canvas,
                 previous: [-100.0, -100.0],
                 ids: HashSet::new(),
+                mode: EraserMode::Stroke,
+                partials: HashMap::new(),
             }));
             let start = Instant::now();
             for i in 0..200 {
@@ -664,6 +800,8 @@ mod tests {
                         surface,
                         previous: sweep[0],
                         ids: HashSet::new(),
+                        mode: EraserMode::Stroke,
+                        partials: HashMap::new(),
                     }));
                     for point in &sweep[1..] {
                         canvas.sample(surface, *point, scale);
@@ -702,6 +840,8 @@ mod tests {
                         surface,
                         previous: [0.0, 0.0],
                         ids: HashSet::new(),
+                        mode: EraserMode::Stroke,
+                        partials: HashMap::new(),
                     }));
                     canvas.sample(surface, [0.0, 0.0], scale);
                     let Some(Gesture::Eraser(erase)) = &canvas.gesture else {
@@ -758,6 +898,230 @@ mod tests {
         );
         output.textures_delta.clear();
     }
+    #[test]
+    fn partial_gestures_replace_multiple_smoothed_strokes_once_and_restore_exact_history() {
+        for (kind, surface) in [
+            (DocumentKind::Page, Surface::Page(0)),
+            (DocumentKind::Whiteboard, Surface::Canvas),
+        ] {
+            for scale in [0.25, 1.0, 4.0] {
+                let data = DocumentData::blank(kind);
+                let mut canvas = Canvas::new(&data);
+                let offset = if kind == DocumentKind::Whiteboard {
+                    [1e12, -1e12]
+                } else {
+                    [0.0; 2]
+                };
+                let world = |x, y| [offset[0] + x, offset[1] + y];
+                for (i, width) in [0.25, 2.0, 24.0].into_iter().enumerate() {
+                    let y = 20.0 + i as f64 * 20.0;
+                    let mut stroke =
+                        Stroke::new(data.id(), surface, [20 + i as u8, 60, 180, 255], width);
+                    stroke.smoothing = drawing::Smoothing::AdaptiveV1 { strength: 50 };
+                    for (x, dy) in [
+                        (10.0, 0.0),
+                        (40.0, 0.2),
+                        (70.0, -0.2),
+                        (100.0, 0.2),
+                        (130.0, 0.0),
+                    ] {
+                        stroke.push(world(x, y + dy));
+                    }
+                    assert!(canvas.drawing.add(stroke));
+                }
+                let originals = canvas.drawing.strokes().to_vec();
+                let revision = canvas.drawing.revision();
+                let transform = Transform {
+                    origin: [20.0; 2],
+                    center: offset,
+                    scale,
+                };
+                let screen = |p| {
+                    let s = transform.to_screen(p);
+                    Pos2::new(s[0] as f32, s[1] as f32)
+                };
+                let ctx = egui::Context::default();
+                frame_transform(&ctx, &mut canvas, surface, vec![], transform);
+                canvas.select(Tool::Eraser);
+                canvas.eraser_mode = EraserMode::Partial;
+                canvas.eraser_radius = 4.0;
+                let a = screen(world(70.0, 5.0));
+                let b = screen(world(70.0, 75.0));
+                frame_transform(
+                    &ctx,
+                    &mut canvas,
+                    surface,
+                    vec![button(a, true), Event::PointerMoved(b)],
+                    transform,
+                );
+                assert_eq!(canvas.drawing.revision(), revision);
+                assert_eq!(canvas.drawing.strokes(), originals);
+                let Some(Gesture::Eraser(erase)) = &canvas.gesture else {
+                    panic!()
+                };
+                assert_eq!(erase.ids.len(), 3);
+                assert!(erase.partials.values().all(|p| p.cut.cuts.0.len() == 1));
+                frame_transform(
+                    &ctx,
+                    &mut canvas,
+                    surface,
+                    vec![button(b, false)],
+                    transform,
+                );
+                assert_eq!(canvas.drawing.revision(), revision + 1);
+                let pieces = canvas.drawing.strokes().to_vec();
+                assert_eq!(pieces.len(), 6);
+                for (i, source) in originals.iter().enumerate() {
+                    let (left, right) = (&pieces[2 * i], &pieces[2 * i + 1]);
+                    assert_eq!(left.width, source.width);
+                    assert_eq!(right.color, source.color);
+                    assert_eq!(left.points.first().unwrap().position, source.path()[0]);
+                    assert_eq!(
+                        right.points.last().unwrap().position,
+                        *source.path().last().unwrap()
+                    );
+                    let radius = 4.0 / scale + source.width * 0.5;
+                    assert!(
+                        (left.points.last().unwrap().position[0] - (offset[0] + 70.0 - radius))
+                            .abs()
+                            < 0.001
+                    );
+                    assert!(
+                        (right.points[0].position[0] - (offset[0] + 70.0 + radius)).abs() < 0.001
+                    );
+                    assert_ne!(left.id, source.id);
+                    assert_ne!(right.id, source.id);
+                }
+                canvas.undo();
+                assert_eq!(canvas.drawing.strokes(), originals);
+                assert!(
+                    canvas
+                        .drawing
+                        .strokes()
+                        .iter()
+                        .zip(&originals)
+                        .all(|(a, b)| Arc::ptr_eq(a, b))
+                );
+                frame_transform(&ctx, &mut canvas, surface, vec![], transform);
+                for source in &originals {
+                    assert_eq!(canvas.cache[&source.id].path, source.path());
+                }
+                canvas.redo();
+                assert_eq!(canvas.drawing.strokes(), pieces);
+                // Whole-stroke erasing remains functional on generated polylines.
+                canvas.eraser_mode = EraserMode::Stroke;
+                let p = screen(world(20.0, 20.0));
+                frame_transform(
+                    &ctx,
+                    &mut canvas,
+                    surface,
+                    vec![button(p, true), button(p, false)],
+                    transform,
+                );
+                assert!(canvas.drawing.strokes().len() < pieces.len());
+                canvas.undo();
+                assert_eq!(canvas.drawing.strokes(), pieces);
+                canvas.undo();
+                assert_eq!(canvas.drawing.strokes(), originals);
+                let mut dot = Stroke::new(data.id(), surface, [0, 0, 0, 255], 2.0);
+                dot.push(world(10.0, 10.0));
+                canvas.drawing.add(dot);
+                assert!(!canvas.drawing.can_redo());
+            }
+        }
+    }
+
+    #[test]
+    fn partial_preview_reuses_untouched_meshes_and_repeated_samples_do_not_rebuild() {
+        let ctx = egui::Context::default();
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        let mut canvas = Canvas::new(&data);
+        let mut stroke = Stroke::new(data.id(), Surface::Canvas, [0, 0, 0, 255], 2.0);
+        stroke.smoothing = drawing::Smoothing::PolylineV1;
+        for i in 0..1000 {
+            stroke.push([30.0 + i as f64 * 0.5, 100.0]);
+        }
+        let id = stroke.id;
+        assert!(canvas.drawing.add(stroke));
+        frame(&ctx, &mut canvas, Surface::Canvas, vec![]);
+        let original_mesh = canvas.cache[&id].meshes[0].clone();
+        canvas.select(Tool::Eraser);
+        canvas.eraser_mode = EraserMode::Partial;
+        canvas.eraser_radius = 4.0;
+        let p = Pos2::new(300.0, 100.0);
+        frame(&ctx, &mut canvas, Surface::Canvas, vec![button(p, true)]);
+        assert!(Arc::ptr_eq(&original_mesh, &canvas.cache[&id].meshes[0]));
+        let Some(Gesture::Eraser(e)) = &canvas.gesture else {
+            panic!()
+        };
+        let meshes: Vec<_> = e.partials[&id]
+            .meshes
+            .iter()
+            .map(|(i, entry)| (*i, entry.2.clone()))
+            .collect();
+        assert!(!meshes.is_empty());
+        frame(
+            &ctx,
+            &mut canvas,
+            Surface::Canvas,
+            vec![Event::PointerMoved(p)],
+        );
+        let Some(Gesture::Eraser(e)) = &canvas.gesture else {
+            panic!()
+        };
+        for (i, mesh) in meshes {
+            assert!(Arc::ptr_eq(&mesh, &e.partials[&id].meshes[&i].2));
+        }
+        frame(&ctx, &mut canvas, Surface::Canvas, vec![button(p, false)]);
+        assert_eq!(canvas.drawing.strokes().len(), 2);
+    }
+
+    #[test]
+    #[ignore = "manual release-mode large-document partial-erasing benchmark"]
+    fn partial_document_performance() {
+        for count in [100, 10_000] {
+            let data = DocumentData::blank(DocumentKind::Whiteboard);
+            let mut canvas = Canvas::new(&data);
+            for i in 0..count {
+                let mut stroke = Stroke::new(data.id(), Surface::Canvas, [0, 0, 0, 255], 2.5);
+                for j in 0..100 {
+                    stroke.push([
+                        (i % 100) as f64 * 200.0 + j as f64,
+                        (i / 100) as f64 * 200.0,
+                    ]);
+                }
+                assert!(canvas.drawing.add(stroke));
+            }
+            for stroke in canvas.drawing.strokes() {
+                canvas.cache.insert(stroke.id, Cached::new(stroke));
+            }
+            let start = std::time::Instant::now();
+            canvas
+                .eraser_index
+                .sync(canvas.drawing.revision(), canvas.drawing.strokes());
+            eprintln!("{count} strokes, document index: {:?}", start.elapsed());
+            canvas.eraser_radius = 4.0;
+            canvas.gesture = Some(Gesture::Eraser(Erasing {
+                surface: Surface::Canvas,
+                previous: [20.0, 0.0],
+                ids: HashSet::new(),
+                mode: EraserMode::Partial,
+                partials: HashMap::new(),
+            }));
+            let start = std::time::Instant::now();
+            for i in 0..2000 {
+                canvas.sample(Surface::Canvas, [20.0 + i as f64 * 0.01, 0.0], 1.0);
+            }
+            eprintln!(
+                "{count} strokes, 2000 partial samples: {:?}",
+                start.elapsed()
+            );
+            let start = std::time::Instant::now();
+            canvas.finish();
+            eprintln!("{count} strokes, commit: {:?}", start.elapsed());
+        }
+    }
+
     #[test]
     fn smoothing_is_captured_on_press_matches_preview_and_survives_history() {
         for (kind, surface) in [

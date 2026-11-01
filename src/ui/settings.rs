@@ -68,7 +68,15 @@ impl SettingsDialog {
                                     .text("Strength"));
                             });
                             ui.weak("0% Off · 25% Light · 50% Medium · 75% Strong · 100% Maximum");
-                            ui.weak("Partial-erasing settings will arrive with that feature.");
+                            ui.add_space(style::GAP);
+                            ui.strong("Eraser mode");
+                            egui::ComboBox::from_id_salt("preferred-eraser-mode")
+                                .selected_text(prefs.drawing.eraser_mode.label())
+                                .show_ui(ui, |ui| {
+                                    for mode in [crate::drawing::EraserMode::Stroke, crate::drawing::EraserMode::Partial] {
+                                        ui.selectable_value(&mut prefs.drawing.eraser_mode, mode, mode.label());
+                                    }
+                                });
                         }
                         Section::Input => {
                             ui.strong("Navigation");

@@ -3,6 +3,9 @@
 use crate::drawing::{Stroke, Surface};
 use std::sync::Arc;
 
+/// Small immutable path blocks bound setup memory and local clipping work.
+pub const SEGMENTS_PER_ENTRY: usize = 16;
+
 #[derive(Clone, Copy)]
 struct Bounds {
     min: [f64; 2],
@@ -106,6 +109,40 @@ impl EraserIndex {
             Self::build(&mut self.nodes, &mut self.entries, 0);
         }
         self.revision = Some(revision);
+    }
+    /// Temporary immutable segment index for a touched rendered centerline.
+    pub fn for_path(path: &[[f64; 2]], width: f64, surface: Surface) -> Self {
+        let mut result = Self::default();
+        if path.is_empty() {
+            return result;
+        }
+        let count = path.len().saturating_sub(1).max(1);
+        result.entries.reserve(count.div_ceil(SEGMENTS_PER_ENTRY));
+        for index in (0..count).step_by(SEGMENTS_PER_ENTRY) {
+            let mut bounds = Bounds {
+                min: [f64::INFINITY; 2],
+                max: [f64::NEG_INFINITY; 2],
+            };
+            for point in &path[index..=(index + SEGMENTS_PER_ENTRY).min(path.len() - 1)] {
+                for (i, value) in point.iter().enumerate() {
+                    bounds.min[i] = bounds.min[i].min(*value);
+                    bounds.max[i] = bounds.max[i].max(*value);
+                }
+            }
+            for i in 0..2 {
+                bounds.min[i] = (bounds.min[i] - width * 0.5).next_down();
+                bounds.max[i] = (bounds.max[i] + width * 0.5).next_up();
+            }
+            result.entries.push(Entry {
+                index,
+                surface,
+                bounds,
+            });
+        }
+        if !result.entries.is_empty() {
+            Self::build(&mut result.nodes, &mut result.entries, 0);
+        }
+        result
     }
     fn build(nodes: &mut Vec<Node>, entries: &mut [Entry], start: usize) -> usize {
         let bounds = entries

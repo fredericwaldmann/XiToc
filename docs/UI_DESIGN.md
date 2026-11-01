@@ -143,8 +143,7 @@ panning. Hand/Space navigation remains available. Changes apply automatically;
 preferences persist locally with a short write debounce. Appearance menu and
 Explorer button edit the same preferences. Persistence warnings appear in Settings.
 
-Partial-erasing and pressure controls remain explanatory text until their
-behaviors exist. Do not expose working-looking controls for
+Pressure controls remain explanatory text until their behavior exists. Do not expose working-looking controls for
 them. Preferences never modify existing stroke objects or PDF contents.
 
 ### Stroke Smoothing (#12)
@@ -156,3 +155,21 @@ Show the scale: 0% Off, 25% Light, 50% Medium, 75% Strong, 100% Maximum. Default
 50% balances jitter reduction and detail. State that it applies to new strokes
 in every open tab. Persist it with other preferences. Existing ink is never
 reshaped by this control. Retain the shared spacing, typography and colors.
+
+### Eraser modes (#13)
+
+Keep the eraser in its existing toolbar position between Pen and Hand. A compact
+menu button shows the full selected mode, Stroke Eraser or Partial Eraser, and
+uses the normal selection treatment when the eraser tool is active. Its dropdown
+selects/activates either mode and reuses the radius DragValue (4–48 logical screen
+points). Keep inside clicks open for size adjustments; mode choice closes that
+menu. Preserve nested Tools/document menus at narrow widths. No toolbar redesign
+or new palette/dimension tokens are needed.
+
+The selected mode is an application preference shared by tabs and exposed in
+Settings → Drawing → Eraser mode. Radius remains an individual tab's tool setting;
+Settings/Ink keep their existing defaults/controls. The two-ring eraser cursor
+continues to show the screen-space eraser radius in both modes, with ink thickness
+accounted for in geometric tests. Each continuous sweep is one undo operation.
+Partial erasing displays the surviving vectors immediately and preserves their
+shape on release. The app still explains that ink saving arrives in M2.

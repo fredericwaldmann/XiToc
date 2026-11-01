@@ -124,7 +124,11 @@ component boundaries and interaction conventions. UI changes must follow it.
 
 Select **Pen** and drag with the mouse on either document type. Use **Ink** for
 opaque pen color and width (document points), or eraser radius (screen points).
-Select **Eraser** to remove whole strokes; its ring shows the actual hit area.
+Use the **Stroke Eraser / Partial Eraser** dropdown between Pen and Hand to
+activate either mode and adjust radius. Stroke Eraser deletes touched strokes;
+Partial Eraser removes intersecting portions and retains editable vector pieces.
+Its ring shows the actual eraser radius; detection includes pen thickness.
+The selected mode persists in application Settings. One sweep is one undo action.
 Each pen stroke or eraser drag is one undo operation. **Ctrl/Cmd+Z** undoes and
 **Ctrl/Cmd+Shift+Z** redoes in the active tab. **Hand** or **Space-drag** pans;
 Whiteboards also allow middle-drag. View offers +/− and Reset; **Ctrl/Cmd-wheel**
@@ -165,7 +169,8 @@ storage restrictions or native storage failures can prevent persistence.
 **Stroke Smoothing** in Settings → Drawing controls new strokes in all open tabs:
 0% Off, 25% Light, 50% Medium (default), 75% Strong and 100% Maximum. It reduces
 small irregularities while preserving sharp turns and endpoints. Existing ink
-keeps its captured strength. Partial erasing and pressure settings remain future work.
+keeps its captured strength. **Eraser mode** also persists in Drawing settings;
+pressure settings remain future work.
 
 ## Checks
 

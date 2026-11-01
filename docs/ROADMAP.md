@@ -110,6 +110,18 @@
   settings migration/persistence, actual controller/history, native/WASM/Trunk.
 - No pressure input, new tools, partial erasing or PDF ink persistence.
 
+## M1.1 — Stroke and partial erasers (#13)
+- Compact toolbar eraser-mode dropdown and shared radius controls/cursor;
+  persist Stroke/Partial selection with schema-1/2 preference migration.
+- Analytic swept capsule clipping of the rendered centerline, including ink
+  width; retain explicit editable polyline fragments without re-smoothing.
+- Reuse document BVH and a temporary path-block index; merge cuts, reuse stable
+  preview chunks and commit one validated replacement command per gesture.
+- Gates: endpoints/middle/dots/thickness/multiple/smoothed strokes, exact history
+  and stacking, branch truncation, pan/zoom/far origin/both layouts, vectors/JSON,
+  menu/settings persistence, index work bounds and release benchmarks.
+- No new drawing tools, pressure input, PDF serialization or sidecars.
+
 ## M2 — One-file PDF roundtrip (hard gate)
 - Generate valid visible PDF with vector ink; embed JSON payload; import it back into same document model.
 - Independent PDF parsing validation; zero sidecars, even across reopen and autosave.

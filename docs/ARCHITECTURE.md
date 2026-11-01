@@ -221,3 +221,50 @@ changing it never invalidates existing geometry. M2 must version the PDF payload
 separately and preserve raw points plus processing metadata (or exact generated
 vectors) alongside matching visible PDF graphics. Unknown future smoothing
 algorithms must not be silently reinterpreted. No note sidecars are introduced.
+
+## M1.1 vector partial erasing (#13)
+
+`EraserMode` selects Stroke (default) or Partial. The toolbar passes the shared
+application preference into the current canvas; changing it finalizes the old
+gesture. Each eraser gesture captures its mode. Preferences schema 3 adds
+`drawing.eraser_mode`, migrates schema 1/2 to Stroke and retains smoothing/style
+settings. Existing radius defaults and per-tab Ink controls are reused.
+
+`partial_erase.rs` analytically clips each candidate rendered centerline segment
+against the swept eraser capsule: two disks and their connecting oriented strip.
+The hit radius is screen radius / view scale + ink width / 2. Calculations use
+relative f64 document coordinates. The same `Stroke::path()`/cached geometry is
+used for rendering, whole-stroke detection and partial clipping. Scalar intervals
+(segment index + local parameter) represent erased portions. Adjacent/overlapping
+cuts merge; zero-length tangencies do not split vectors. One continuous retained
+range yields one fragment, not one object per input point or pointer event.
+
+The document BVH from #14 stays unchanged for whole-stroke queries. Partial
+candidates lazily receive a temporary immutable BVH over blocks of 16 rendered
+segments, reusing the existing bounds hierarchy/segment-clipping broad phase.
+Queries visit local blocks; merged cuts avoid redoing already erased geometry.
+No document mutation/index rebuild or fragment UUID creation occurs on movement.
+Preview caches only changed 128-segment mesh chunks and reuses untouched original
+meshes; even empty erased chunks are cached. Temporary indexes/preview meshes are
+released with the gesture. Extremely dense overlapping content still requires
+processing its genuine local candidates. Initial path-block indexing is linear
+in rendered points plus hierarchy setup; commits and first fragment rendering
+scale with affected geometry, not just the pointer sample count.
+
+On release, `Drawing::replace_partial` validates all replacements and commits one
+Replace command. It stores only original/fragment Arc objects with their old/new
+indices. Apply/undo use linear compaction/backwards merging and preserve stacking
+order; invalid replacements leave data/history untouched. Each surviving piece
+gets a new UUID at commit, retained across redo. Untouched IDs remain unchanged;
+undo restores the original IDs and raw smoothing data. New IDs also ensure that
+old/new geometry cannot collide in render caches keyed by stroke identity.
+
+Survivors use `Smoothing::PolylineV1`: their points are the exact retained rendered
+polyline vertices plus analytic cut endpoints. They are not smoothed a second
+time. Color, width, document/surface identity and vector editability are retained.
+Constant mouse pressure needs no pressure-map allocations; nonuniform pressure is
+interpolated along normalized raw/rendered arc length and at cut endpoints. This
+preserves pressure-ready vector data but does not introduce pressure-sensitive
+rendering or device input. M2 must version/serialize these explicit vectors and
+processing tags in the same PDF as their visible graphics. The blank schema,
+canonical PDF storage and unsaved-ink guards remain unchanged.
