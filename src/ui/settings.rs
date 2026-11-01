@@ -51,12 +51,14 @@ impl SettingsDialog {
                             });
                         }
                         Section::Drawing => {
-                            ui.strong("Default ink tools");
-                            ui.label("Used for newly created or opened tabs.");
-                            super::drawing_controls::show(ui, &mut prefs.drawing.color,
-                                &mut prefs.drawing.width, &mut prefs.drawing.eraser_radius);
-                            ui.add_space(style::GAP);
-                            super::drawing_controls::response(ui, &mut prefs.drawing);
+                            egui::ComboBox::from_id_salt("settings-preset").selected_text(prefs.drawing.presets.active().label()).show_ui(ui, |ui| {
+                                for preset in &prefs.drawing.presets.items {
+                                    ui.selectable_value(&mut prefs.drawing.presets.selected, preset.id, preset.label());
+                                }
+                            });
+                            super::drawing_controls::preset(ui, &mut prefs.drawing.presets);
+                            ui.separator();
+                            super::drawing_controls::eraser_radius(ui, &mut prefs.drawing.eraser_radius);
                             ui.strong("Eraser mode");
                             egui::ComboBox::from_id_salt("preferred-eraser-mode")
                                 .selected_text(prefs.drawing.eraser_mode.label())

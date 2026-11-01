@@ -308,12 +308,36 @@ Preventing default on pen-down suppresses duplicate compatibility mouse input;
 ordinary mouse/finger events remain on eframe's path.
 Browser CSS positions divide by egui's UI zoom, matching eframe's coordinates.
 
-## M1.3 palette and future objects
+## M1.3 top toolbar, pen types and preset library
 
-The foreground palette registers hit regions before the shared editor processes
-input. Popovers directly mutate existing per-tab color/width/radius and persisted
-DrawingPreferences smoothing/pressure/eraser mode. Shared drawing widgets serve
-Settings and popovers. No duplicate settings store, per-frame IO or forced repaint.
-The engine/model/PDF codec remain unchanged. See `CREATIVE_TOOLS.md` for proposed
-object/transform/order contracts that must be decided before M2 persistence, and
-separate future selection, shapes, text, images and connectors issue briefs.
+This supersedes the earlier bottom-palette UI slice. The 40-point toolbar remains
+directly below tabs. `pen.rs` contains UI-independent PenType, PenStyle, PenPreset
+and Presets with stable UUIDs, bounded validation and library lifecycle operations.
+Only Monoline, Pressure and Highlighter are implemented. `Canvas::apply_pen`
+projects the selected style into transient controller fields; strokes capture
+pen type, RGBA opacity, width, smoothing and effective pressure at pointer-down.
+Partial fragments retain type/style and exact undo/redo snapshots.
+
+Preferences schema 5 replaces independent live ink defaults with a single preset
+library (selected ID and ordered entries), retaining eraser defaults/mode. Versions
+1–4 migrate through a private decoder-only legacy structure; original style is
+preserved in a stable-ID Migrated pen. No parallel legacy settings state survives.
+Settings and top-toolbar popovers share the same preset widgets/state. Registry
+validation rejects duplicates, missing defaults/selection, unsupported pen types,
+out-of-range/nonfinite values and oversized names/libraries. Local preferences
+are bounded to 64 KiB; note content is never included. Unsupported preferences are
+preserved by the existing app guard until an explicit user change.
+
+Opaque ink keeps the existing rounded renderer. Translucent strokes use joined,
+anti-aliased vector ribbon strips to avoid overpainting every segment/cap. Adjacent
+cached chunks include neighbor samples for matching seam normals, preserving the
+incremental mesh architecture. Width response comes from the same PressureStyle
+and hit-testing pipeline; erasers conservatively use existing rounded envelopes
+around flat-nib endpoints. Genuine self-crossings and distinct strokes composite
+normally. Cached meshes are reused on idle frames. No offscreen full-canvas render
+or per-frame stroke reconstruction is introduced.
+
+The blank PDF codec/schema and save lifecycle are unchanged; ink remains in
+memory until M2. M2 must serialize semantic pen types and style snapshots together
+with matching visible transparency/pressure geometry. No preset lookup may be
+required to reopen ink. See `CREATIVE_TOOLS.md` for remaining object dependencies.

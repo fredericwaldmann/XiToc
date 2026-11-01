@@ -448,7 +448,7 @@ or repository fixtures. Automated controller tests cover both document types,
 whole/partial erasure/history, secondary-contact isolation and cancellation.
 Native Windows/macOS runtime and physical pen testing remain outstanding.
 
-## M1.3 floating drawing workspace
+## Archived M1.3 floating drawing workspace (superseded by top toolbar below)
 
 Automated regression exercises the actual floating palette and editor together
 in Page/Whiteboard layouts: Pen options appear; Eraser changes the shared
@@ -486,3 +486,60 @@ Hand/Space pan, Ctrl/Cmd-wheel/pinch zoom, both erasers and undo/redo. Test Sett
 changes against the same smoothing/pressure/mode controls. Ink remains memory-only;
 discard only scratch drawings. Proposed future issues/dependencies are recorded
 in `CREATIVE_TOOLS.md`; none of their tools are exposed as working controls.
+
+## M1.3 top toolbar, pen types and presets — current acceptance
+
+This supersedes the bottom-floating-toolbar interaction specification. Tools are
+in the fixed 40-point panel directly below tabs on both document types.
+
+Automated coverage:
+- Preset create/edit/reorder/delete-custom/restore, stable selection/IDs, 32-entry
+  limit, name/style/range/unknown-type validation and semantic JSON round trips.
+- Preferences 1–4 migrate to schema 5, retaining color/width/smoothing/pressure
+  and eraser values; migration produces stable identity. Restart round trips
+  retain library order and selection. Invalid/future preferences remain guarded.
+- Actual UI clicks create/reorder/delete/restore presets. Toolbar clicks select
+  Highlighter in one click without ink on both layouts; creation leaves its editor
+  open rather than dismissing itself; disabled controls cannot select tools.
+- All three types capture style independently from later preset edits. Synthetic
+  force makes Monoline/Highlighter constant-width and Pressure responsive; absent
+  force still falls back. Partial fragments keep type/opacity/style, and exact
+  undo/redo and JSON round trips hold on Page and Whiteboard.
+- Independent triangle-coverage sampling verifies translucent joins/chunk seams
+  do not overpaint; idle cached meshes are reused. Existing eraser-index,
+  incremental geometry, pressure, zoom, layout and storage/PDF tests remain.
+
+Local checks: fmt, Clippy with warnings denied, 75 tests passed (four manual
+benchmarks ignored by default), native build, WASM check and Trunk release build.
+Both release partial-erasing benchmarks also passed. 10,000 strokes: index setup
+7.46 ms, 2,000 local samples 3.28 ms, commit 4.86 ms. 100,000-segment path: setup
+2.64 ms, 2,000 samples 8.16 ms. CPU measurements vary with host load and do not
+measure physical pen/GPU/display latency. Existing opaque rendering and spatial
+indexes remain intact; translucent strokes reuse the same cached chunk pipeline.
+
+Performed actual Firefox 157/WebGL2 release-app inspection at 1100×760 and
+480×360: top toolbar in both layouts/themes, inline color picker, preset settings,
+custom creation/rename/reorder and scrolling management controls. New-preset
+popover self-dismissal and narrow strip clipping were caught and fixed, then
+rechecked. Created Monoline ink and drew a translucent Highlighter over it; the
+underlying ink stays readable. Verified custom name/order/selected UUID in the
+actual localStorage state before and after browser reload; all survived. Only
+scratch session ink was discarded. Screenshots: `screenshots/README.md`.
+Linux native executable launched without startup errors. Physical pressure and
+interactive native Windows/macOS behavior remain unverified.
+
+Manual reproduction:
+1. Run `cargo run --locked`, select a scratch real workspace and create both types.
+   Or run `trunk serve`, open localhost and create browser session notes. Dismiss
+   scratch export dialogs; ink cannot be saved to PDF until M2.
+2. Select Black/Blue/Red, Highlighter and Pressure pen. Inspect color/thickness
+   previews and selection. Draw, smooth, pan/zoom, erase in both modes, undo/redo.
+3. Use preset +; its editor opens. Rename, change type/color/width/opacity/smoothing
+   and pressure options. Create multiple custom presets, reorder, delete custom
+   entries and restore defaults. Default presets may be edited/reordered but not
+   deleted. Confirm Settings → Drawing uses the same values.
+4. Resize to 480×360, scroll preset strip with trackpad/Shift-wheel or Tab through
+   buttons, open/scroll popovers, dismiss by Escape/outside click. Check light/dark
+   and confirm no bottom toolbar or overlap with Explorer/tabs.
+5. Restart/reload only after discarding scratch ink; presets survive independently
+   of document bytes. Repeat on compatible physical stylus hardware for pressure.

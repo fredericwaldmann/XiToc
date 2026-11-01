@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const STORAGE_KEY: &str = "XiToc/preferences";
-const VERSION: u32 = 4;
+const VERSION: u32 = 5;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Theme {
@@ -14,25 +14,43 @@ pub enum Theme {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DrawingPreferences {
-    pub color: [u8; 4],
-    pub width: f64,
+    pub presets: crate::pen::Presets,
     pub eraser_radius: f64,
-    pub smoothing_strength: u8,
     pub eraser_mode: crate::drawing::EraserMode,
-    pub pressure: crate::drawing::PressureStyle,
 }
 impl Default for DrawingPreferences {
     fn default() -> Self {
         Self {
+            presets: Default::default(),
+            eraser_radius: 14.0,
+            eraser_mode: Default::default(),
+        }
+    }
+}
+
+/// Decode legacy preference schemas without retaining a second live pen state.
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct LegacyDrawing {
+    color: [u8; 4],
+    width: f64,
+    smoothing_strength: u8,
+    pressure: crate::drawing::PressureStyle,
+    eraser_radius: f64,
+    eraser_mode: crate::drawing::EraserMode,
+}
+impl Default for LegacyDrawing {
+    fn default() -> Self {
+        Self {
             color: [37, 99, 200, 255],
             width: 2.5,
-            eraser_radius: 14.0,
             smoothing_strength: 50,
-            eraser_mode: crate::drawing::EraserMode::Stroke,
             pressure: crate::drawing::PressureStyle {
                 enabled: true,
                 ..Default::default()
             },
+            eraser_radius: 14.0,
+            eraser_mode: Default::default(),
         }
     }
 }
@@ -60,26 +78,86 @@ impl Default for Preferences {
 }
 impl Preferences {
     pub fn decode(json: &str) -> Result<Self, String> {
-        if json.len() > 16 * 1024 {
+        if json.len() > 64 * 1024 {
             return Err("Preferences exceed the supported size.".into());
         }
-        let mut prefs: Self =
+        let mut value: serde_json::Value =
             serde_json::from_str(json).map_err(|e| format!("Cannot read preferences: {e}"))?;
-        // Version 1 had no strength field; serde supplies the handwriting default.
-        if matches!(prefs.schema_version, 1..=3) {
-            prefs.schema_version = VERSION;
+        let version = value
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(VERSION as u64);
+        if (1..=4).contains(&version)
+            || (value.get("schema_version").is_none()
+                && value
+                    .get("drawing")
+                    .is_some_and(|d| d.get("presets").is_none()))
+        {
+            let old: LegacyDrawing = serde_json::from_value(
+                value
+                    .get("drawing")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({})),
+            )
+            .map_err(|e| format!("Cannot migrate drawing preferences: {e}"))?;
+            if !old.width.is_finite() || !(0.25..=12.0).contains(&old.width) || old.color[3] != 255
+            {
+                return Err("Invalid legacy ink preferences.".into());
+            }
+            let mut drawing = DrawingPreferences {
+                eraser_radius: old.eraser_radius,
+                eraser_mode: old.eraser_mode,
+                ..Default::default()
+            };
+            // Preserve customized legacy ink as its own preset, with sensible defaults alongside.
+            if version <= 4
+                || old.color != [37, 99, 200, 255]
+                || old.width != 2.5
+                || old.smoothing_strength != 50
+                || old.pressure != LegacyDrawing::default().pressure
+            {
+                drawing.presets.duplicate();
+                let migrated = drawing.presets.active_mut();
+                migrated.id = uuid::Uuid::from_u128(100);
+                migrated.name = "Migrated pen".into();
+                migrated.style = crate::pen::PenStyle {
+                    pen_type: if old.pressure.enabled {
+                        crate::pen::PenType::Pressure
+                    } else {
+                        crate::pen::PenType::Monoline
+                    },
+                    color: [old.color[0], old.color[1], old.color[2]],
+                    width: old.width,
+                    opacity: 100,
+                    smoothing_strength: old.smoothing_strength,
+                    pressure: old.pressure,
+                };
+            }
+            if drawing
+                .presets
+                .items
+                .last()
+                .is_some_and(|p| p.id == uuid::Uuid::from_u128(100))
+            {
+                drawing.presets.selected = uuid::Uuid::from_u128(100);
+            }
+            let object = value
+                .as_object_mut()
+                .ok_or("Preferences must be an object.")?;
+            object.insert(
+                "drawing".into(),
+                serde_json::to_value(drawing).expect("serializable drawing defaults"),
+            );
+            object.insert("schema_version".into(), VERSION.into());
         }
+        let prefs: Self =
+            serde_json::from_value(value).map_err(|e| format!("Cannot read preferences: {e}"))?;
         if prefs.schema_version != VERSION {
             return Err("Unsupported preferences version.".into());
         }
-        if !prefs.drawing.width.is_finite()
-            || !(0.25..=12.0).contains(&prefs.drawing.width)
+        if !prefs.drawing.presets.validate()
             || !prefs.drawing.eraser_radius.is_finite()
             || !(4.0..=48.0).contains(&prefs.drawing.eraser_radius)
-            || prefs.drawing.smoothing_strength > 100
-            || prefs.drawing.pressure.strength > 100
-            || !(1..=100).contains(&prefs.drawing.pressure.minimum)
-            || prefs.drawing.color[3] != 255
         {
             return Err("Invalid drawing preferences.".into());
         }
@@ -97,11 +175,8 @@ impl Preferences {
         storage.get_string(STORAGE_KEY).as_deref() == Some(json.as_str())
     }
     pub fn apply_drawing(&self, canvas: &mut crate::canvas::Canvas) {
-        canvas.color = self.drawing.color;
-        canvas.width = self.drawing.width;
+        canvas.apply_pen(&self.drawing.presets.active().style);
         canvas.eraser_radius = self.drawing.eraser_radius;
-        canvas.smoothing_strength = self.drawing.smoothing_strength;
-        canvas.pressure_style = self.drawing.pressure;
         canvas.eraser_mode = self.drawing.eraser_mode;
     }
 }
@@ -124,16 +199,49 @@ pub(crate) mod tests {
         fn flush(&mut self) {}
     }
     #[test]
+    fn legacy_migration_is_stable_and_preserves_all_ink_fields() {
+        for version in 1..=4 {
+            let json = format!(
+                r#"{{"schema_version":{version},"drawing":{{"color":[3,44,100,255],"width":7.5,"smoothing_strength":25,"pressure":{{"enabled":true,"strength":60,"minimum":40}},"eraser_radius":20.0,"eraser_mode":"Partial"}}}}"#
+            );
+            let prefs = Preferences::decode(&json).unwrap();
+            assert_eq!(prefs, Preferences::decode(&json).unwrap());
+            let active = prefs.drawing.presets.active();
+            assert_eq!(active.name, "Migrated pen");
+            assert_eq!(active.style.width, 7.5);
+            assert_eq!(active.style.color, [3, 44, 100]);
+            assert_eq!(active.style.opacity, 100);
+            assert_eq!(active.style.pen_type, crate::pen::PenType::Pressure);
+            assert_eq!(active.style.smoothing_strength, 25);
+            assert_eq!(active.style.pressure.strength, 60);
+            assert_eq!(active.style.pressure.minimum, 40);
+            assert_eq!(
+                prefs.drawing.eraser_mode,
+                crate::drawing::EraserMode::Partial
+            );
+            assert_eq!(prefs.drawing.eraser_radius, 20.0);
+            assert_eq!(
+                Preferences::decode(&serde_json::to_string(&prefs).unwrap()).unwrap(),
+                prefs
+            );
+        }
+        let mut prefs = Preferences::default();
+        prefs.drawing.presets.selected = uuid::Uuid::new_v4();
+        assert!(Preferences::decode(&serde_json::to_string(&prefs).unwrap()).is_err());
+    }
+
+    #[test]
     fn pressure_preferences_migrate_validate_persist_and_apply() {
         for version in 1..=3 {
             let prefs = Preferences::decode(&format!(r#"{{"schema_version":{version}}}"#)).unwrap();
             assert_eq!(prefs.schema_version, VERSION);
-            assert!(prefs.drawing.pressure.enabled);
+            assert!(prefs.drawing.presets.active().style.pressure.enabled);
         }
         for strength in [0, 50, 100] {
             for minimum in [1, 20, 100] {
                 let mut prefs = Preferences::default();
-                prefs.drawing.pressure = crate::drawing::PressureStyle {
+                prefs.drawing.presets.active_mut().style.pen_type = crate::pen::PenType::Pressure;
+                prefs.drawing.presets.active_mut().style.pressure = crate::drawing::PressureStyle {
                     enabled: strength != 0,
                     strength,
                     minimum,
@@ -145,7 +253,10 @@ pub(crate) mod tests {
                     crate::document::DocumentData::blank(crate::document::DocumentKind::Whiteboard);
                 let mut canvas = crate::canvas::Canvas::new(&data);
                 prefs.apply_drawing(&mut canvas);
-                assert_eq!(canvas.pressure_style, prefs.drawing.pressure);
+                assert_eq!(
+                    canvas.pressure_style,
+                    prefs.drawing.presets.active().style.effective_pressure()
+                );
             }
         }
         for json in [
@@ -174,7 +285,10 @@ pub(crate) mod tests {
             prefs.store(&mut storage);
             let restored = Preferences::load(Some(&storage)).unwrap();
             assert_eq!(restored.drawing.eraser_mode, mode);
-            assert_eq!(restored.drawing.smoothing_strength, 50);
+            assert_eq!(
+                restored.drawing.presets.active().style.smoothing_strength,
+                50
+            );
         }
         assert!(Preferences::decode(r#"{"drawing":{"eraser_mode":"Unknown"}}"#).is_err());
     }
@@ -183,11 +297,11 @@ pub(crate) mod tests {
     fn smoothing_preferences_migrate_and_persist_every_strength() {
         let old = Preferences::decode(r#"{"schema_version":1,"drawing":{"width":6.0}}"#).unwrap();
         assert_eq!(old.schema_version, VERSION);
-        assert_eq!(old.drawing.smoothing_strength, 50);
-        assert_eq!(old.drawing.width, 6.0);
+        assert_eq!(old.drawing.presets.active().style.smoothing_strength, 50);
+        assert_eq!(old.drawing.presets.active().style.width, 6.0);
         for strength in [0, 25, 50, 75, 100] {
             let mut prefs = old.clone();
-            prefs.drawing.smoothing_strength = strength;
+            prefs.drawing.presets.active_mut().style.smoothing_strength = strength;
             let mut storage = MemoryStorage::default();
             prefs.store(&mut storage);
             assert_eq!(Preferences::load(Some(&storage)).unwrap(), prefs);
@@ -202,29 +316,28 @@ pub(crate) mod tests {
             Preferences::load(Some(&storage)).unwrap(),
             Preferences::default()
         );
-        let prefs = Preferences {
+        let mut prefs = Preferences {
             theme: Theme::Dark,
             explorer_visible: false,
             middle_button_pan: false,
-            drawing: DrawingPreferences {
-                width: 8.0,
-                color: [2, 3, 4, 255],
-                eraser_radius: 32.0,
-                smoothing_strength: 75,
-                eraser_mode: crate::drawing::EraserMode::Partial,
-                pressure: crate::drawing::PressureStyle {
-                    enabled: true,
-                    strength: 75,
-                    minimum: 30,
-                },
-            },
             ..Default::default()
+        };
+        prefs.drawing.eraser_radius = 32.0;
+        prefs.drawing.eraser_mode = crate::drawing::EraserMode::Partial;
+        let pen = &mut prefs.drawing.presets.active_mut().style;
+        pen.width = 8.0;
+        pen.color = [2, 3, 4];
+        pen.smoothing_strength = 75;
+        pen.pressure = crate::drawing::PressureStyle {
+            enabled: true,
+            strength: 75,
+            minimum: 30,
         };
         prefs.store(&mut storage);
         assert_eq!(Preferences::load(Some(&storage)).unwrap(), prefs);
         for json in [
             "broken",
-            r#"{"schema_version":5}"#,
+            r#"{"schema_version":6}"#,
             r#"{"drawing":{"width":0.0}}"#,
             r#"{"drawing":{"eraser_radius":49.0}}"#,
             r#"{"drawing":{"color":[0,0,0,0]}}"#,

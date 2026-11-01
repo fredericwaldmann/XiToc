@@ -5,6 +5,10 @@ use egui::{Color32, Pos2, Rect, Stroke, StrokeKind, Vec2};
 
 #[derive(Clone, Copy)]
 pub enum Icon {
+    Select,
+    Settings,
+    Undo,
+    Redo,
     Pen,
     Eraser,
     Hand,
@@ -34,6 +38,41 @@ pub fn paint(painter: &egui::Painter, center: Pos2, icon: Icon, color: Color32) 
     let point = |x: f32, y: f32| center + egui::vec2(x, y);
     let line = |a, b| painter.line_segment([a, b], stroke);
     match icon {
+        Icon::Select => {
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    point(-5.0, -7.0),
+                    point(6.0, 0.0),
+                    point(0.0, 2.0),
+                    point(-3.0, 7.0),
+                ],
+                stroke,
+            ));
+        }
+        Icon::Settings => {
+            for (y, x) in [(-4.0, -2.0), (1.0, 3.0), (6.0, -3.0)] {
+                line(point(-7.0, y), point(7.0, y));
+                painter.circle_filled(point(x, y), 2.0, color);
+            }
+        }
+        Icon::Undo | Icon::Redo => {
+            let sign = if matches!(icon, Icon::Undo) {
+                1.0
+            } else {
+                -1.0
+            };
+            painter.add(egui::Shape::line(
+                vec![
+                    point(-6.0 * sign, -2.0),
+                    point(1.0 * sign, -2.0),
+                    point(5.0 * sign, 1.0),
+                    point(5.0 * sign, 5.0),
+                ],
+                stroke,
+            ));
+            line(point(-6.0 * sign, -2.0), point(-2.0 * sign, -6.0));
+            line(point(-6.0 * sign, -2.0), point(-2.0 * sign, 2.0));
+        }
         Icon::Pen => {
             line(point(-5.0, 5.0), point(-3.0, -1.0));
             line(point(-3.0, -1.0), point(3.0, -7.0));

@@ -1,6 +1,7 @@
 # Creative tools — proposed GitHub issue briefs and dependencies
 
-M1.3 only integrates Pen, Stroke/Partial Eraser and Hand. The following are
+M1.3 integrates Monoline, Pressure Pen, Highlighter presets, Stroke/Partial Eraser
+and Hand in the top toolbar. Selection remains disabled. The following are
 proposed issue titles ready for separate GitHub tasks, not implemented features.
 Existing #11 covers adding pages; #10 covers split editors. Do not expose future
 tools as working controls. Each slice needs desktop/WASM, both layouts, history,
@@ -15,7 +16,7 @@ large-coordinate geometry and PDF semantic/viewer round-trip coverage.
 | Text boxes and sticky notes | Object model + selection + font strategy | Text tool click inserts and focuses inline editing; sticky note inserts a colored semantic text container. Escape exits editing before tool changes. Store text, layout box, font/style and sticky background. Define portable font embedding/fallback and PDF text metrics before export; no OS-specific text in shared types. |
 | Local images as editable objects | Object model + selection + resize | Explicit local picker/drop, bounded decode and image-size limits; drag/place then resize. Store image bytes/resources inside the PDF, preserve crop/transform. No linked external files, uploads or remote image service. |
 | Attached connectors and arrows | Shapes + selection + stable IDs | Drag from object anchor to target; transient routing preview. Store endpoint object IDs/anchors or free world points and routing/style. Movement updates attachments; deletion policy detaches to last world point. Undo restores IDs and relations atomically. |
-| Drawing styles: Monoline, Pencil, Marker and opacity | Versioned stroke style + PDF compositing | Popovers share color/width/response controls; distinct style tags and reproducible geometry. Monoline captures constant width; Pencil needs deterministic texture; Marker needs transparency/overlap semantics. Opacity must match live preview, erasing and PDF graphics. No relabeling existing Pen as a new engine. |
+| Textured Pencil and advanced brushes | Versioned stroke style + PDF compositing | Monoline, Pressure Pen and translucent Highlighter are implemented in memory. Pencil still needs deterministic texture and editable/PDF representation; watercolor remains out of scope. Match live opacity, erasing and PDF graphics before persisted brush support. |
 
 ## Before implementing PDF ink persistence
 

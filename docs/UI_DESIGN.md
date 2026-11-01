@@ -8,7 +8,7 @@ Rust/egui component tree on desktop and WASM. Original vector icons live in
 ## Reference and hierarchy
 
 Primary UX reference: [Apple Freeform for Mac: drawing and sketching](https://support.apple.com/guide/freeform/draw-and-sketch-frfm6e3d132d2/mac),
-consulted November 2026. Adopt compact floating tools, nearby contextual options,
+consulted November 2026. Adopt compact drawing tools, nearby contextual options,
 and direct canvas manipulation. This is an adaptation, not a pixel replica.
 Apple's indexed guide text confirms bottom-of-window drawing tools, contextual
 nib/color options, and object/partial erasing. Its full page/images returned
@@ -16,8 +16,8 @@ HTTP 429; detailed current macOS visual parity has not been verified.
 
 Preserve XiToc's application menu bar, resizable real-folder Explorer, horizontal
 scrolling document tabs, New Document (+) beside tabs, Settings and status bar.
-Order inside the editor: tabs → compact document header → canvas. The palette
-floats inside the canvas; never anchor it to the entire application window.
+Order inside the editor: tabs → top drawing toolbar → canvas. Drawing tools
+MUST stay directly below the tabs. No bottom floating toolbar.
 Document type is chosen at creation and derived from metadata, never a toggle.
 Browser import/export retains truthful session/download language. Ink remains
 memory-only until M2, with dirty indicators and existing discard protections.
@@ -28,7 +28,7 @@ memory-only until M2, with dirty indicators and existing discard protections.
 | --- | --- | --- | --- |
 | Shell | #F6F7F9 | #1B2028 | Application bar, tabs, status |
 | Sidebar | #F0F2F5 | #181D24 | Explorer |
-| Surface | #FFFFFF | #242B35 | Palette, active tab, popovers/dialogs |
+| Surface | #FFFFFF | #242B35 | Toolbar, active tab, popovers/dialogs |
 | Text | #202731 | #E6EAF0 | Primary labels |
 | Muted | #637083 | #9CA8B9 | Secondary labels |
 | Border | #D9DEE6 | #353E4A | Restrained outlines |
@@ -51,50 +51,73 @@ ordinary icon buttons 26×26 with 14–16 glyphs. App bar 38, tab strip 36 with 
 high tabs, document header 40, status 28. Ordinary corners 4, dialogs 6.
 Explorer starts at 248, resizes from 132 to min(360, 45% window).
 
-## Floating drawing palette
+## Top drawing toolbar and presets
 
-Bottom center of the editor viewport, 16 above its bottom edge. Surface fill,
-1-point Border outline, 12-point corners, 6-point inner padding, 4-point gaps.
-Restrained black shadow: alpha 24/255, offset (0,3), blur 12, spread 0.
-Tool buttons are 34×34; original monoline glyphs occupy 14–16 points and use
-1.25-point strokes. Current three-tool palette is approximately 124×48.
-Keep its position fixed; it is not draggable. Never place it over Explorer,
-tabs or status. Native minimum window is 480×360; hide Explorer for more room.
+Fixed 40-point top panel directly below the document tabs, with 8×6 padding and
+4-point item gaps on Surface. Controls are 26×26 with original 14–16-point icons
+and 1.25-point strokes. Preset buttons are 40×26. No floating palette or shadow.
+Never overlay Explorer, tabs or canvas with the drawing toolbar.
 
-Enabled sequence: Hand, Pen, Eraser. Each is a real keyboard-focusable button
-with an accessible name and tooltip. Selection uses selection fill, accent icon
-and outline; hover/focus use shared semantic styles. Tooltips explain settings
-and Space-drag. Clicking Pen or Eraser selects it and toggles its settings.
-Hand selects navigation without a settings panel. No dead/fake tool controls.
+Order: Selection (disabled until object selection), Hand, horizontal pen presets,
+New preset (+), Pen settings, Eraser, Undo/Redo, zoom. No unfinished pen types.
+One click selects a preset and Pen; its preview combines a nib icon with its actual
+color/opacity and a thickness stripe clamped to 1–8 screen points. Hover and
+accessible names expose name, type, document-point thickness and opacity.
+Selected presets use Selection fill and outline; keyboard focus uses normal egui
+focus styling. Color alone is not the only selection indication. Hand and Eraser
+show the same selected-tool treatment.
 
-Future conceptual sequence reserves Selection, Hand, Pen, Monoline, Pencil,
-Marker, Eraser, Shapes, Text, Sticky Notes. These are architecture positions,
-not empty slots occupying canvas today. See `CREATIVE_TOOLS.md` for dependencies.
+The five editable/reorderable defaults are Black pen, Blue pen, Red pen
+(Monoline, 2.5 pt, 100% opacity), yellow Highlighter (18 pt, 35%), and purple
+Pressure pen (4 pt, 100%). Blue is initially selected. New preset copies the
+selected style with a new stable ID and opens its editor. Up to 32 presets are
+stored locally. Only custom presets can be deleted. Move left/right reorders
+any preset while retaining identity and selection. Restore default presets
+explicitly replaces custom and edited presets with the five defaults.
 
-## Contextual settings and state ownership
+The preset strip scrolls horizontally with trackpad/Shift-wheel; Tab navigation
+reveals focused buttons. Selecting, reordering or resizing reveals the selected
+preset. At editor widths below 800, zoom moves into View; below 500, history also
+moves there. The toolbar remains one row. At the native minimum 480×360 window,
+Explorer remains usable and at least one preset is accessible in the strip;
+hiding Explorer exposes more tools. No wrapped tool rows or bottom fallback.
+Whiteboard-only grid stays in zoom/View. Browser export is in View on compact
+windows and inline only with at least 1000 editor points. Dirty ink export stays
+disabled. The immutable document type remains in the tab/tooltip and status.
 
-Popovers anchor above their tool with natural viewport fallback/constraining;
-280-point preferred width, capped to available editor width minus 24. Content
-scrolls when height is limited, leaving palette accessible. Inside adjustments
-stay open; outside click, Escape, or clicking the opener dismisses naturally.
-They are nonmodal. Foreground hit regions are registered before canvas input;
-clicking controls never starts ink or panning. Outside canvas clicks dismiss and
-may begin the intended canvas gesture. Existing stroke input stays unchanged.
+## Preset popover and state ownership
 
-Pen: color swatch, inline expandable opaque color picker, thickness 0.25–12 PDF
-points, smoothing strength 0–100%, pressure enable, sensitivity 0–100%, minimum
-width 1–100%. Default blue #2563C8, thickness 2.5, smoothing 50%, pressure enabled
-at 100% with minimum 20%. No opacity control until compositing is implemented.
-Eraser: Whole-stroke (`Stroke Eraser`) or Partial-stroke (`Partial Eraser`), and
-radius 4–48 logical screen points. Its two-ring cursor matches the engine radius.
+Pen settings opens below the top toolbar; preferred width 280, constrained by
+viewport edges, content scrolls at limited heights. It provides editable name
+(up to 64 characters), implemented pen type, inline expandable Color picker,
+thickness 0.25–24 PDF points, opacity 1–100%, smoothing 0–100%, and Pressure Pen's
+enable/strength/minimum controls. A blank name displays as “Untitled pen”.
+Color expansion stays inside the popover, without replacing it with a second root
+popup. Slider rails use Border fill and selection trailing fill in both themes.
+New/Delete/Move/Restore controls live in this same editor. Inside adjustments
+remain open; outside click and Escape dismiss naturally. No modal dialogs are
+needed to manage presets.
 
-Color/width/radius edit the existing active-tab canvas values. Smoothing, pressure
-and eraser mode edit existing persisted DrawingPreferences, also shown in
-Settings → Drawing; no mirrored palette state. Smoothing/pressure affect new
-strokes across tabs, never reshape old strokes. Settings color/width/radius are
-defaults for newly opened tabs. Shared drawing-control functions serve both UIs.
-Mouse and devices without supported force remain constant-width; native Linux
-and macOS tablets currently use that fallback. Do not claim hardware detection.
+Preset values are the single live style state. Toolbar and Settings → Drawing
+use the same preset library and shared editor widgets. Settings retains its
+existing sections, layout and persistence. Selection/order/edits persist using
+the existing preferences backend; no workspace sidecars or ink storage. All tabs
+use the selected preset for subsequent strokes. Active gestures capture a style
+snapshot at pointer-down, so edits never change existing strokes or history.
+
+Monoline always ignores pressure for thickness, while retaining smoothing.
+Pressure Pen captures the configured response and uses normalized device force
+when available; absent force and mouse keep constant width. Highlighter ignores
+pressure and uses a wide translucent vector ribbon. Separate strokes and true
+self-crossings accumulate opacity via normal source-over compositing. Translucent
+ink has a flat nib; ordinary opaque ink retains the rounded renderer. No textures
+or watercolor types. Opacity is captured into stroke RGBA, not a registry lookup.
+Native Linux/macOS pressure hardware currently uses constant-width fallback.
+
+Eraser opens a compact popover with Stroke Eraser / Partial Eraser and active-tab
+radius (4–48 logical screen points). Mode remains the shared application preference;
+Settings retains the default radius for newly opened tabs. Its cursor ring and
+one-gesture/one-undo behavior stay unchanged.
 
 Settings remains Edit → Settings, centered 520-point preferred width with 24
 outer clearance, General/Appearance/Drawing/Input Devices sections, scrollable
@@ -107,17 +130,14 @@ Page Notes: white A4 pages, 0.75 gray edge, black shadow alpha 28/255, offset
 (0,3), blur 10, spread 1. Neutral Workspace surrounds paper, outer/page gap 24.
 Fit available width up to 794; minimum paper width 210 with scrolling. Preserve
 the page list, boundaries, per-page labels and page-local ink clipping. Multipage
-creation remains #11; no new page-editing feature in M1.3. Palette stays fixed
-while paper scrolls; pan/scroll can reveal content behind it.
+creation remains #11; no new page-editing feature in M1.3. The top toolbar stays fixed while paper scrolls.
 
 Whiteboards: Board fill, no A4 bounds/edge/shadow. Optional low-contrast adaptive
 dot grid follows the existing camera. Infinite f64 world coordinates remain
-unchanged. Both types share the same palette, controller and renderer.
+unchanged. Both types share the same top toolbar, controller and renderer.
 
-Header retains immutable document type, Undo/Redo and View menu (zoom out/in,
-percentage, reset/fit; Whiteboard-only grid). Under 360 editor points, collapse
-these actions into one typed document menu. Browser export remains disabled for
-dirty ink. External PDFs show read-only/preview-unavailable; no drawing palette.
+External PDFs show read-only/preview-unavailable and expose no enabled drawing
+tools. Both document kinds retain existing navigation, erasing and undo behavior.
 
 ## Navigation, shortcuts and accessibility
 
@@ -140,15 +160,15 @@ keep full errors and the unsaved-ink caveat accessible on narrow windows.
 
 ## Boundaries, performance and verification
 
-`app.rs` coordinates state/actions. `toolbar.rs` renders header and palette;
+`app.rs` coordinates state/actions. `toolbar.rs` renders the top toolbar;
 `drawing_controls.rs` shares settings widgets; style/icons centralize visuals.
 Document model, PDF, storage, geometry, smoothing, indexes and mesh caches remain
-independent. No IO, timers or unconditional repaint requests in palette drawing;
+independent. No IO, timers or unconditional repaint requests in toolbar drawing;
 closed popovers do not construct their content. Preserve existing incremental
 stroke meshes, spatial eraser indexes and large-coordinate transforms.
 
 Verify actual running app at 1100×760 and 480×360, both themes and document types.
-Capture workspace, Page, Whiteboard, Pen and Eraser popovers; confirm no overlap
-with Explorer/tabs, no accidental ink from controls, drawing/erasing/history,
+Capture workspace, Page, Whiteboard, preset settings and Eraser popovers; confirm no overlap
+with Explorer/tabs, no bottom palette, no accidental ink from controls, drawing/erasing/history,
 resize, grid and zoom. Record performed checks in TEST_PLAN, distinguish build
 checks from visual verification and physical pen/display latency tests.

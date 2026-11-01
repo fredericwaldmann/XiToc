@@ -74,13 +74,34 @@ impl Cached {
         for index in self.meshes.len()..chunks {
             let start = index * MESH_SEGMENTS;
             let end = (start + MESH_SEGMENTS + 1).min(self.path.len());
-            let shapes = rounded_shapes(
-                &self.path[start..end],
-                &self.pressures[start..end],
-                transform,
-                stroke,
-                index > 0,
-            );
+            let shapes = if stroke.color[3] < 255 {
+                // Neighboring samples make both sides of a cached chunk seam agree.
+                let lo = start.saturating_sub(1);
+                let hi = (end + 1).min(self.path.len());
+                let points: Vec<_> = self.path[lo..hi]
+                    .iter()
+                    .map(|point| {
+                        let p = transform.to_screen(*point);
+                        Pos2::new(p[0] as f32, p[1] as f32)
+                    })
+                    .collect();
+                translucent_shapes(
+                    &points,
+                    &self.pressures[lo..hi],
+                    (stroke.width * transform.scale) as f32,
+                    ink_color(stroke),
+                    stroke.pressure_style,
+                    start - lo..end - lo,
+                )
+            } else {
+                rounded_shapes(
+                    &self.path[start..end],
+                    &self.pressures[start..end],
+                    transform,
+                    stroke,
+                    index > 0,
+                )
+            };
             let primitives = ui.ctx().tessellate(
                 shapes
                     .into_iter()
@@ -180,6 +201,7 @@ const MESH_SEGMENTS: usize = 128;
 pub struct Canvas {
     pub drawing: Drawing,
     pub tool: Tool,
+    pub pen_type: crate::pen::PenType,
     pub color: [u8; 4],
     pub width: f64,
     /// Eraser radius in logical screen points, shown at its actual hit-test size.
@@ -198,10 +220,19 @@ pub struct Canvas {
     processed: Vec<Surface>,
 }
 impl Canvas {
+    pub fn apply_pen(&mut self, style: &crate::pen::PenStyle) {
+        self.pen_type = style.pen_type;
+        self.color = style.rgba();
+        self.width = style.width;
+        self.smoothing_strength = style.smoothing_strength;
+        self.pressure_style = style.effective_pressure();
+    }
+
     pub fn new(data: &DocumentData) -> Self {
         Self {
             drawing: Drawing::new(data),
             tool: Tool::Pen,
+            pen_type: crate::pen::PenType::Pressure,
             color: [37, 99, 200, 255],
             width: 2.5,
             eraser_radius: 14.0,
@@ -382,6 +413,7 @@ impl Canvas {
                             stroke.smoothing = drawing::Smoothing::AdaptiveV1 {
                                 strength: self.smoothing_strength,
                             };
+                            stroke.pen_type = self.pen_type;
                             stroke.pressure_style = self.pressure_style;
                             self.preview = Default::default();
                             stroke.push_pressure(point, self.input_pressure);
@@ -725,6 +757,15 @@ fn pressure_at(pressures: &[Option<f32>], t: f64) -> Option<f32> {
     )
 }
 
+fn ink_color(stroke: &Stroke) -> Color32 {
+    Color32::from_rgba_unmultiplied(
+        stroke.color[0],
+        stroke.color[1],
+        stroke.color[2],
+        stroke.color[3],
+    )
+}
+
 fn rounded_shapes(
     path: &[[f64; 2]],
     pressures: &[Option<f32>],
@@ -732,12 +773,7 @@ fn rounded_shapes(
     stroke: &Stroke,
     skip_first_cap: bool,
 ) -> Vec<egui::Shape> {
-    let color = Color32::from_rgba_unmultiplied(
-        stroke.color[0],
-        stroke.color[1],
-        stroke.color[2],
-        stroke.color[3],
-    );
+    let color = ink_color(stroke);
     let width = (stroke.width * transform.scale) as f32;
     let points: Vec<_> = path
         .iter()
@@ -746,6 +782,16 @@ fn rounded_shapes(
             Pos2::new(p[0] as f32, p[1] as f32)
         })
         .collect();
+    if stroke.color[3] < 255 {
+        return translucent_shapes(
+            &points,
+            pressures,
+            width,
+            color,
+            stroke.pressure_style,
+            0..points.len(),
+        );
+    }
     let mut shapes = Vec::with_capacity(points.len() * 2);
     if !stroke.pressure_style.enabled || pressures.iter().all(Option::is_none) {
         for pair in points.windows(2) {
@@ -798,6 +844,77 @@ fn rounded_shapes(
     shapes
 }
 
+/// A joined ribbon avoids compositing every segment and cap on top of itself.
+/// Separate strokes (and true self-crossings) still accumulate opacity normally.
+/// Translucent ink has a flat nib; the opaque rounded renderer stays unchanged.
+fn translucent_shapes(
+    points: &[Pos2],
+    pressures: &[Option<f32>],
+    width: f32,
+    color: Color32,
+    pressure: drawing::PressureStyle,
+    visible: std::ops::Range<usize>,
+) -> Vec<egui::Shape> {
+    if points.is_empty() {
+        return Vec::new();
+    }
+    if points.len() == 1 || points.iter().all(|p| *p == points[0]) {
+        let radius = pressures
+            .iter()
+            .map(|p| width * pressure.factor(*p) as f32 * 0.5)
+            .fold(0.0_f32, f32::max);
+        return vec![egui::Shape::circle_filled(points[0], radius, color)];
+    }
+    let directions: Vec<_> = points
+        .windows(2)
+        .map(|p| (p[1] - p[0]).normalized())
+        .collect();
+    let mut mesh = egui::Mesh::default();
+    let mut previous = directions
+        .iter()
+        .copied()
+        .find(|v| v.length_sq() > 0.0)
+        .unwrap_or(egui::Vec2::X);
+    for (i, point) in points.iter().enumerate() {
+        let next = directions
+            .get(i)
+            .copied()
+            .filter(|v| v.length_sq() > 0.0)
+            .unwrap_or(previous);
+        let normal = |v: egui::Vec2| egui::vec2(-v.y, v.x);
+        let average = (normal(previous) + normal(next)).normalized();
+        let miter = if average.length_sq() > 0.0 {
+            average / average.dot(normal(next)).max(0.5)
+        } else {
+            normal(next)
+        };
+        let radius = width * pressure.factor(pressures[i]) as f32 * 0.5;
+        // One feather on each outside edge; adjacent path samples share vertices.
+        for (distance, ink) in [
+            (radius + 0.5, Color32::TRANSPARENT),
+            ((radius - 0.5).max(0.0), color),
+            (-(radius - 0.5).max(0.0), color),
+            (-radius - 0.5, Color32::TRANSPARENT),
+        ] {
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: *point + miter * distance,
+                uv: egui::epaint::WHITE_UV,
+                color: ink,
+            });
+        }
+        if i > visible.start && i < visible.end {
+            let start = (i as u32 - 1) * 4;
+            for edge in 0..3 {
+                let a = start + edge;
+                mesh.indices
+                    .extend_from_slice(&[a, a + 4, a + 1, a + 1, a + 4, a + 5]);
+            }
+        }
+        previous = next;
+    }
+    vec![egui::Shape::mesh(mesh)]
+}
+
 /// Ordered pen input shared by the browser bridge and synthetic controller tests.
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn pen_events(
@@ -836,6 +953,126 @@ pub(crate) fn pen_events(
 mod tests {
     use super::*;
     use crate::document::DocumentKind;
+
+    #[test]
+    fn pen_presets_capture_style_and_survive_partial_erase_history() {
+        for (kind, surface) in [
+            (DocumentKind::Page, Surface::Page(0)),
+            (DocumentKind::Whiteboard, Surface::Canvas),
+        ] {
+            for pen_type in crate::pen::PenType::ALL {
+                let data = DocumentData::blank(kind);
+                let ctx = egui::Context::default();
+                let mut canvas = Canvas::new(&data);
+                let style = crate::pen::PenStyle {
+                    pen_type,
+                    width: 18.0,
+                    opacity: 35,
+                    smoothing_strength: 0,
+                    ..Default::default()
+                };
+                canvas.apply_pen(&style);
+                let mut events = pen_events(0, egui::pos2(30.0, 60.0), 0.1, egui::Modifiers::NONE);
+                events.extend(pen_events(
+                    1,
+                    egui::pos2(100.0, 60.0),
+                    0.5,
+                    egui::Modifiers::NONE,
+                ));
+                events.extend(pen_events(
+                    2,
+                    egui::pos2(170.0, 60.0),
+                    1.0,
+                    egui::Modifiers::NONE,
+                ));
+                frame(&ctx, &mut canvas, surface, events);
+                let source = canvas.drawing.strokes()[0].clone();
+                assert_eq!(source.pen_type, pen_type);
+                assert_eq!(source.color, style.rgba());
+                assert_eq!(source.width, 18.0);
+                assert_eq!(
+                    source.pressure_style.enabled,
+                    pen_type == crate::pen::PenType::Pressure
+                );
+                assert_eq!(
+                    serde_json::from_str::<Stroke>(&serde_json::to_string(&*source).unwrap())
+                        .unwrap(),
+                    *source
+                );
+                canvas.apply_pen(&crate::pen::PenStyle::default());
+                assert_eq!(canvas.drawing.strokes()[0], source);
+                canvas.select(Tool::Eraser);
+                canvas.eraser_mode = EraserMode::Partial;
+                canvas.eraser_radius = 4.0;
+                let at = egui::pos2(100.0, 60.0);
+                frame(
+                    &ctx,
+                    &mut canvas,
+                    surface,
+                    vec![button(at, true), button(at, false)],
+                );
+                assert_eq!(canvas.drawing.strokes().len(), 2);
+                let fragments = canvas.drawing.strokes().to_vec();
+                for fragment in &fragments {
+                    assert_eq!(fragment.pen_type, source.pen_type);
+                    assert_eq!(fragment.color, source.color);
+                    assert_eq!(fragment.pressure_style, source.pressure_style);
+                }
+                canvas.undo();
+                assert_eq!(canvas.drawing.strokes(), &[source]);
+                canvas.redo();
+                assert_eq!(canvas.drawing.strokes(), fragments);
+            }
+        }
+    }
+
+    #[test]
+    fn translucent_ribbons_do_not_overpaint_joins_and_reuse_cached_chunks() {
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        let ctx = egui::Context::default();
+        let mut canvas = Canvas::new(&data);
+        let mut stroke = Stroke::new(data.id(), Surface::Canvas, [255, 200, 0, 89], 18.0);
+        stroke.pen_type = crate::pen::PenType::Highlighter;
+        stroke.smoothing = drawing::Smoothing::PolylineV1;
+        for i in 0..400 {
+            stroke.push([20.0 + i as f64, 100.0]);
+        }
+        let id = stroke.id;
+        assert!(canvas.drawing.add(stroke));
+        frame(&ctx, &mut canvas, Surface::Canvas, vec![]);
+        let meshes = canvas.cache[&id].meshes.clone();
+        // Independent strict triangle inclusion: one opaque-interior alpha sample
+        // per position, even near sample joins and both sides of chunk boundaries.
+        for x in [40.31, 147.91, 148.11, 200.37, 275.91, 276.11] {
+            let point = egui::pos2(x, 100.17);
+            let mut hits = 0;
+            for mesh in &meshes {
+                for tri in mesh.indices.as_chunks::<3>().0 {
+                    let a = mesh.vertices[tri[0] as usize];
+                    let b = mesh.vertices[tri[1] as usize];
+                    let c = mesh.vertices[tri[2] as usize];
+                    let cross = |u: egui::Vec2, v: egui::Vec2| u.x * v.y - u.y * v.x;
+                    let sides = [
+                        cross(b.pos - a.pos, point - a.pos),
+                        cross(c.pos - b.pos, point - b.pos),
+                        cross(a.pos - c.pos, point - c.pos),
+                    ];
+                    if sides.iter().all(|v| *v > 0.0) || sides.iter().all(|v| *v < 0.0) {
+                        hits += 1;
+                        assert_eq!([a.color.a(), b.color.a(), c.color.a()], [89; 3]);
+                    }
+                }
+            }
+            assert_eq!(hits, 1, "sample {x} must not darken at joins");
+        }
+        frame(&ctx, &mut canvas, Surface::Canvas, vec![]);
+        assert!(
+            meshes
+                .iter()
+                .zip(&canvas.cache[&id].meshes)
+                .all(|(a, b)| Arc::ptr_eq(a, b))
+        );
+    }
 
     #[test]
     fn force_changes_at_rest_secondary_contacts_and_cancellation() {

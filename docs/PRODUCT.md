@@ -119,10 +119,18 @@ Browser pen PointerEvents and Windows winit pen-force input have a supported cod
 path; native Linux/macOS tablets currently use constant-width fallback. Physical
 hardware is unverified. See PRESSURE_INPUT.md. Saving ink remains the M2 milestone.
 
-## M1.3 drawing workspace
+## M1.3 top drawing toolbar and presets
 
-A compact floating Hand/Pen/Eraser palette replaces inline drawing controls in
-both layouts. Pen and Eraser open contextual settings; Undo/Redo and View remain
-in the header. Explorer, tabs with +, menu bar and Settings remain. Only working
-tools appear. Opacity, additional pen styles and creative objects remain planned
-(`CREATIVE_TOOLS.md`). Ink is still memory-only until M2.
+Drawing tools remain directly below document tabs; no bottom palette. One-click
+horizontal preset buttons show color/thickness and selection. Five defaults:
+Black/Blue/Red Monoline, Highlighter, Pressure pen. Users can create a custom copy,
+edit type/name/color/width/opacity/smoothing/pressure, reorder, delete custom
+presets and restore defaults in Pen settings. Settings → Drawing edits the same
+library. Presets persist locally, separately from PDF contents. Legacy drawing
+preferences migrate without losing configured values.
+
+Monoline is constant-width; Pressure Pen uses device force with constant-width
+fallback; Highlighter is a wide semi-transparent vector stroke. Existing smoothing,
+both erasers, history and both layouts remain. Selection is visibly disabled until
+its object-selection milestone. No realistic pencils/watercolor or PDF saving is
+introduced. Explorer, tabs, menu bar and Settings dialog remain.

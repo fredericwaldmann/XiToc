@@ -348,7 +348,7 @@ impl XiTocApp {
                             let opened = &mut self.documents[index];
                             (&opened.loaded.document, &mut opened.editor)
                         });
-                        ui::toolbar::show(ui, document, action, &mut self.preferences.drawing.eraser_mode);
+                        ui::toolbar::show(ui, document, action, &mut self.preferences.drawing);
                     });
                 if let Some(index) = self.active {
                     let opened = &mut self.documents[index];
@@ -358,9 +358,6 @@ impl XiTocApp {
                             ui.label("PDF preview is not available yet. The original file is preserved and will not be rewritten.");
                         });
                     } else {
-                        ui::toolbar::palette(ui, &mut opened.editor, &mut self.preferences.drawing);
-                        opened.editor.canvas.smoothing_strength = self.preferences.drawing.smoothing_strength;
-                        opened.editor.canvas.pressure_style = self.preferences.drawing.pressure;
                         opened.editor.middle_button_pan = self.preferences.middle_button_pan;
                         opened.editor.show(ui, &opened.loaded.document.data);
                     }
@@ -749,8 +746,8 @@ mod tests {
         app.preferences.theme = Theme::Dark;
         app.preferences.explorer_visible = false;
         app.preferences.middle_button_pan = false;
-        app.preferences.drawing.width = 8.0;
-        app.preferences.drawing.color = [10, 20, 30, 255];
+        app.preferences.drawing.presets.active_mut().style.width = 8.0;
+        app.preferences.drawing.presets.active_mut().style.color = [10, 20, 30];
         app.preferences.drawing.eraser_radius = 32.0;
         eframe::App::save(&mut app, &mut storage);
         let restarted = XiTocApp::new(Some(&storage));
