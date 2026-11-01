@@ -27,6 +27,10 @@ pub fn show(ui: &mut egui::Ui, rgba: &mut [u8; 4], width: &mut f64, radius: &mut
                 .suffix(" pt"),
         );
     });
+    eraser_radius(ui, radius);
+}
+
+pub fn eraser_radius(ui: &mut egui::Ui, radius: &mut f64) {
     ui.horizontal(|ui| {
         ui.label("Eraser radius");
         ui.add(

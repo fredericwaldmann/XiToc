@@ -335,7 +335,7 @@ impl XiTocApp {
                             let opened = &mut self.documents[index];
                             (&opened.loaded.document, &mut opened.editor)
                         });
-                        ui::toolbar::show(ui, document, action);
+                        ui::toolbar::show(ui, document, action, &mut self.preferences.drawing.eraser_mode);
                     });
                 if let Some(index) = self.active {
                     let opened = &mut self.documents[index];

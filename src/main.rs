@@ -4,6 +4,7 @@ mod document;
 mod drawing;
 mod editor;
 mod eraser_index;
+mod partial_erase;
 mod pdf;
 mod settings;
 mod smoothing;

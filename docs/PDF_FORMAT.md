@@ -112,3 +112,14 @@ path. JSON round trips preserve f64 samples exactly. Future M2 encoding must
 version the PDF payload and serialize the raw vectors/processing metadata with
 matching visible graphics. The existing blank-PDF schema remains unchanged and
 cannot save handwriting; no sidecar format is created.
+
+## M1.1 partial-erasure vectors (preparation for M2)
+
+Partial erasing creates independently identified `Stroke` objects tagged
+`Smoothing::PolylineV1`. Their f64 vector samples contain the retained visible
+centerline and exact cut endpoints, with unchanged style/document/surface and
+interpolated pressure metadata. Do not re-smooth these explicit paths on reload.
+Undo retains the original stroke objects; redo retains fragment IDs and points.
+Semantic JSON round trips are tested, but the implemented blank-PDF schema still
+cannot save ink. M2 must version its payload and include these vectors/tags with
+matching conventional PDF graphics. No PDF serialization or sidecars are added.

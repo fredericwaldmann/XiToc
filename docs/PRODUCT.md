@@ -81,7 +81,7 @@ Edit → Settings provides General (Explorer visibility/editor behavior), Appear
 automatically and persist on the device, independently of workspace PDFs. Drawing
 defaults initialize newly created/opened tabs; Ink continues to adjust individual
 tabs. The Appearance menu and Explorer button use the same persisted preferences.
-Partial-erasing and pressure controls await their features.
+Pressure controls await their feature.
 
 ## Handwriting smoothing (M1.1)
 
@@ -92,3 +92,19 @@ new strokes in all open Page Notes and Whiteboards. Existing strokes retain thei
 captured strength, raw editable samples, identity/style and undo/redo history.
 The preview follows the pointer and uses the same geometry after release.
 Handwriting remains memory-only until M2; this does not add PDF ink saving.
+
+## Two eraser modes (M1.1, #13)
+
+The existing eraser toolbar position now shows Stroke Eraser or Partial Eraser.
+Its compact dropdown activates either mode and offers the same screen-point
+radius control as Ink. The ring shows its effective eraser radius; hit testing
+also accounts for pen width. The selected mode persists as an application
+preference and is also available in Settings → Drawing.
+
+Stroke Eraser removes the entire touched stroke. Partial Eraser removes only
+intersecting portions of its visible vector centerline; surviving pieces retain
+color, width and shape as editable polylines. One sweep across any number of
+strokes is one undo operation; undo restores the exact original objects and
+stacking order, and redo restores the same fragment IDs/geometry. Both document
+types, navigation and smoothing remain supported. Ink is still memory-only until
+M2; no PDF serialization or note sidecars are added.

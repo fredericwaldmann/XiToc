@@ -27,11 +27,28 @@ impl InkPoint {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EraserMode {
+    #[default]
+    Stroke,
+    Partial,
+}
+impl EraserMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Stroke => "Stroke Eraser",
+            Self::Partial => "Partial Eraser",
+        }
+    }
+}
+
 /// Versioned per-stroke processing; missing metadata retains the original M1 path.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Smoothing {
     #[default]
     Legacy,
+    /// Explicit surviving centerline after clipping; never smooth it again.
+    PolylineV1,
     AdaptiveV1 {
         strength: u8,
     },
@@ -64,6 +81,7 @@ impl Stroke {
     pub fn path(&self) -> Vec<[f64; 2]> {
         match self.smoothing {
             Smoothing::Legacy => smooth(&self.points),
+            Smoothing::PolylineV1 => self.points.iter().map(|p| p.position).collect(),
             Smoothing::AdaptiveV1 { strength } => crate::smoothing::path(&self.points, strength),
         }
     }
@@ -96,24 +114,58 @@ impl Transform {
 // New object commands can extend this enum with their inverse state.
 #[derive(Debug)]
 enum Command {
-    Insert { index: usize, stroke: Arc<Stroke> },
+    Insert {
+        index: usize,
+        stroke: Arc<Stroke>,
+    },
     Erase(Vec<(usize, Arc<Stroke>)>),
+    Replace {
+        before: Vec<(usize, Arc<Stroke>)>,
+        after: Vec<(usize, Arc<Stroke>)>,
+    },
+}
+fn remove_at(strokes: &mut Vec<Arc<Stroke>>, removed: &[(usize, Arc<Stroke>)]) {
+    if removed.is_empty() {
+        return;
+    }
+    let mut removed = removed.iter().peekable();
+    let mut index = 0;
+    strokes.retain(|_| {
+        let keep = removed.peek().is_none_or(|(target, _)| *target != index);
+        if !keep {
+            removed.next();
+        }
+        index += 1;
+        keep
+    });
+}
+fn insert_at(strokes: &mut Vec<Arc<Stroke>>, removed: &[(usize, Arc<Stroke>)]) {
+    if removed.is_empty() {
+        return;
+    }
+    // Merge backwards in linear time instead of shifting the tail
+    // once per restored stroke. All slots contain valid Arcs.
+    let original_len = strokes.len();
+    strokes.extend(removed.iter().map(|(_, stroke)| stroke.clone()));
+    let mut source = original_len;
+    let mut removed = removed.iter().rev().peekable();
+    for target in (0..strokes.len()).rev() {
+        if removed.peek().is_some_and(|(index, _)| *index == target) {
+            strokes[target] = removed.next().unwrap().1.clone();
+        } else {
+            source -= 1;
+            strokes[target] = strokes[source].clone();
+        }
+    }
 }
 impl Command {
     fn apply(&self, strokes: &mut Vec<Arc<Stroke>>) {
         match self {
             Self::Insert { index, stroke } => strokes.insert(*index, stroke.clone()),
-            Self::Erase(removed) => {
-                let mut removed = removed.iter().peekable();
-                let mut index = 0;
-                strokes.retain(|_| {
-                    let keep = removed.peek().is_none_or(|(target, _)| *target != index);
-                    if !keep {
-                        removed.next();
-                    }
-                    index += 1;
-                    keep
-                });
+            Self::Erase(removed) => remove_at(strokes, removed),
+            Self::Replace { before, after } => {
+                remove_at(strokes, before);
+                insert_at(strokes, after);
             }
         }
     }
@@ -122,21 +174,10 @@ impl Command {
             Self::Insert { index, .. } => {
                 strokes.remove(*index);
             }
-            Self::Erase(removed) => {
-                // Merge backwards in linear time instead of shifting the tail
-                // once per restored stroke. All slots contain valid Arcs.
-                let original_len = strokes.len();
-                strokes.extend(removed.iter().map(|(_, stroke)| stroke.clone()));
-                let mut source = original_len;
-                let mut removed = removed.iter().rev().peekable();
-                for target in (0..strokes.len()).rev() {
-                    if removed.peek().is_some_and(|(index, _)| *index == target) {
-                        strokes[target] = removed.next().unwrap().1.clone();
-                    } else {
-                        source -= 1;
-                        strokes[target] = strokes[source].clone();
-                    }
-                }
+            Self::Erase(removed) => insert_at(strokes, removed),
+            Self::Replace { before, after } => {
+                remove_at(strokes, after);
+                insert_at(strokes, before);
             }
         }
     }
@@ -203,20 +244,21 @@ impl Drawing {
             _ => false,
         }
     }
-    pub fn add(&mut self, stroke: Stroke) -> bool {
-        if stroke.document_id != self.owner
-            || stroke.id.is_nil()
-            || matches!(stroke.smoothing, Smoothing::AdaptiveV1 { strength } if strength > 100)
-            || stroke.points.is_empty()
-            || !stroke.width.is_finite()
-            || !(0.1..=24.0).contains(&stroke.width)
-            || self.strokes.iter().any(|s| s.id == stroke.id)
-            || stroke.points.iter().any(|p| {
-                !self.contains(stroke.surface, p.position)
-                    || !p.pressure.is_finite()
-                    || !(0.0..=1.0).contains(&p.pressure)
+    fn valid_stroke(&self, stroke: &Stroke) -> bool {
+        stroke.document_id == self.owner
+            && !stroke.id.is_nil()
+            && !matches!(stroke.smoothing, Smoothing::AdaptiveV1 { strength } if strength > 100)
+            && !stroke.points.is_empty()
+            && stroke.width.is_finite()
+            && (0.1..=24.0).contains(&stroke.width)
+            && stroke.points.iter().all(|p| {
+                self.contains(stroke.surface, p.position)
+                    && p.pressure.is_finite()
+                    && (0.0..=1.0).contains(&p.pressure)
             })
-        {
+    }
+    pub fn add(&mut self, stroke: Stroke) -> bool {
+        if !self.valid_stroke(&stroke) || self.strokes.iter().any(|s| s.id == stroke.id) {
             return false;
         }
         self.execute(Command::Insert {
@@ -238,6 +280,53 @@ impl Drawing {
             .collect();
         if !removed.is_empty() {
             self.execute(Command::Erase(removed));
+        }
+    }
+    /// Replaces affected strokes in one journal entry, retaining stacking order.
+    pub fn replace_partial(
+        &mut self,
+        mut replacements: std::collections::HashMap<Uuid, Vec<Stroke>>,
+    ) -> bool {
+        if replacements.is_empty() {
+            return false;
+        }
+        let mut ids: std::collections::HashSet<_> = self.strokes.iter().map(|s| s.id).collect();
+        if replacements.keys().any(|id| !ids.contains(id)) {
+            return false;
+        }
+        for source in &self.strokes {
+            if let Some(pieces) = replacements.get(&source.id)
+                && pieces.iter().any(|s| {
+                    !self.valid_stroke(s)
+                        || s.surface != source.surface
+                        || s.color != source.color
+                        || s.width != source.width
+                        || s.smoothing != Smoothing::PolylineV1
+                        || !ids.insert(s.id)
+                })
+            {
+                return false;
+            }
+        }
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        let mut output = 0;
+        for (index, stroke) in self.strokes.iter().enumerate() {
+            if let Some(pieces) = replacements.remove(&stroke.id) {
+                before.push((index, stroke.clone()));
+                for piece in pieces {
+                    after.push((output, Arc::new(piece)));
+                    output += 1;
+                }
+            } else {
+                output += 1;
+            }
+        }
+        if !before.is_empty() {
+            self.execute(Command::Replace { before, after });
+            true
+        } else {
+            false
         }
     }
     fn execute(&mut self, command: Command) {
@@ -502,6 +591,72 @@ mod tests {
         drawing.add(stroke(&data, Surface::Canvas, &[[9.0, 9.0]]));
         assert!(!drawing.can_redo());
     }
+    #[test]
+    fn partial_replace_keeps_interleaved_order_and_rejects_invalid_pieces_atomically() {
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        let mut drawing = Drawing::new(&data);
+        for i in 0..6 {
+            drawing.add(stroke(
+                &data,
+                Surface::Canvas,
+                &[[i as f64, 0.0], [i as f64, 100.0]],
+            ));
+        }
+        let original = drawing.strokes().to_vec();
+        let piece = |source: &Stroke, start, end| {
+            let mut p = Stroke::new(data.id(), source.surface, source.color, source.width);
+            p.smoothing = Smoothing::PolylineV1;
+            p.push([source.points[0].position[0], start]);
+            p.push([source.points[0].position[0], end]);
+            p
+        };
+        let a = piece(&original[1], 0.0, 30.0);
+        let b = piece(&original[1], 70.0, 100.0);
+        let c = piece(&original[3], 0.0, 80.0);
+        let expected = vec![
+            original[0].id,
+            a.id,
+            b.id,
+            original[2].id,
+            c.id,
+            original[5].id,
+        ];
+        let mut invalid = a.clone();
+        invalid.color = [0, 0, 0, 0];
+        let revision = drawing.revision();
+        assert!(!drawing.replace_partial(std::collections::HashMap::from([(
+            original[1].id,
+            vec![invalid]
+        )])));
+        assert_eq!(drawing.revision(), revision);
+        assert_eq!(drawing.strokes(), original);
+        let mut reused = a.clone();
+        reused.id = original[1].id;
+        assert!(!drawing.replace_partial(std::collections::HashMap::from([(
+            original[1].id,
+            vec![reused]
+        )])));
+        assert!(drawing.replace_partial(std::collections::HashMap::from([
+            (original[1].id, vec![a, b]),
+            (original[3].id, vec![c]),
+            (original[4].id, vec![])
+        ])));
+        assert_eq!(
+            drawing.strokes().iter().map(|s| s.id).collect::<Vec<_>>(),
+            expected
+        );
+        drawing.undo();
+        assert_eq!(drawing.strokes(), original);
+        drawing.redo();
+        assert_eq!(
+            drawing.strokes().iter().map(|s| s.id).collect::<Vec<_>>(),
+            expected
+        );
+        drawing.undo();
+        drawing.add(stroke(&data, Surface::Canvas, &[[12.0, 12.0]]));
+        assert!(!drawing.can_redo());
+    }
+
     #[test]
     fn histories_are_isolated_between_documents() {
         let a = DocumentData::blank(DocumentKind::Whiteboard);

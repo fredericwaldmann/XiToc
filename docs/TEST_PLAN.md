@@ -267,7 +267,7 @@ Manual native and browser:
    session behavior. Clearing site data resets defaults. Native disk errors are
    logged by eframe. Inspect the OS app.ron / localStorage preference key to
    confirm that it contains no document content or workspace paths.
-6. Stroke Smoothing is enabled as of #12; pressure and partial-erasing controls remain unavailable.
+6. Stroke Smoothing (#12) and eraser modes (#13) are enabled; pressure controls remain unavailable.
 
 Local validation for this change: fmt, Clippy with warnings denied, 42 tests
 passed (the existing eraser benchmark is ignored), native build, WASM check and
@@ -327,3 +327,72 @@ controller tests cover Page Notes and all five strength/persistence levels.
 Physical handwriting latency, native graphical smoke and Windows/macOS runtime
 still require matching devices. Local comparison screenshot:
 `/tmp/xitoc-smoothing-comparison.png` (not a repository artifact).
+
+## M1.1 stroke and partial erasers (#13)
+
+Automated: analytic capsule disk/strip/end-cap/stationary intersections compared
+against independent point-distance samples; middle/end/dot/full/thick cuts;
+legacy/adaptive curve survivors preserving every unaffected visible vertex;
+repeat/overlap cut merging and tangency without fragment explosion; exact JSON
+fragment round trips and pressure interpolation; large origins/long segments.
+Controller events cover multiple smoothed strokes in both layouts at 0.25×/1×/4×,
+transient previews without document mutation, single-command commit, exact
+original/fragment history and stacking, whole-erasing generated polylines and
+branch truncation. Tests verify stable/idle preview mesh reuse, rejection of
+invalid replacement IDs/style/data, menu mode/size, preference migration and
+persistence. Existing #14/#12/PDF/storage/UI tests remain required.
+
+Deterministic performance checks: query only two 16-segment blocks from a
+100,000-segment path, preserve original mesh Arcs during partial previews and
+reuse cut meshes for repeated identical samples. Run
+`cargo test --release partial_ -- --ignored --nocapture` for 100/10,000-stroke
+sampling/commit timings and 100/100,000-segment setup/sampling. These CPU timings
+exclude GPU rendering/event/display latency; commits and initial fragment meshes
+scale with affected vector geometry. Genuine thousands of separated holes can
+require thousands of fragments; continuous/repeated cuts must coalesce.
+
+Manual native/WebGL2 browser:
+1. Create Page and Whiteboard notes; draw curves, dots, thick strokes and several
+   crossing lines at different smoothing strengths.
+2. Open the eraser dropdown between Pen and Hand, select Stroke Eraser, sweep
+   across several strokes. Whole strokes disappear; one undo restores the sweep.
+3. Select Partial Eraser, sweep across the middle and ends of multiple strokes.
+   Only intersected sections disappear; visible fragments keep their shape/style.
+   Undo once restores all originals in their stacking order; redo restores cuts.
+4. Adjust radius in the same dropdown and compare the cursor ring/gap. Repeat
+   after zoom/pan/resize and on another tab/type, then erase a survivor again.
+5. Reload/restart to verify the selected mode; only preferences persist until M2.
+   Current ink remains memory-only; discard only the scratch drawings for reload.
+6. Check narrow Tools/document submenus, both themes and keyboard navigation.
+
+Local validation for #13: formatting, Clippy (`-D warnings`), 61 tests passed
+(four manual benchmarks ignored by default), native build, WASM check and Trunk
+release build. Both partial benchmarks and the existing whole-stroke eraser
+benchmark passed separately in release mode.
+
+| Partial CPU workload | Result |
+| --- | ---: |
+| 100 strokes: 2,000 pointer samples / commit | 10.109 ms / 0.090 ms |
+| 10,000 strokes: 2,000 pointer samples / commit | 5.742 ms / 7.846 ms |
+| 10,000-stroke document index setup | 9.766 ms |
+| 100,000-segment path-block index setup | 2.196 ms |
+| 100,000-segment path: 2,000 local samples | 9.133 ms |
+
+Host load affects these measurements; the smaller fixture is not guaranteed
+faster in one run. Path-block setup replaced an initial per-segment hierarchy
+that took 50.684 ms on the same long-path fixture. The #14 whole-stroke benchmark
+still completed 200 warm empty-space samples on 10,000 strokes in 0.006 ms, with
+an 8.216 ms document index build. Benchmarks exclude rendering/display latency;
+real overlapping content and affected geometry size still matter.
+
+Firefox headless/WebGL2 smoke: created a scratch Whiteboard, drew straight and
+smoothed strokes, selected Partial Eraser and swept through all three. Matching
+local gaps appeared with preserved survivors and the effective-radius ring.
+Keyboard undo/redo restored/reapplied the entire sweep. Stroke Eraser removed
+all three originals with one sweep, and undo restored them. The browser
+localStorage key contained the selected mode in preferences schema 3. A browser
+reload check was interrupted by server recovery; restart persistence is covered
+by automated preference round trips. Local screenshot
+`/tmp/xitoc-partial-eraser.png` is a session artifact, not a note format or repo file.
+Native graphical/physical-device and Windows/macOS runtime checks remain manual;
+both layouts and pan/zoom/far-origin behavior have automated controller coverage.

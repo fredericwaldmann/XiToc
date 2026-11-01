@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const STORAGE_KEY: &str = "XiToc/preferences";
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Theme {
@@ -18,6 +18,7 @@ pub struct DrawingPreferences {
     pub width: f64,
     pub eraser_radius: f64,
     pub smoothing_strength: u8,
+    pub eraser_mode: crate::drawing::EraserMode,
 }
 impl Default for DrawingPreferences {
     fn default() -> Self {
@@ -26,11 +27,12 @@ impl Default for DrawingPreferences {
             width: 2.5,
             eraser_radius: 14.0,
             smoothing_strength: 50,
+            eraser_mode: crate::drawing::EraserMode::Stroke,
         }
     }
 }
 
-// Future eraser modes and pressure options belong in typed
+// Future pressure options belong in typed
 // groups here, with validation and schema migration when their behavior exists.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -60,7 +62,7 @@ impl Preferences {
         let mut prefs: Self =
             serde_json::from_str(json).map_err(|e| format!("Cannot read preferences: {e}"))?;
         // Version 1 had no strength field; serde supplies the handwriting default.
-        if prefs.schema_version == 1 {
+        if matches!(prefs.schema_version, 1 | 2) {
             prefs.schema_version = VERSION;
         }
         if prefs.schema_version != VERSION {
@@ -93,6 +95,7 @@ impl Preferences {
         canvas.width = self.drawing.width;
         canvas.eraser_radius = self.drawing.eraser_radius;
         canvas.smoothing_strength = self.drawing.smoothing_strength;
+        canvas.eraser_mode = self.drawing.eraser_mode;
     }
 }
 
@@ -113,6 +116,29 @@ pub(crate) mod tests {
         }
         fn flush(&mut self) {}
     }
+    #[test]
+    fn eraser_modes_migrate_and_persist_independently_of_smoothing() {
+        use crate::drawing::EraserMode;
+        for json in [
+            r#"{"schema_version":1}"#,
+            r#"{"schema_version":2,"drawing":{"smoothing_strength":75}}"#,
+        ] {
+            let migrated = Preferences::decode(json).unwrap();
+            assert_eq!(migrated.schema_version, VERSION);
+            assert_eq!(migrated.drawing.eraser_mode, EraserMode::Stroke);
+        }
+        for mode in [EraserMode::Stroke, EraserMode::Partial] {
+            let mut prefs = Preferences::default();
+            prefs.drawing.eraser_mode = mode;
+            let mut storage = MemoryStorage::default();
+            prefs.store(&mut storage);
+            let restored = Preferences::load(Some(&storage)).unwrap();
+            assert_eq!(restored.drawing.eraser_mode, mode);
+            assert_eq!(restored.drawing.smoothing_strength, 50);
+        }
+        assert!(Preferences::decode(r#"{"drawing":{"eraser_mode":"Unknown"}}"#).is_err());
+    }
+
     #[test]
     fn smoothing_preferences_migrate_and_persist_every_strength() {
         let old = Preferences::decode(r#"{"schema_version":1,"drawing":{"width":6.0}}"#).unwrap();
@@ -145,6 +171,7 @@ pub(crate) mod tests {
                 color: [2, 3, 4, 255],
                 eraser_radius: 32.0,
                 smoothing_strength: 75,
+                eraser_mode: crate::drawing::EraserMode::Partial,
             },
             ..Default::default()
         };
@@ -152,7 +179,7 @@ pub(crate) mod tests {
         assert_eq!(Preferences::load(Some(&storage)).unwrap(), prefs);
         for json in [
             "broken",
-            r#"{"schema_version":3}"#,
+            r#"{"schema_version":4}"#,
             r#"{"drawing":{"width":0.0}}"#,
             r#"{"drawing":{"eraser_radius":49.0}}"#,
             r#"{"drawing":{"color":[0,0,0,0]}}"#,
