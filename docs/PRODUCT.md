@@ -118,3 +118,11 @@ Both layouts, smoothing, both erasers and undo/redo retain editable pressure dat
 Browser pen PointerEvents and Windows winit pen-force input have a supported code
 path; native Linux/macOS tablets currently use constant-width fallback. Physical
 hardware is unverified. See PRESSURE_INPUT.md. Saving ink remains the M2 milestone.
+
+## M1.3 drawing workspace
+
+A compact floating Hand/Pen/Eraser palette replaces inline drawing controls in
+both layouts. Pen and Eraser open contextual settings; Undo/Redo and View remain
+in the header. Explorer, tabs with +, menu bar and Settings remain. Only working
+tools appear. Opacity, additional pen styles and creative objects remain planned
+(`CREATIVE_TOOLS.md`). Ink is still memory-only until M2.

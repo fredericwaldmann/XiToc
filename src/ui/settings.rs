@@ -56,31 +56,7 @@ impl SettingsDialog {
                             super::drawing_controls::show(ui, &mut prefs.drawing.color,
                                 &mut prefs.drawing.width, &mut prefs.drawing.eraser_radius);
                             ui.add_space(style::GAP);
-                            ui.strong("Stroke Smoothing");
-                            ui.label("Applies to new strokes in every open tab.");
-                            ui.spacing_mut().slider_width = style::SMOOTHING_SLIDER_WIDTH.min(ui.available_width() - 70.0);
-                            ui.scope(|ui| {
-                                let p = style::palette(ui);
-                                ui.visuals_mut().widgets.inactive.bg_fill = p.border;
-                                ui.add(egui::Slider::new(&mut prefs.drawing.smoothing_strength, 0..=100)
-                                    .suffix("%")
-                                    .trailing_fill(true)
-                                    .text("Strength"));
-                            });
-                            ui.weak("0% Off · 25% Light · 50% Medium · 75% Strong · 100% Maximum");
-                            ui.add_space(style::GAP);
-                            ui.strong("Pen pressure");
-                            ui.checkbox(&mut prefs.drawing.pressure.enabled, "Enable pressure sensitivity");
-                            ui.scope(|ui| {
-                                let p = style::palette(ui);
-                                ui.visuals_mut().widgets.inactive.bg_fill = p.border;
-                                ui.add_enabled_ui(prefs.drawing.pressure.enabled, |ui| {
-                                    ui.add(egui::Slider::new(&mut prefs.drawing.pressure.strength, 0..=100).suffix("%").trailing_fill(true).text("Sensitivity strength"));
-                                    ui.add(egui::Slider::new(&mut prefs.drawing.pressure.minimum, 1..=100).suffix("%").trailing_fill(true).text("Minimum stroke width"));
-                                });
-                            });
-                            ui.weak("Applies to new strokes with pen/touch force. Mouse and devices without pressure keep constant width. Native Linux/macOS tablets currently use this fallback.");
-                            ui.add_space(style::GAP);
+                            super::drawing_controls::response(ui, &mut prefs.drawing);
                             ui.strong("Eraser mode");
                             egui::ComboBox::from_id_salt("preferred-eraser-mode")
                                 .selected_text(prefs.drawing.eraser_mode.label())

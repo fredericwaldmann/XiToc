@@ -447,3 +447,42 @@ Settings and drawing screenshots are local session artifacts in `/tmp`, not PDFs
 or repository fixtures. Automated controller tests cover both document types,
 whole/partial erasure/history, secondary-contact isolation and cancellation.
 Native Windows/macOS runtime and physical pen testing remain outstanding.
+
+## M1.3 floating drawing workspace
+
+Automated regression exercises the actual floating palette and editor together
+in Page/Whiteboard layouts: Pen options appear; Eraser changes the shared
+preference/controller mode; adjustments remain open; Escape dismisses on the next
+frame; disabled parent UI prevents tool changes; no control click produces ink.
+Existing controller, smoothing, pressure, erase/history, mesh cache and spatial
+index regression tests stay required. No engine/model/PDF codec changes.
+
+Local validation: fmt, Clippy with warnings denied, 68 tests passed (four manual
+benchmarks ignored by default), native build, WASM check and Trunk release build.
+Both release partial-erasing benchmarks passed separately. 10,000 strokes:
+index setup 8.07 ms, 2,000 local samples 3.65 ms, commit 4.93 ms. 100,000-segment
+path: index setup 2.05 ms, 2,000 samples 5.52 ms. Host-dependent CPU measurements
+exclude GPU/display/input latency; this UI slice preserves engine caching/indexes.
+
+Performed Firefox 157 / WebGL2 visual smoke with actual release application:
+created Page and Whiteboard session PDFs using tab +; dismissed scratch export
+dialogs without claiming saved files; inspected white A4 on neutral workspace,
+borderless dotted board, palette and both popovers at 1100×760; resized to
+480×360 and inspected both themes and scrolling Pen options. Explorer, tabs and
+palette occupy separate regions. Drew using mouse pointer events, whole-erased
+the stroke and restored it with Ctrl+Z; dirty indicator/export guard followed
+history. Screenshots are indexed in `screenshots/README.md`. This verifies the
+app against our specification, not pixel parity with Apple's current macOS UI.
+
+Linux native executable was built and launched without startup errors; native
+screenshot capture failed (host image tool unavailable for this purpose). Native
+interactive drawing, physical pen latency and Windows/macOS runtime remain manual.
+
+To reproduce: run `cargo run --locked`, open a scratch workspace, create both
+notes with +, inspect palette/settings and both themes. For browser run
+`trunk serve`, open localhost, create both session notes, dismiss export dialogs.
+Check small window, popover scrolling/Escape/outside-click, tab switching,
+Hand/Space pan, Ctrl/Cmd-wheel/pinch zoom, both erasers and undo/redo. Test Settings
+changes against the same smoothing/pressure/mode controls. Ink remains memory-only;
+discard only scratch drawings. Proposed future issues/dependencies are recorded
+in `CREATIVE_TOOLS.md`; none of their tools are exposed as working controls.

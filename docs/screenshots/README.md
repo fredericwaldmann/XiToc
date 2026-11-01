@@ -46,3 +46,21 @@ No native graphical/OS-dialog testing or physical stylus/high-DPI hardware testi
 was performed. Native Linux compilation, simulated scaling tests and GitHub CI
 cover build compatibility separately; they do not prove hardware latency or
 platform startup. M1 drawings are deliberately not saved/reloaded from PDF.
+
+## M1.3 actual browser captures
+
+Firefox 157 / WebGL2 running the Trunk release build on Linux, November 2026.
+These are app screenshots, not mockups. The browser uses explicit import/export
+fallback, so Explorer contains session PDFs rather than a permissioned disk tree.
+
+- [Main workspace, dark, with ink](m1.3/main-dark.png)
+- [A4 Page Note](m1.3/page.png)
+- [Whiteboard](m1.3/whiteboard.png)
+- [Pen settings](m1.3/pen.png)
+- [Eraser settings](m1.3/eraser.png)
+- [480×360 light](m1.3/small.png) / [dark](m1.3/small-dark.png)
+- [480×360 scrollable Pen settings](m1.3/small-pen.png)
+
+Native Linux executable launched successfully; native screenshot capture was
+unavailable in this environment. Windows/macOS and physical pen checks remain
+manual. No comparison screenshot from Apple's application is included.

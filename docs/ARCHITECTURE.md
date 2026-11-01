@@ -307,3 +307,13 @@ A page-lifetime Rust callback requests repaint when pen samples arrive.
 Preventing default on pen-down suppresses duplicate compatibility mouse input;
 ordinary mouse/finger events remain on eframe's path.
 Browser CSS positions divide by egui's UI zoom, matching eframe's coordinates.
+
+## M1.3 palette and future objects
+
+The foreground palette registers hit regions before the shared editor processes
+input. Popovers directly mutate existing per-tab color/width/radius and persisted
+DrawingPreferences smoothing/pressure/eraser mode. Shared drawing widgets serve
+Settings and popovers. No duplicate settings store, per-frame IO or forced repaint.
+The engine/model/PDF codec remain unchanged. See `CREATIVE_TOOLS.md` for proposed
+object/transform/order contracts that must be decided before M2 persistence, and
+separate future selection, shapes, text, images and connectors issue briefs.
