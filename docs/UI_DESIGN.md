@@ -1,186 +1,154 @@
-# XiToc UI design system (M0.6 foundation, M1 tools)
+# XiToc UI design system — M1.3 drawing workspace
 
-Follow this document for all interface work. `src/ui/style.rs` is the source of
-Rust tokens; update both together. Use egui logical points, never physical pixels.
-The interface supports desktop and browser with one component tree.
+Follow this specification for future UI changes. Keep `src/ui/style.rs` tokens
+and this document synchronized. All dimensions are egui logical points. Use one
+Rust/egui component tree on desktop and WASM. Original vector icons live in
+`src/ui/icons.rs`; no Apple assets, icon fonts or remote images.
 
-## Principles and hierarchy
+## Reference and hierarchy
 
-Keep the application compact, quiet and useful. Content receives the largest
-area; chrome uses flat surfaces, restrained separators and a single teal accent.
-Do not copy other products' assets. Avoid decorative cards, oversized buttons,
-heavy borders, gradients or animation. Every enabled control must perform its
-advertised action. Future tools are disabled with milestone tooltips.
+Primary UX reference: [Apple Freeform for Mac: drawing and sketching](https://support.apple.com/guide/freeform/draw-and-sketch-frfm6e3d132d2/mac),
+consulted November 2026. Adopt compact floating tools, nearby contextual options,
+and direct canvas manipulation. This is an adaptation, not a pixel replica.
+Apple's indexed guide text confirms bottom-of-window drawing tools, contextual
+nib/color options, and object/partial erasing. Its full page/images returned
+HTTP 429; detailed current macOS visual parity has not been verified.
 
-Order: application bar → document tabs → document toolbar → editor, with a
-resizable Explorer on the left and a status bar across the bottom. Keep filesystem
-IO, document mutations and PDF encoding out of UI components. Never introduce a
-document-type switch: layout comes from immutable document metadata.
+Preserve XiToc's application menu bar, resizable real-folder Explorer, horizontal
+scrolling document tabs, New Document (+) beside tabs, Settings and status bar.
+Order inside the editor: tabs → compact document header → canvas. The palette
+floats inside the canvas; never anchor it to the entire application window.
+Document type is chosen at creation and derived from metadata, never a toggle.
+Browser import/export retains truthful session/download language. Ink remains
+memory-only until M2, with dirty indicators and existing discard protections.
 
-## Colors
+## Colors and appearance
 
 | Token | Light | Dark | Use |
 | --- | --- | --- | --- |
 | Shell | #F6F7F9 | #1B2028 | Application bar, tabs, status |
 | Sidebar | #F0F2F5 | #181D24 | Explorer |
-| Surface | #FFFFFF | #242B35 | Toolbar, active tab, menus/dialogs |
+| Surface | #FFFFFF | #242B35 | Palette, active tab, popovers/dialogs |
 | Text | #202731 | #E6EAF0 | Primary labels |
 | Muted | #637083 | #9CA8B9 | Secondary labels |
-| Border | #D9DEE6 | #353E4A | Restrained control outlines |
-| Accent | #256B68 | #73C7BC | Active type icon, focus, tab underline |
-| Selection | #DDEDE9 | #29443F | Selected row/button |
+| Border | #D9DEE6 | #353E4A | Restrained outlines |
+| Accent | #256B68 | #73C7BC | Selected icons, focus, active tab underline |
+| Selection | #DDEDE9 | #29443F | Selected tools/rows |
 | Hover | #E5E9EF | #2F3845 | Hover feedback |
 | Workspace | #DFE3E9 | #10151C | Around Page Notes |
 | Board | #F6F8FA | #1B212A | Borderless Whiteboard |
-| Dot | #C6CFD9 | #404C5C | Whiteboard grid |
+| Dot | #C6CFD9 | #404C5C | Optional grid |
 
-Appearance menu and Settings select Light or Dark. Light is the initial default;
-theme and Explorer visibility are persisted application preferences, separate from PDF data. Pages remain white in
-both themes. Use egui's semantic error color for errors, never color alone to
-explain a failure. Avoid hard-coded colors outside tokens except white paper,
-its neutral edge and shadow.
+Pages stay white in both themes. Theme and Explorer visibility persist locally;
+grid and camera remain session state. Use semantic error colors with readable
+messages, never color alone. Avoid gradients, animation and heavy outlines.
 
-## Typography and spacing
+## Dimensions and typography
 
-Use the bundled egui proportional font. Body/buttons: 13 pt; secondary labels:
-11 pt; headings: 18 pt; wordmark: 16 pt bold; empty-editor heading: 20 pt. Avoid
-all-caps except the small Explorer heading. Use strong text for category labels,
-not every control. Truncate long file/tab/status labels and reveal full text on
-hover; errors also have a dedicated readable status window.
+Body/buttons 13, secondary text 11, headings 18, wordmark 16 bold, empty heading
+20. Spacing scale: 2, 4, 6, 8, 10, 16, 24. Ordinary controls/tree rows 26;
+ordinary icon buttons 26×26 with 14–16 glyphs. App bar 38, tab strip 36 with 32
+high tabs, document header 40, status 28. Ordinary corners 4, dialogs 6.
+Explorer starts at 248, resizes from 132 to min(360, 45% window).
 
-Spacing scale: 2, 4, 6, 8, 10, 16, 24 pt. Standard horizontal gap 8, vertical gap 6,
-button padding 8×4, tree indentation 16. Controls and tree file rows are 26 pt high;
-icon buttons 26×26, glyph box 14–16. Application bar 38, tab strip 36 (tab 32),
-document toolbar 40, status bar 28. Control corner radius 4, dialog radius 6.
-Explorer starts at 248 pt, resizes from 132 to at most 360 and 45% of the window.
+## Floating drawing palette
 
-## Icons, interaction and navigation
+Bottom center of the editor viewport, 16 above its bottom edge. Surface fill,
+1-point Border outline, 12-point corners, 6-point inner padding, 4-point gaps.
+Restrained black shadow: alpha 24/255, offset (0,3), blur 12, spread 0.
+Tool buttons are 34×34; original monoline glyphs occupy 14–16 points and use
+1.25-point strokes. Current three-tool palette is approximately 124×48.
+Keep its position fixed; it is not draggable. Never place it over Explorer,
+tabs or status. Native minimum window is 480×360; hide Explorer for more room.
 
-Use the original monoline vector icons in `src/ui/icons.rs`; no emoji or external
-icon font dependency. Page: outlined sheet with lines. Whiteboard: wide outlined
-canvas with dots. Folder: folder outline. Plus/minus, reset, grid, sidebar and close use
-consistent strokes. Pair document icons with readable kind labels or tooltips;
-color alone never identifies a type. Icon buttons have accessible names and
-hover descriptions, with keyboard focus inherited from real egui buttons.
+Enabled sequence: Hand, Pen, Eraser. Each is a real keyboard-focusable button
+with an accessible name and tooltip. Selection uses selection fill, accent icon
+and outline; hover/focus use shared semantic styles. Tooltips explain settings
+and Space-drag. Clicking Pen or Eraser selects it and toggles its settings.
+Hand selects navigation without a settings panel. No dead/fake tool controls.
 
-Explorer category chevrons and labels expand/collapse. Folder names select the
-real creation destination; their chevrons expand/collapse. Files have hover and
-selected backgrounds. Context menus expose existing creation actions; do not
-advertise rename/move/delete before M3. Categories are virtual views of real paths.
-Tabs show type icon, filename, active surface and 2 pt accent underline, close
-button and full path/type tooltip. They scroll horizontally and reveal newly
-activated tabs. Tab focus uses an accent outline; Enter/Space activates a focused
-tab. Closing never deletes a file. M1 prefixes dirty tab titles with a filled dot
-and exposes “Unsaved drawing (memory only)” in the tooltip. The bottom status
-always warns when any tab has unsaved ink. Discard dialogs default to keeping
-work; Escape cancels. Never label memory-only ink as saved.
+Future conceptual sequence reserves Selection, Hand, Pen, Monoline, Pencil,
+Marker, Eraser, Shapes, Text, Sticky Notes. These are architecture positions,
+not empty slots occupying canvas today. See `CREATIVE_TOOLS.md` for dependencies.
 
-The M1 toolbar provides Pen, Eraser and Hand selection, an Ink settings menu,
-Undo/Redo and View zoom controls. Active tools use the selection background;
-Undo/Redo are disabled when their document journal has no corresponding action.
-Ink contains an inline expandable opaque color picker (Edit color), pen width (0.25–12 document points) and
-eraser radius (4–48 logical screen points). The default pen is blue (#2563C8),
-2.5 pt wide. Pressure-enabled ink varies width when the backend supplies force; mouse ink stays constant-width.
-The screen-space eraser ring must match the swept hit-test radius. Use logical
-points, not physical display pixels, for its dimensions. View supports both
-layouts; Page 100% fits the available width. Hand/Space-drag pans without ink.
-Selection, Text and Shapes remain disabled in the Ink menu with M6 tooltips.
-Browser Export PDF is disabled while that tab contains unsaved ink, explaining
-that drawing export is M2. Blank/original PDF export remains an explicit request,
-never a verified disk save. Ctrl/Cmd+S explains the persistence limitation.
+## Contextual settings and state ownership
 
-## Document surfaces
+Popovers anchor above their tool with natural viewport fallback/constraining;
+280-point preferred width, capped to available editor width minus 24. Content
+scrolls when height is limited, leaving palette accessible. Inside adjustments
+stay open; outside click, Escape, or clicking the opener dismisses naturally.
+They are nonmodal. Foreground hit regions are registered before canvas input;
+clicking controls never starts ink or panning. Outside canvas clicks dismiss and
+may begin the intended canvas gesture. Existing stroke input stays unchanged.
 
-Page Notes: white A4 rectangles with 0.75 pt gray edge and subtle black shadow
-(alpha 28/255, offset 0×3, blur 10, spread 1). Center pages in a neutral workspace,
-24 pt outer margin and page gap. Width fits available space up to 794 pt; below
-210 pt page width, horizontal scrolling preserves readable geometry. Retain the
-page list and label pages beneath the paper; do not add multipage editing yet.
-M1 zoom scales that fit-width baseline; scrollbars expose enlarged pages. Ink is
-stored page-locally in PDF points, clipped to paper, and never in the margins.
+Pen: color swatch, inline expandable opaque color picker, thickness 0.25–12 PDF
+points, smoothing strength 0–100%, pressure enable, sensitivity 0–100%, minimum
+width 1–100%. Default blue #2563C8, thickness 2.5, smoothing 50%, pressure enabled
+at 100% with minimum 20%. No opacity control until compositing is implemented.
+Eraser: Whole-stroke (`Stroke Eraser`) or Partial-stroke (`Partial Eraser`), and
+radius 4–48 logical screen points. Its two-ring cursor matches the engine radius.
 
-Whiteboards: fill the editor with the board color, no paper edge or page shadow.
-Optional low-contrast dots follow the existing camera, spaced adaptively to avoid
-excessive drawing. Grid visibility and camera changes are session-only. Pen draws by default;
-Hand, space-drag or middle-drag pans; Ctrl/Cmd-wheel or pinch zooms around the
-pointer. Toolbar zoom anchors at the viewport center. M1 ink uses the same
-controller and renderer as A4, without page bounds.
-External PDFs display a truthful read-only/preview-unavailable explanation.
+Color/width/radius edit the existing active-tab canvas values. Smoothing, pressure
+and eraser mode edit existing persisted DrawingPreferences, also shown in
+Settings → Drawing; no mirrored palette state. Smoothing/pressure affect new
+strokes across tabs, never reshape old strokes. Settings color/width/radius are
+defaults for newly opened tabs. Shared drawing-control functions serve both UIs.
+Mouse and devices without supported force remain constant-width; native Linux
+and macOS tablets currently use that fallback. Do not claim hardware detection.
 
-## Responsive behavior and component boundaries
+Settings remains Edit → Settings, centered 520-point preferred width with 24
+outer clearance, General/Appearance/Drawing/Input Devices sections, scrollable
+content, persistent preferences, Done/Escape dismissal. Underlying editor is
+disabled while Settings is open. Popovers need no new modal dialogs.
 
-The Explorer can be hidden with the top sidebar button. Narrow Explorer headers
-use “Files” and a Workspace menu; long trees scroll. Tabs scroll rather than wrap.
-Toolbar contents move into Tools/View menus; below 360 pt editor width, one typed
-document menu contains drawing, view and permitted export actions.
-Inline drawing controls require 760 pt; inline view controls require 1100 pt.
-Smaller editors use Tools/View menus without changing toolbar height. Status
-context is omitted on narrow windows; the status text truncates and the details
-button always exposes the complete message. Dialog inputs follow available width.
-No fixed physical-pixel sizing; egui handles display scaling and canvas resizing.
+## Document surfaces and controls
 
-`app.rs` owns state and executes actions. `ui/chrome.rs`, `explorer.rs`, `tabs.rs`,
-`toolbar.rs` and `dialog.rs` render their respective areas and return intents;
-`style.rs` and `icons.rs` are reusable foundations. `editor.rs` renders metadata-
-derived document surfaces and maintains transient navigation. Domain/PDF/storage
-remain independent. Add small components as needed, not a framework or parallel
-editor implementations. Verify narrow/wide windows, both themes and scaling when
-extending this layout; see `TEST_PLAN.md`.
+Page Notes: white A4 pages, 0.75 gray edge, black shadow alpha 28/255, offset
+(0,3), blur 10, spread 1. Neutral Workspace surrounds paper, outer/page gap 24.
+Fit available width up to 794; minimum paper width 210 with scrolling. Preserve
+the page list, boundaries, per-page labels and page-local ink clipping. Multipage
+creation remains #11; no new page-editing feature in M1.3. Palette stays fixed
+while paper scrolls; pan/scroll can reveal content behind it.
 
-## Settings (M1.1, #6)
+Whiteboards: Board fill, no A4 bounds/edge/shadow. Optional low-contrast adaptive
+dot grid follows the existing camera. Infinite f64 world coordinates remain
+unchanged. Both types share the same palette, controller and renderer.
 
-Edit → Settings opens a centered modal with General, Appearance, Drawing and
-Input Devices sections. Section selectors wrap at narrow widths; the content
-scrolls independently so Done remains accessible. `SETTINGS_WIDTH` is 520 logical
-points; the modal leaves 24 points of outer clearance. Reuse the standard surface,
-heading, separators, spacing and focus styles. Done and Escape close the dialog.
-The editor beneath is disabled while the dialog is open.
+Header retains immutable document type, Undo/Redo and View menu (zoom out/in,
+percentage, reset/fit; Whiteboard-only grid). Under 360 editor points, collapse
+these actions into one typed document menu. Browser export remains disabled for
+dirty ink. External PDFs show read-only/preview-unavailable; no drawing palette.
 
-General includes editor behavior (Show Explorer). Appearance reuses Light/Dark.
-Drawing reuses the Ink color picker and width/radius controls for defaults applied
-to newly created/opened tabs. Input Devices includes middle-button Whiteboard
-panning. Hand/Space navigation remains available. Changes apply automatically;
-preferences persist locally with a short write debounce. Appearance menu and
-Explorer button edit the same preferences. Persistence warnings appear in Settings.
+## Navigation, shortcuts and accessibility
 
-Pressure controls are implemented under Drawing as described below. Preferences never modify existing stroke objects or PDF contents.
+- Pen: crosshair; Eraser: radius ring; Hand: grab/grabbing. Space temporarily pans.
+- Space-drag pans either type; optional middle-drag pans Whiteboards.
+- Ctrl/Cmd-wheel or pinch zooms; View zoom anchors at viewport center. Page 100%
+  means fit-width baseline; Whiteboard 100% means unit camera scale.
+- Ctrl/Cmd+Z undo; Ctrl/Cmd+Shift+Z redo. Buttons disable at journal boundaries.
+- Ctrl/Cmd+S reports that ink saving requires M2. Never mark current ink saved.
+- Tab/Shift+Tab moves focus through controls; Enter/Space activates buttons/tabs;
+  Escape dismisses popovers or Settings. Retain existing platform behavior.
+- No unmodified tool hotkeys added; do not steal future text-entry keystrokes.
 
-### Stroke Smoothing (#12)
+Tabs retain kind icon, filename, full path/type tooltip, dirty dot, close button,
+selected surface and 2-point underline; scroll horizontally instead of wrapping.
+The + action stays beside the scrollable tab region. Closing never deletes PDFs.
+Explorer virtual categories retain actual hierarchy; folder selection determines
+creation destination. Truncate long labels with full hover text. Status details
+keep full errors and the unsaved-ink caveat accessible on narrow windows.
 
-Settings → Drawing contains a Stroke Smoothing group and a 0–100% Strength slider.
-`SMOOTHING_SLIDER_WIDTH` is 200 logical points, constrained by available width.
-Use the Border token for its visible rail and the standard selection trailing fill.
-Show the scale: 0% Off, 25% Light, 50% Medium, 75% Strong, 100% Maximum. Default
-50% balances jitter reduction and detail. State that it applies to new strokes
-in every open tab. Persist it with other preferences. Existing ink is never
-reshaped by this control. Retain the shared spacing, typography and colors.
+## Boundaries, performance and verification
 
-### Eraser modes (#13)
+`app.rs` coordinates state/actions. `toolbar.rs` renders header and palette;
+`drawing_controls.rs` shares settings widgets; style/icons centralize visuals.
+Document model, PDF, storage, geometry, smoothing, indexes and mesh caches remain
+independent. No IO, timers or unconditional repaint requests in palette drawing;
+closed popovers do not construct their content. Preserve existing incremental
+stroke meshes, spatial eraser indexes and large-coordinate transforms.
 
-Keep the eraser in its existing toolbar position between Pen and Hand. A compact
-menu button shows the full selected mode, Stroke Eraser or Partial Eraser, and
-uses the normal selection treatment when the eraser tool is active. Its dropdown
-selects/activates either mode and reuses the radius DragValue (4–48 logical screen
-points). Keep inside clicks open for size adjustments; mode choice closes that
-menu. Preserve nested Tools/document menus at narrow widths. No toolbar redesign
-or new palette/dimension tokens are needed.
-
-The selected mode is an application preference shared by tabs and exposed in
-Settings → Drawing → Eraser mode. Radius remains an individual tab's tool setting;
-Settings/Ink keep their existing defaults/controls. The two-ring eraser cursor
-continues to show the screen-space eraser radius in both modes, with ink thickness
-accounted for in geometric tests. Each continuous sweep is one undo operation.
-Partial erasing displays the surviving vectors immediately and preserves their
-shape on release. The app still explains that ink saving arrives in M2.
-
-### Pen pressure (#15)
-
-Settings → Drawing provides Enable pressure sensitivity (default on), Sensitivity
-strength (0–100%, default 100%) and Minimum stroke width (1–100%, default 20%).
-Disable the two sliders when the checkbox is off. Reuse the smoothing slider
-width, ordinary semantic colors and shared spacing; no new tokens are needed.
-Explain the device-dependent constant-width fallback, including native Linux and
-macOS. These settings apply to new strokes in every tab and persist locally.
-Minimum is the lower endpoint at full strength; 0% strength keeps constant width.
-Existing ink keeps its captured settings. No pressure capability detection is
-claimed: a connected pen may become available without restarting the app.
+Verify actual running app at 1100×760 and 480×360, both themes and document types.
+Capture workspace, Page, Whiteboard, Pen and Eraser popovers; confirm no overlap
+with Explorer/tabs, no accidental ink from controls, drawing/erasing/history,
+resize, grid and zoom. Record performed checks in TEST_PLAN, distinguish build
+checks from visual verification and physical pen/display latency tests.

@@ -31,7 +31,7 @@ pub fn show(
         icons::show(ui, doc.data.kind().into(), p.accent);
         if width < 360.0 {
             menu(ui, doc.data.kind().label(), |ui| {
-                tools(ui, doc, editor, eraser_mode);
+                history(ui, &mut editor.canvas);
                 ui.separator();
                 view(ui, doc, editor);
                 export(ui, action, editor.canvas.dirty());
@@ -44,114 +44,150 @@ pub fn show(
                 .color(p.muted),
         );
         ui.separator();
-        if width >= 760.0 {
-            tools(ui, doc, editor, eraser_mode);
-        } else {
-            menu(ui, "Tools", |ui| tools(ui, doc, editor, eraser_mode));
-        }
-        ui.separator();
-        if width >= 1100.0 {
-            view(ui, doc, editor);
-        } else {
-            menu(ui, "View", |ui| view(ui, doc, editor));
-        }
+        history(ui, &mut editor.canvas);
+        menu(ui, "View", |ui| view(ui, doc, editor));
         export(ui, action, editor.canvas.dirty());
     });
 }
 
-fn tools(ui: &mut egui::Ui, doc: &Document, editor: &mut Editor, eraser_mode: &mut EraserMode) {
-    ui.add_enabled_ui(!doc.external, |ui| {
-        ui.horizontal(|ui| {
-            for (tool, label, hint) in [
-                (Tool::Pen, "Pen", "Freehand ink"),
-                (Tool::Eraser, "Eraser", "Erase whole strokes"),
-                (Tool::Pan, "Hand", "Pan without drawing; or hold Space"),
-            ] {
-                if tool == Tool::Eraser {
-                    eraser_menu(ui, &mut editor.canvas, eraser_mode);
-                    continue;
-                }
-                if ui
-                    .selectable_label(editor.canvas.tool == tool, label)
-                    .on_hover_text(hint)
-                    .clicked()
-                {
-                    editor.canvas.select(tool);
-                }
-            }
-            menu(ui, "Ink", |ui| {
-                let old_color = editor.canvas.color;
-                super::drawing_controls::show(
-                    ui,
-                    &mut editor.canvas.color,
-                    &mut editor.canvas.width,
-                    &mut editor.canvas.eraser_radius,
-                );
-                if editor.canvas.color != old_color {
-                    editor.canvas.finish();
-                }
-                ui.separator();
-                ui.horizontal(|ui| {
-                    for name in ["Select", "Text", "Shapes"] {
-                        ui.add_enabled(false, egui::Button::new(name))
-                            .on_disabled_hover_text(format!("{name} is unavailable until M6"));
-                    }
-                });
-            });
-            if ui
-                .add_enabled(
-                    editor.canvas.drawing.can_undo(),
-                    egui::Button::new("Undo").frame_when_inactive(false),
-                )
-                .on_hover_text("Ctrl/Cmd+Z")
-                .clicked()
-            {
-                editor.canvas.undo();
-            }
-            if ui
-                .add_enabled(
-                    editor.canvas.drawing.can_redo(),
-                    egui::Button::new("Redo").frame_when_inactive(false),
-                )
-                .on_hover_text("Ctrl/Cmd+Shift+Z")
-                .clicked()
-            {
-                editor.canvas.redo();
-            }
-        });
-    });
-}
-
-fn eraser_menu(ui: &mut egui::Ui, canvas: &mut Canvas, mode: &mut EraserMode) {
-    let config = egui::containers::menu::MenuConfig::new()
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-    let button = egui::Button::new(mode.label())
-        .selected(canvas.tool == Tool::Eraser)
-        .right_text(egui::containers::menu::SubMenuButton::arrow_atom(None));
-    let content = |ui: &mut egui::Ui| {
-        for choice in [EraserMode::Stroke, EraserMode::Partial] {
-            if ui
-                .selectable_label(*mode == choice, choice.label())
-                .clicked()
-            {
-                canvas.select(Tool::Eraser);
-                canvas.eraser_mode = choice;
-                *mode = choice;
-                ui.close();
+fn history(ui: &mut egui::Ui, canvas: &mut Canvas) {
+    for (redo, label, enabled) in [
+        (false, "Undo", canvas.drawing.can_undo()),
+        (true, "Redo", canvas.drawing.can_redo()),
+    ] {
+        if ui
+            .add_enabled(enabled, egui::Button::new(label).frame_when_inactive(false))
+            .on_hover_text(if redo {
+                "Ctrl/Cmd+Shift+Z"
+            } else {
+                "Ctrl/Cmd+Z"
+            })
+            .clicked()
+        {
+            if redo {
+                canvas.redo();
+            } else {
+                canvas.undo();
             }
         }
-        ui.separator();
-        super::drawing_controls::eraser_radius(ui, &mut canvas.eraser_radius);
-    };
-    if egui::containers::menu::is_in_menu(ui) {
-        egui::containers::menu::SubMenuButton::from_button(button)
-            .config(config)
-            .ui(ui, content);
-    } else {
-        egui::containers::menu::MenuButton::from_button(button)
-            .config(config)
-            .ui(ui, content);
     }
+}
+
+/// Foreground UI is registered before the canvas, so its hit regions own input.
+pub fn palette(
+    ui: &mut egui::Ui,
+    editor: &mut Editor,
+    prefs: &mut crate::settings::DrawingPreferences,
+) -> egui::Rect {
+    let bounds = ui.available_rect_before_wrap();
+    let p = style::palette(ui);
+    egui::Area::new(egui::Id::unique("drawing-palette").with(editor.canvas.drawing.owner()))
+        .order(egui::Order::Foreground)
+        .movable(false)
+        .enabled(ui.is_enabled())
+        .pivot(egui::Align2::CENTER_BOTTOM)
+        .fixed_pos(egui::pos2(
+            bounds.center().x,
+            bounds.bottom() - style::PALETTE_INSET,
+        ))
+        .constrain_to(bounds)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::new()
+                .fill(p.surface)
+                .stroke(egui::Stroke::new(1.0, p.border))
+                .corner_radius(style::PALETTE_RADIUS)
+                .shadow(egui::epaint::Shadow {
+                    offset: [0, 3],
+                    blur: 12,
+                    spread: 0,
+                    color: egui::Color32::from_black_alpha(24),
+                })
+                .inner_margin(6)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        for (tool, icon, label) in [
+                            (Tool::Pan, Icon::Hand, "Hand · Space-drag to pan"),
+                            (Tool::Pen, Icon::Pen, "Pen · click again for settings"),
+                            (
+                                Tool::Eraser,
+                                Icon::Eraser,
+                                "Eraser · click again for settings",
+                            ),
+                        ] {
+                            let selected = editor.canvas.tool == tool;
+                            let response = ui.add(
+                                egui::Button::new("")
+                                    .min_size(egui::Vec2::splat(style::PALETTE_TOOL))
+                                    .selected(selected),
+                            );
+                            response.widget_info(|| {
+                                egui::WidgetInfo::selected(
+                                    egui::Role::Button,
+                                    true,
+                                    selected,
+                                    label,
+                                )
+                            });
+                            icons::paint(
+                                ui.painter(),
+                                response.rect.center(),
+                                icon,
+                                if selected { p.accent } else { p.text },
+                            );
+                            let response = response.on_hover_text(label);
+                            if response.clicked() {
+                                editor.canvas.select(tool);
+                            }
+                            if tool != Tool::Pan && ui.is_enabled() {
+                                egui::Popup::from_toggle_button_response(&response)
+                                    .align(egui::emath::RectAlign::TOP)
+                                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                    .width(style::TOOL_POPOVER_WIDTH.min(bounds.width() - 24.0))
+                                    .show(|ui| {
+                                        egui::ScrollArea::vertical()
+                                            .max_height((bounds.height() - 90.0).max(60.0))
+                                            .show(ui, |ui| {
+                                                if tool == Tool::Pen {
+                                                    ui.strong("Pen");
+                                                    super::drawing_controls::pen(
+                                                        ui,
+                                                        &mut editor.canvas.color,
+                                                        &mut editor.canvas.width,
+                                                    );
+                                                    ui.separator();
+                                                    super::drawing_controls::response(ui, prefs);
+                                                } else {
+                                                    ui.strong("Eraser");
+                                                    for mode in
+                                                        [EraserMode::Stroke, EraserMode::Partial]
+                                                    {
+                                                        if ui
+                                                            .selectable_value(
+                                                                &mut prefs.eraser_mode,
+                                                                mode,
+                                                                mode.label(),
+                                                            )
+                                                            .changed()
+                                                        {
+                                                            editor.canvas.finish();
+                                                            editor.canvas.eraser_mode = mode;
+                                                        }
+                                                    }
+                                                    super::drawing_controls::eraser_radius(
+                                                        ui,
+                                                        &mut editor.canvas.eraser_radius,
+                                                    );
+                                                }
+                                            });
+                                    });
+                            }
+                        }
+                    });
+                });
+        })
+        .response
+        .rect
 }
 
 fn view(ui: &mut egui::Ui, doc: &Document, editor: &mut Editor) {
@@ -219,28 +255,82 @@ fn menu(ui: &mut egui::Ui, label: &str, content: impl FnOnce(&mut egui::Ui)) {
 mod tests {
     use super::*;
     #[test]
-    fn eraser_dropdown_selects_mode_and_exposes_size() {
+    fn floating_popovers_own_input_and_edit_existing_preferences() {
         use crate::ui::settings::tests::{pointer, render};
-        let ctx = egui::Context::default();
-        let mut canvas = Canvas::new(&crate::document::DocumentData::blank(
-            DocumentKind::Whiteboard,
-        ));
-        let mut mode = EraserMode::Stroke;
-        fn click(ctx: &egui::Context, canvas: &mut Canvas, mode: &mut EraserMode, label: &str) {
-            render(ctx, vec![], |ui| eraser_menu(ui, canvas, mode));
-            let labels = render(ctx, vec![], |ui| eraser_menu(ui, canvas, mode));
-            let pos = *labels.get(label).unwrap();
-            render(ctx, pointer(pos, true), |ui| eraser_menu(ui, canvas, mode));
-            render(ctx, pointer(pos, false), |ui| eraser_menu(ui, canvas, mode));
+        for kind in [DocumentKind::Page, DocumentKind::Whiteboard] {
+            let ctx = egui::Context::default();
+            let data = crate::document::DocumentData::blank(kind);
+            let mut editor = Editor::new(&data);
+            let mut prefs = crate::settings::DrawingPreferences::default();
+            let mut rect = egui::Rect::NOTHING;
+            let mut frame = |events| {
+                render(&ctx, events, |ui| {
+                    rect = palette(ui, &mut editor, &mut prefs);
+                    editor.show(ui, &data);
+                })
+            };
+            frame(vec![]);
+            frame(vec![]);
+            drop(frame);
+            let pen = rect.center();
+            let eraser = pen + egui::vec2(style::PALETTE_TOOL + 4.0, 0.0);
+            let mut frame = |events| {
+                render(&ctx, events, |ui| {
+                    palette(ui, &mut editor, &mut prefs);
+                    editor.show(ui, &data);
+                })
+            };
+            frame(pointer(pen, true));
+            frame(pointer(pen, false));
+            let labels = frame(vec![]);
+            assert!(labels.contains_key("Pen color"));
+            assert!(labels.contains_key("Pen pressure"));
+            frame(pointer(eraser, true));
+            frame(pointer(eraser, false));
+            let labels = frame(vec![]);
+            let partial = labels["Partial Eraser"];
+            frame(pointer(partial, true));
+            frame(pointer(partial, false));
+            assert!(frame(vec![]).contains_key("Eraser radius"));
+            drop(frame);
+            render(
+                &ctx,
+                vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                |ui| {
+                    palette(ui, &mut editor, &mut prefs);
+                    editor.show(ui, &data);
+                },
+            );
+            let labels = render(&ctx, vec![], |ui| {
+                palette(ui, &mut editor, &mut prefs);
+                editor.show(ui, &data);
+            });
+            assert!(
+                !labels.contains_key("Eraser radius"),
+                "Escape dismisses settings"
+            );
+            let hand = pen - egui::vec2(style::PALETTE_TOOL + 4.0, 0.0);
+            for events in [vec![], pointer(hand, true), pointer(hand, false)] {
+                render(&ctx, events, |ui| {
+                    ui.disable();
+                    palette(ui, &mut editor, &mut prefs);
+                    editor.show(ui, &data);
+                });
+            }
+            assert_eq!(prefs.eraser_mode, EraserMode::Partial);
+            assert_eq!(editor.canvas.eraser_mode, EraserMode::Partial);
+            assert!(editor.canvas.tool == Tool::Eraser);
+            assert!(
+                !editor.canvas.dirty(),
+                "Palette/popover input must never draw ink"
+            );
         }
-        click(&ctx, &mut canvas, &mut mode, "Stroke Eraser");
-        click(&ctx, &mut canvas, &mut mode, "Partial Eraser");
-        assert_eq!(mode, EraserMode::Partial);
-        assert_eq!(canvas.eraser_mode, mode);
-        assert!(canvas.tool == Tool::Eraser);
-        click(&ctx, &mut canvas, &mut mode, "Partial Eraser");
-        let labels = render(&ctx, vec![], |ui| eraser_menu(ui, &mut canvas, &mut mode));
-        assert!(labels.contains_key("Eraser radius"));
     }
 
     #[test]

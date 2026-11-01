@@ -5,6 +5,9 @@ use egui::{Color32, Pos2, Rect, Stroke, StrokeKind, Vec2};
 
 #[derive(Clone, Copy)]
 pub enum Icon {
+    Pen,
+    Eraser,
+    Hand,
     Page,
     Board,
     Folder,
@@ -31,6 +34,52 @@ pub fn paint(painter: &egui::Painter, center: Pos2, icon: Icon, color: Color32) 
     let point = |x: f32, y: f32| center + egui::vec2(x, y);
     let line = |a, b| painter.line_segment([a, b], stroke);
     match icon {
+        Icon::Pen => {
+            line(point(-5.0, 5.0), point(-3.0, -1.0));
+            line(point(-3.0, -1.0), point(3.0, -7.0));
+            line(point(3.0, -7.0), point(7.0, -3.0));
+            line(point(7.0, -3.0), point(1.0, 3.0));
+            line(point(1.0, 3.0), point(-5.0, 5.0));
+            line(point(-3.0, -1.0), point(1.0, 3.0));
+        }
+        Icon::Eraser => {
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    point(-6.0, 1.0),
+                    point(1.0, -6.0),
+                    point(7.0, 0.0),
+                    point(0.0, 7.0),
+                ],
+                stroke,
+            ));
+            line(point(-3.0, -2.0), point(3.0, 4.0));
+            line(point(0.0, 7.0), point(7.0, 7.0));
+        }
+        Icon::Hand => {
+            painter.add(egui::Shape::line(
+                vec![
+                    point(-5.0, 0.0),
+                    point(-7.0, -2.0),
+                    point(-7.0, 1.0),
+                    point(-3.0, 6.0),
+                    point(3.0, 6.0),
+                    point(6.0, 1.0),
+                    point(6.0, -4.0),
+                    point(3.0, -4.0),
+                    point(3.0, 0.0),
+                    point(3.0, -6.0),
+                    point(0.0, -6.0),
+                    point(0.0, 0.0),
+                    point(0.0, -7.0),
+                    point(-3.0, -7.0),
+                    point(-3.0, 0.0),
+                    point(-3.0, -5.0),
+                    point(-5.0, -5.0),
+                    point(-5.0, 0.0),
+                ],
+                stroke,
+            ));
+        }
         Icon::Page => {
             painter.rect_stroke(
                 rect.shrink2(egui::vec2(2.0, 0.0)),

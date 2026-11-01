@@ -3,7 +3,10 @@
 Read `docs/PRODUCT.md`, `docs/ARCHITECTURE.md`, `docs/PDF_FORMAT.md`, `docs/ROADMAP.md`, and `docs/TEST_PLAN.md` before changing architecture or storage.
 
 For UI changes, also read and follow `docs/UI_DESIGN.md`; keep centralized tokens
-and the documented design system in sync.
+and the documented design system in sync. Follow its M1.3 floating palette,
+contextual settings, responsive layout and light/dark interaction specification.
+Do not expose planned tools as working controls; consult `docs/CREATIVE_TOOLS.md`
+for object-model and persistence dependencies.
 
 ## Mission and non-negotiable requirements
 

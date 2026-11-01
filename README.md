@@ -282,3 +282,9 @@ Browser pen PointerEvents are supported where force is reported. Windows has a
 source-verified egui/winit pen-force path; native Linux/macOS tablets currently
 fall back to constant width. No physical pen hardware was tested. Platform details
 and future native integration: [Pressure input](docs/PRESSURE_INPUT.md).
+
+M1.3 drawing workspace: use the bottom-center Hand/Pen/Eraser palette. Click Pen
+or Eraser for contextual settings; header Undo/Redo and View retain navigation.
+The + beside document tabs creates either immutable document type. Ink remains
+memory-only until M2. See [UI specification](docs/UI_DESIGN.md) and
+[future creative tool dependencies](docs/CREATIVE_TOOLS.md).

@@ -151,3 +151,13 @@ Windows has a source-verified winit pen path. Native Linux/macOS tablet integrat
 remains future work with constant-width fallback. See PRESSURE_INPUT.md.
 Synthetic tests cover geometry, erasers, history, smoothing and zoom; physical
 hardware has not been tested. M2 PDF serialization remains a separate milestone.
+
+## M1.3 — Freeform-inspired drawing workspace
+
+Compact floating Hand/Pen/Eraser palette inside both editor surfaces, contextual
+settings sharing existing tab/preferences state, retained Explorer/tabs/menu/Settings
+and header history/View controls. New Document (+) beside tabs addresses #9.
+No drawing-engine, PDF schema, storage or persistence changes. Opacity and creative
+tools remain planned; proposed issue briefs/dependencies: `CREATIVE_TOOLS.md`.
+Acceptance: `UI_DESIGN.md`, palette input-isolation regression, existing cache and
+controller tests, native/WASM builds and actual app visual smoke at narrow/wide sizes.

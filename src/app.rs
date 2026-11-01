@@ -308,6 +308,7 @@ impl XiTocApp {
 
     fn show_document_area(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>) {
         let p = style::palette(ui);
+        let can_create = self.can_create();
         egui::CentralPanel::default()
             .frame(style::frame(p.workspace, 0, 0))
             .show(ui, |ui| {
@@ -323,7 +324,14 @@ impl XiTocApp {
                             read_only: opened.loaded.document.external,
                             dirty: opened.editor.canvas.dirty(),
                         });
-                        tab_action = self.tabs.show(ui, documents, self.active);
+                        ui.horizontal(|ui| {
+                            ui.add_enabled_ui(can_create, |ui| {
+                                let response = ui.menu_button("+", |ui| ui::new_choices(ui, &self.selected_folder, action)).response;
+                                response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "New Document"));
+                                response.on_hover_text("New Document");
+                            });
+                            tab_action = self.tabs.show(ui, documents, self.active);
+                        });
                     });
                 if let Some(tab_action) = tab_action {
                     match tab_action {
@@ -350,6 +358,7 @@ impl XiTocApp {
                             ui.label("PDF preview is not available yet. The original file is preserved and will not be rewritten.");
                         });
                     } else {
+                        ui::toolbar::palette(ui, &mut opened.editor, &mut self.preferences.drawing);
                         opened.editor.canvas.smoothing_strength = self.preferences.drawing.smoothing_strength;
                         opened.editor.canvas.pressure_style = self.preferences.drawing.pressure;
                         opened.editor.middle_button_pan = self.preferences.middle_button_pan;
