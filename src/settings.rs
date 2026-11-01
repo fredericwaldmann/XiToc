@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const STORAGE_KEY: &str = "XiToc/preferences";
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Theme {
@@ -19,6 +19,7 @@ pub struct DrawingPreferences {
     pub eraser_radius: f64,
     pub smoothing_strength: u8,
     pub eraser_mode: crate::drawing::EraserMode,
+    pub pressure: crate::drawing::PressureStyle,
 }
 impl Default for DrawingPreferences {
     fn default() -> Self {
@@ -28,12 +29,15 @@ impl Default for DrawingPreferences {
             eraser_radius: 14.0,
             smoothing_strength: 50,
             eraser_mode: crate::drawing::EraserMode::Stroke,
+            pressure: crate::drawing::PressureStyle {
+                enabled: true,
+                ..Default::default()
+            },
         }
     }
 }
 
-// Future pressure options belong in typed
-// groups here, with validation and schema migration when their behavior exists.
+// Application preferences stay separate from captured document ink.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Preferences {
@@ -62,7 +66,7 @@ impl Preferences {
         let mut prefs: Self =
             serde_json::from_str(json).map_err(|e| format!("Cannot read preferences: {e}"))?;
         // Version 1 had no strength field; serde supplies the handwriting default.
-        if matches!(prefs.schema_version, 1 | 2) {
+        if matches!(prefs.schema_version, 1..=3) {
             prefs.schema_version = VERSION;
         }
         if prefs.schema_version != VERSION {
@@ -73,6 +77,8 @@ impl Preferences {
             || !prefs.drawing.eraser_radius.is_finite()
             || !(4.0..=48.0).contains(&prefs.drawing.eraser_radius)
             || prefs.drawing.smoothing_strength > 100
+            || prefs.drawing.pressure.strength > 100
+            || !(1..=100).contains(&prefs.drawing.pressure.minimum)
             || prefs.drawing.color[3] != 255
         {
             return Err("Invalid drawing preferences.".into());
@@ -95,6 +101,7 @@ impl Preferences {
         canvas.width = self.drawing.width;
         canvas.eraser_radius = self.drawing.eraser_radius;
         canvas.smoothing_strength = self.drawing.smoothing_strength;
+        canvas.pressure_style = self.drawing.pressure;
         canvas.eraser_mode = self.drawing.eraser_mode;
     }
 }
@@ -116,6 +123,39 @@ pub(crate) mod tests {
         }
         fn flush(&mut self) {}
     }
+    #[test]
+    fn pressure_preferences_migrate_validate_persist_and_apply() {
+        for version in 1..=3 {
+            let prefs = Preferences::decode(&format!(r#"{{"schema_version":{version}}}"#)).unwrap();
+            assert_eq!(prefs.schema_version, VERSION);
+            assert!(prefs.drawing.pressure.enabled);
+        }
+        for strength in [0, 50, 100] {
+            for minimum in [1, 20, 100] {
+                let mut prefs = Preferences::default();
+                prefs.drawing.pressure = crate::drawing::PressureStyle {
+                    enabled: strength != 0,
+                    strength,
+                    minimum,
+                };
+                let mut storage = MemoryStorage::default();
+                assert!(prefs.store(&mut storage));
+                assert_eq!(Preferences::load(Some(&storage)).unwrap(), prefs);
+                let data =
+                    crate::document::DocumentData::blank(crate::document::DocumentKind::Whiteboard);
+                let mut canvas = crate::canvas::Canvas::new(&data);
+                prefs.apply_drawing(&mut canvas);
+                assert_eq!(canvas.pressure_style, prefs.drawing.pressure);
+            }
+        }
+        for json in [
+            r#"{"drawing":{"pressure":{"strength":101}}}"#,
+            r#"{"drawing":{"pressure":{"minimum":0}}}"#,
+        ] {
+            assert!(Preferences::decode(json).is_err());
+        }
+    }
+
     #[test]
     fn eraser_modes_migrate_and_persist_independently_of_smoothing() {
         use crate::drawing::EraserMode;
@@ -172,6 +212,11 @@ pub(crate) mod tests {
                 eraser_radius: 32.0,
                 smoothing_strength: 75,
                 eraser_mode: crate::drawing::EraserMode::Partial,
+                pressure: crate::drawing::PressureStyle {
+                    enabled: true,
+                    strength: 75,
+                    minimum: 30,
+                },
             },
             ..Default::default()
         };
@@ -179,7 +224,7 @@ pub(crate) mod tests {
         assert_eq!(Preferences::load(Some(&storage)).unwrap(), prefs);
         for json in [
             "broken",
-            r#"{"schema_version":4}"#,
+            r#"{"schema_version":5}"#,
             r#"{"drawing":{"width":0.0}}"#,
             r#"{"drawing":{"eraser_radius":49.0}}"#,
             r#"{"drawing":{"color":[0,0,0,0]}}"#,

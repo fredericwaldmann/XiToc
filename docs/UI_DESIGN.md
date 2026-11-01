@@ -80,7 +80,7 @@ Undo/Redo and View zoom controls. Active tools use the selection background;
 Undo/Redo are disabled when their document journal has no corresponding action.
 Ink contains an inline expandable opaque color picker (Edit color), pen width (0.25–12 document points) and
 eraser radius (4–48 logical screen points). The default pen is blue (#2563C8),
-2.5 pt wide. M1 renders constant-width ink; pressure hardware comes later.
+2.5 pt wide. Pressure-enabled ink varies width when the backend supplies force; mouse ink stays constant-width.
 The screen-space eraser ring must match the swept hit-test radius. Use logical
 points, not physical display pixels, for its dimensions. View supports both
 layouts; Page 100% fits the available width. Hand/Space-drag pans without ink.
@@ -143,8 +143,7 @@ panning. Hand/Space navigation remains available. Changes apply automatically;
 preferences persist locally with a short write debounce. Appearance menu and
 Explorer button edit the same preferences. Persistence warnings appear in Settings.
 
-Pressure controls remain explanatory text until their behavior exists. Do not expose working-looking controls for
-them. Preferences never modify existing stroke objects or PDF contents.
+Pressure controls are implemented under Drawing as described below. Preferences never modify existing stroke objects or PDF contents.
 
 ### Stroke Smoothing (#12)
 
@@ -173,3 +172,15 @@ continues to show the screen-space eraser radius in both modes, with ink thickne
 accounted for in geometric tests. Each continuous sweep is one undo operation.
 Partial erasing displays the surviving vectors immediately and preserves their
 shape on release. The app still explains that ink saving arrives in M2.
+
+### Pen pressure (#15)
+
+Settings → Drawing provides Enable pressure sensitivity (default on), Sensitivity
+strength (0–100%, default 100%) and Minimum stroke width (1–100%, default 20%).
+Disable the two sliders when the checkbox is off. Reuse the smoothing slider
+width, ordinary semantic colors and shared spacing; no new tokens are needed.
+Explain the device-dependent constant-width fallback, including native Linux and
+macOS. These settings apply to new strokes in every tab and persist locally.
+Minimum is the lower endpoint at full strength; 0% strength keeps constant width.
+Existing ink keeps its captured settings. No pressure capability detection is
+claimed: a connected pen may become available without restarting the app.

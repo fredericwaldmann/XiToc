@@ -7,6 +7,7 @@ use crate::drawing::InkPoint;
 #[derive(Default)]
 pub struct Preview {
     starts: Vec<usize>,
+    pub pressures: Vec<Option<f32>>,
 }
 impl Preview {
     /// Returns the first possibly modified path point for mesh invalidation.
@@ -22,10 +23,11 @@ impl Preview {
         let start = self.starts.len().saturating_sub(3).min(points.len());
         let changed = self.starts.get(start).copied().unwrap_or(path.len());
         path.truncate(changed);
+        self.pressures.truncate(changed);
         self.starts.truncate(start);
         for i in start..points.len() {
             self.starts.push(path.len());
-            emit(points, i, strength, path);
+            emit(points, i, strength, path, &mut self.pressures);
         }
         Some(changed)
     }
@@ -75,17 +77,41 @@ fn filtered(points: &[InkPoint], i: usize, strength: f64) -> [f64; 2] {
                     + (points[i + 1].position[axis] - b[axis]) * 0.5)
     })
 }
-fn emit(points: &[InkPoint], i: usize, strength: u8, path: &mut Vec<[f64; 2]>) {
+fn emit(
+    points: &[InkPoint],
+    i: usize,
+    strength: u8,
+    path: &mut Vec<[f64; 2]>,
+    pressures: &mut Vec<Option<f32>>,
+) {
+    use crate::drawing::mix_pressure as mix_p;
+    let filtered_p = |i: usize| {
+        let weight = (0.5 * f64::from(strength.min(100)) / 100.0 * allowance(points, i)) as f32;
+        if weight == 0.0 {
+            points[i].pressure
+        } else {
+            mix_p(
+                points[i].pressure,
+                mix_p(points[i - 1].pressure, points[i + 1].pressure, 0.5),
+                weight,
+            )
+        }
+    };
+    let pressure = filtered_p(i);
     let amount = f64::from(strength.min(100)) / 100.0;
     let trim = 0.5 * amount * allowance(points, i);
     let b = filtered(points, i, amount);
     if trim == 0.0 {
         path.push(b);
+        pressures.push(pressure);
         return;
     }
     let start = mix(b, filtered(points, i - 1, amount), trim);
     let end = mix(b, filtered(points, i + 1, amount), trim);
     path.push(start);
+    let start_p = mix_p(pressure, filtered_p(i - 1), trim as f32);
+    let end_p = mix_p(pressure, filtered_p(i + 1), trim as f32);
+    pressures.push(start_p);
     let steps = ((distance(start, b) + distance(b, end)) / 1.0)
         .ceil()
         .clamp(2.0, 32.0) as usize;
@@ -93,6 +119,11 @@ fn emit(points: &[InkPoint], i: usize, strength: u8, path: &mut Vec<[f64; 2]>) {
     for step in 1..=steps {
         let t = step as f64 / steps as f64;
         path.push(mix(mix(start, b, t), mix(b, end, t), t));
+        pressures.push(mix_p(
+            mix_p(start_p, pressure, t as f32),
+            mix_p(pressure, end_p, t as f32),
+            t as f32,
+        ));
     }
 }
 
@@ -102,6 +133,38 @@ mod tests {
     fn samples(positions: &[[f64; 2]]) -> Vec<InkPoint> {
         positions.iter().copied().map(InkPoint::mouse).collect()
     }
+    #[test]
+    fn pressure_interpolation_is_local_incremental_and_preserves_raw_samples() {
+        let points: Vec<_> = (0..200)
+            .map(|i| InkPoint {
+                position: [i as f64, (i as f64 * 0.2).sin()],
+                pressure: Some(i as f32 / 200.0),
+            })
+            .collect();
+        let original = points.clone();
+        for strength in [0, 25, 50, 75, 100] {
+            let mut preview = Preview::default();
+            let mut output = Vec::new();
+            for count in 1..=points.len() {
+                let old = preview.pressures.clone();
+                let changed = preview
+                    .update(&points[..count], strength, &mut output)
+                    .unwrap();
+                assert_eq!(old[..changed], preview.pressures[..changed]);
+                assert_eq!(output.len(), preview.pressures.len());
+                assert_eq!(preview.pressures[0], points[0].pressure);
+                assert_eq!(
+                    *preview.pressures.last().unwrap(),
+                    points[count - 1].pressure
+                );
+                let mut rebuilt = Preview::default();
+                rebuilt.update(&points[..count], strength, &mut Vec::new());
+                assert_eq!(preview.pressures, rebuilt.pressures);
+            }
+        }
+        assert_eq!(points, original);
+    }
+
     #[test]
     fn disabled_dots_short_strokes_endpoints_and_sharp_corners() {
         for positions in [

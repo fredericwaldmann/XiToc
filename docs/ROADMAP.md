@@ -139,3 +139,15 @@
 
 ## M6 — More tools + polish
 - Move/select strokes, text/images, shapes, page templates, PDF import background, keyboard shortcuts, autosave recovery, smoke screenshots, accessible toolbar. Package signed installers eventually.
+
+## M1.1 pressure-sensitive input (#15)
+
+Optional normalized per-sample force, captured response settings, incremental
+pressure-aware smoothing, round variable-width vectors and width-aware erasing
+are implemented for both document types. Settings schema 4 persists enable,
+strength and minimum width. Mouse and missing force use constant nominal width.
+Browser primary pen PointerEvents and native egui touch-force input are consumed;
+Windows has a source-verified winit pen path. Native Linux/macOS tablet integration
+remains future work with constant-width fallback. See PRESSURE_INPUT.md.
+Synthetic tests cover geometry, erasers, history, smoothing and zoom; physical
+hardware has not been tested. M2 PDF serialization remains a separate milestone.

@@ -123,3 +123,13 @@ Undo retains the original stroke objects; redo retains fragment IDs and points.
 Semantic JSON round trips are tested, but the implemented blank-PDF schema still
 cannot save ink. M2 must version its payload and include these vectors/tags with
 matching conventional PDF graphics. No PDF serialization or sidecars are added.
+
+## M1.1 pressure metadata (preparation for M2, #15)
+
+In-memory InkPoint now holds optional normalized pressure (None/null unavailable,
+Some(0) a real zero). Old numeric values decode as measured samples; old strokes
+without PressureStyle stay constant-width. New strokes capture enabled/strength/
+minimum response. Partial fragments keep explicit interpolated pressure and the
+same style. M2 must version and serialize all these fields, emit matching visible
+variable-width vector graphics, and verify edit/viewer round trips. Schema 1 and
+the blank PDF codec remain unchanged; this feature does not save ink to PDFs.

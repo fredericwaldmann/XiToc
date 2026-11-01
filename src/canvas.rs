@@ -34,6 +34,7 @@ enum Gesture {
 }
 struct Cached {
     path: Vec<[f64; 2]>,
+    pressures: Vec<Option<f32>>,
     view: Option<(Transform, f32)>,
     meshes: Vec<Arc<egui::Mesh>>,
     bounds: ([f64; 2], [f64; 2]),
@@ -50,6 +51,8 @@ impl Cached {
             }
         }
         Self {
+            pressures: crate::partial_erase::path_pressures(stroke, &path)
+                .unwrap_or_else(|| vec![stroke.points[0].pressure; path.len()]),
             path,
             view: None,
             meshes: Vec::new(),
@@ -71,7 +74,13 @@ impl Cached {
         for index in self.meshes.len()..chunks {
             let start = index * MESH_SEGMENTS;
             let end = (start + MESH_SEGMENTS + 1).min(self.path.len());
-            let shapes = rounded_shapes(&self.path[start..end], transform, stroke, index > 0);
+            let shapes = rounded_shapes(
+                &self.path[start..end],
+                &self.pressures[start..end],
+                transform,
+                stroke,
+                index > 0,
+            );
             let primitives = ui.ctx().tessellate(
                 shapes
                     .into_iter()
@@ -131,10 +140,16 @@ impl Cached {
                 let mut shapes = Vec::new();
                 partial.cut.cuts.visit_visible(start, end, |lo, hi| {
                     let mut points = Vec::new();
-                    cut::visit_piece(&self.path, lo, hi, |p, _| points.push(p));
+                    let mut pressures = Vec::new();
+                    cut::visit_piece(&self.path, lo, hi, |p, t| {
+                        points.push(p);
+                        pressures.push(pressure_at(&self.pressures, t));
+                    });
                     let skip_cap =
                         index > 0 && lo == start && partial.cut.cuts.connected_before(start);
-                    shapes.extend(rounded_shapes(&points, transform, stroke, skip_cap));
+                    shapes.extend(rounded_shapes(
+                        &points, &pressures, transform, stroke, skip_cap,
+                    ));
                 });
                 let mut mesh = egui::Mesh::default();
                 for primitive in ui.ctx().tessellate(
@@ -170,6 +185,9 @@ pub struct Canvas {
     /// Eraser radius in logical screen points, shown at its actual hit-test size.
     pub eraser_radius: f64,
     pub smoothing_strength: u8,
+    pub pressure_style: drawing::PressureStyle,
+    input_pressure: Option<f32>,
+    touch_id: Option<egui::TouchId>,
     pub eraser_mode: EraserMode,
     preview: crate::smoothing::Preview,
     gesture: Option<Gesture>,
@@ -188,6 +206,12 @@ impl Canvas {
             width: 2.5,
             eraser_radius: 14.0,
             smoothing_strength: 50,
+            pressure_style: drawing::PressureStyle {
+                enabled: true,
+                ..Default::default()
+            },
+            input_pressure: None,
+            touch_id: None,
             eraser_mode: EraserMode::Stroke,
             preview: Default::default(),
             gesture: None,
@@ -317,6 +341,23 @@ impl Canvas {
             let events = ui.input(|i| i.events.clone());
             for event in events {
                 match event {
+                    Event::Touch {
+                        id, phase, force, ..
+                    } => {
+                        if phase == egui::TouchPhase::Start && self.touch_id.is_none() {
+                            self.touch_id = Some(id);
+                        }
+                        if self.touch_id == Some(id) {
+                            // End events often report zero after contact; retain the last contact force.
+                            if matches!(phase, egui::TouchPhase::Start | egui::TouchPhase::Move) {
+                                self.input_pressure = drawing::normalize_pressure(force);
+                            } else if phase == egui::TouchPhase::Cancel {
+                                self.finish();
+                                self.touch_id = None;
+                                self.input_pressure = None;
+                            }
+                        }
+                    }
                     Event::PointerButton {
                         pos,
                         button: PointerButton::Primary,
@@ -341,8 +382,9 @@ impl Canvas {
                             stroke.smoothing = drawing::Smoothing::AdaptiveV1 {
                                 strength: self.smoothing_strength,
                             };
+                            stroke.pressure_style = self.pressure_style;
                             self.preview = Default::default();
-                            stroke.push(point);
+                            stroke.push_pressure(point, self.input_pressure);
                             self.gesture = Some(Gesture::Pen(stroke));
                         } else {
                             self.gesture = Some(Gesture::Eraser(Erasing {
@@ -374,9 +416,15 @@ impl Canvas {
                         // Only the owning surface can finish this gesture.
                         if self.surface_active(surface) {
                             self.finish();
+                            self.input_pressure = None;
+                            self.touch_id = None;
                         }
                     }
-                    Event::PointerGone => self.finish(),
+                    Event::PointerGone => {
+                        self.finish();
+                        self.input_pressure = None;
+                        self.touch_id = None;
+                    }
                     _ => {}
                 }
             }
@@ -434,7 +482,7 @@ impl Canvas {
         match &mut self.gesture {
             Some(Gesture::Pen(stroke)) => {
                 if self.drawing.contains(surface, point) {
-                    stroke.push(point);
+                    stroke.push_pressure(point, self.input_pressure);
                 } else {
                     // End at the A4 edge, never bridge an excursion into margins.
                     if let Some(bounds) = self.drawing.bounds(surface) {
@@ -448,9 +496,17 @@ impl Canvas {
                                 t = t.min((bounds[i] - last[i]) / (point[i] - last[i]));
                             }
                         }
-                        stroke.push(std::array::from_fn(|i| {
-                            (last[i] + t * (point[i] - last[i])).clamp(0.0, bounds[i])
-                        }));
+                        let pressure = drawing::mix_pressure(
+                            stroke.points.last().unwrap().pressure,
+                            self.input_pressure,
+                            t as f32,
+                        );
+                        stroke.push_pressure(
+                            std::array::from_fn(|i| {
+                                (last[i] + t * (point[i] - last[i])).clamp(0.0, bounds[i])
+                            }),
+                            pressure,
+                        );
                     }
                     self.finish();
                 }
@@ -470,11 +526,13 @@ impl Canvas {
                             .entry(stroke.id)
                             .or_insert_with(|| Cached::new(stroke));
                         if erase.mode == EraserMode::Stroke {
-                            if drawing::hit_path(
+                            if pressure_hit(
                                 &cached.path,
+                                &cached.pressures,
+                                stroke,
                                 erase.previous,
                                 point,
-                                radius + stroke.width * 0.5,
+                                radius,
                             ) {
                                 erase.ids.insert(stroke.id);
                             }
@@ -484,10 +542,10 @@ impl Canvas {
                                     .partials
                                     .entry(stroke.id)
                                     .or_insert_with(|| PartialPreview {
-                                        cut: crate::partial_erase::PartialCut::new(
+                                        cut: crate::partial_erase::PartialCut::with_pressure(
                                             &cached.path,
-                                            stroke.width,
-                                            surface,
+                                            stroke,
+                                            &cached.pressures,
                                         ),
                                         meshes: HashMap::new(),
                                     });
@@ -518,6 +576,7 @@ impl Canvas {
     fn update_preview(&mut self, stroke: &Stroke) {
         let cached = self.cache.entry(stroke.id).or_insert_with(|| Cached {
             path: Vec::new(),
+            pressures: Vec::new(),
             view: None,
             meshes: Vec::new(),
             bounds: ([0.0; 2], [0.0; 2]),
@@ -529,6 +588,10 @@ impl Canvas {
             .preview
             .update(&stroke.points, strength, &mut cached.path)
         {
+            cached.pressures.truncate(changed);
+            cached
+                .pressures
+                .extend_from_slice(&self.preview.pressures[changed..]);
             cached
                 .meshes
                 .truncate(changed.saturating_sub(1) / MESH_SEGMENTS);
@@ -593,6 +656,7 @@ impl Canvas {
         {
             let cached = self.cache.entry(stroke.id).or_insert_with(|| Cached {
                 path: Vec::new(),
+                pressures: Vec::new(),
                 view: None,
                 meshes: Vec::new(),
                 bounds: ([0.0; 2], [0.0; 2]),
@@ -604,6 +668,10 @@ impl Canvas {
                 .preview
                 .update(&stroke.points, strength, &mut cached.path)
             {
+                cached.pressures.truncate(changed);
+                cached
+                    .pressures
+                    .extend_from_slice(&self.preview.pressures[changed..]);
                 cached
                     .meshes
                     .truncate(changed.saturating_sub(1) / MESH_SEGMENTS);
@@ -613,8 +681,53 @@ impl Canvas {
     }
 }
 
+fn pressure_hit(
+    path: &[[f64; 2]],
+    pressures: &[Option<f32>],
+    stroke: &Stroke,
+    from: [f64; 2],
+    to: [f64; 2],
+    radius: f64,
+) -> bool {
+    if !stroke.pressure_style.enabled || pressures.iter().all(Option::is_none) {
+        return drawing::hit_path(path, from, to, radius + stroke.width * 0.5);
+    }
+    if path.len() == 1 {
+        return drawing::hit_path(
+            path,
+            from,
+            to,
+            radius + stroke.width * 0.5 * stroke.pressure_style.factor(pressures[0]),
+        );
+    }
+    path.windows(2).enumerate().any(|(i, pair)| {
+        crate::partial_erase::clip_tapered(
+            pair[0],
+            pair[1],
+            from,
+            to,
+            radius,
+            [
+                stroke.width * 0.5 * stroke.pressure_style.factor(pressures[i]),
+                stroke.width * 0.5 * stroke.pressure_style.factor(pressures[i + 1]),
+            ],
+        )
+        .is_some()
+    })
+}
+
+fn pressure_at(pressures: &[Option<f32>], t: f64) -> Option<f32> {
+    let i = (t.floor() as usize).min(pressures.len() - 1);
+    drawing::mix_pressure(
+        pressures[i],
+        pressures[(i + 1).min(pressures.len() - 1)],
+        (t - i as f64) as f32,
+    )
+}
+
 fn rounded_shapes(
     path: &[[f64; 2]],
+    pressures: &[Option<f32>],
     transform: Transform,
     stroke: &Stroke,
     skip_first_cap: bool,
@@ -634,22 +747,277 @@ fn rounded_shapes(
         })
         .collect();
     let mut shapes = Vec::with_capacity(points.len() * 2);
-    for pair in points.windows(2) {
-        shapes.push(egui::Shape::line_segment(
-            [pair[0], pair[1]],
-            Line::new(width, color),
+    if !stroke.pressure_style.enabled || pressures.iter().all(Option::is_none) {
+        for pair in points.windows(2) {
+            shapes.push(egui::Shape::line_segment(
+                [pair[0], pair[1]],
+                Line::new(width, color),
+            ));
+        }
+        for point in points.into_iter().skip(usize::from(skip_first_cap)) {
+            shapes.push(egui::Shape::circle_filled(point, width * 0.5, color));
+        }
+        return shapes;
+    }
+    let radii: Vec<_> = pressures
+        .iter()
+        .map(|p| width * stroke.pressure_style.factor(*p) as f32 * 0.5)
+        .collect();
+    for (i, pair) in points.windows(2).enumerate() {
+        let delta = pair[1] - pair[0];
+        if delta.length_sq() == 0.0 {
+            continue;
+        }
+        let length = delta.length();
+        let slope = (radii[i] - radii[i + 1]) / length;
+        if slope.abs() >= 1.0 {
+            continue;
+        } // one disk contains the other
+        let unit = delta / length;
+        let normal = egui::vec2(-unit.y, unit.x) * (1.0 - slope * slope).sqrt();
+        let left = unit * slope + normal;
+        let right = unit * slope - normal;
+        shapes.push(egui::Shape::convex_polygon(
+            vec![
+                pair[0] + left * radii[i],
+                pair[1] + left * radii[i + 1],
+                pair[1] + right * radii[i + 1],
+                pair[0] + right * radii[i],
+            ],
+            color,
+            Line::NONE,
         ));
     }
-    for point in points.into_iter().skip(usize::from(skip_first_cap)) {
-        shapes.push(egui::Shape::circle_filled(point, width * 0.5, color));
+    for (i, point) in points
+        .into_iter()
+        .enumerate()
+        .skip(usize::from(skip_first_cap))
+    {
+        shapes.push(egui::Shape::circle_filled(point, radii[i], color));
     }
     shapes
+}
+
+/// Ordered pen input shared by the browser bridge and synthetic controller tests.
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) fn pen_events(
+    phase: u8,
+    pos: Pos2,
+    pressure: f32,
+    modifiers: egui::Modifiers,
+) -> Vec<Event> {
+    let touch_phase = match phase {
+        0 => egui::TouchPhase::Start,
+        1 => egui::TouchPhase::Move,
+        2 => egui::TouchPhase::End,
+        _ => egui::TouchPhase::Cancel,
+    };
+    let mut events = vec![Event::Touch {
+        device_id: egui::TouchDeviceId(0),
+        id: egui::TouchId(0),
+        phase: touch_phase,
+        pos,
+        force: drawing::normalize_pressure(Some(pressure)),
+    }];
+    match phase {
+        0 | 2 => events.push(Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed: phase == 0,
+            modifiers,
+        }),
+        1 => events.push(Event::PointerMoved(pos)),
+        _ => events.push(Event::PointerGone),
+    }
+    events
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::document::DocumentKind;
+
+    #[test]
+    fn force_changes_at_rest_secondary_contacts_and_cancellation() {
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        let mut canvas = Canvas::new(&data);
+        let ctx = egui::Context::default();
+        let pos = Pos2::new(40.0, 40.0);
+        let mut events = pen_events(0, pos, 0.1, egui::Modifiers::NONE);
+        events.extend(pen_events(1, pos, 0.8, egui::Modifiers::NONE));
+        events.push(Event::Touch {
+            device_id: egui::TouchDeviceId(0),
+            id: egui::TouchId(9),
+            phase: egui::TouchPhase::Start,
+            pos,
+            force: Some(0.0),
+        });
+        events.push(Event::PointerMoved(Pos2::new(80.0, 40.0)));
+        events.extend(pen_events(3, pos, 0.0, egui::Modifiers::NONE));
+        frame(&ctx, &mut canvas, Surface::Canvas, events);
+        let stroke = &canvas.drawing.strokes()[0];
+        assert_eq!(
+            stroke.points.iter().map(|p| p.pressure).collect::<Vec<_>>(),
+            vec![Some(0.1), Some(0.8), Some(0.8)]
+        );
+        assert!(!canvas.interacting());
+        frame(
+            &ctx,
+            &mut canvas,
+            Surface::Canvas,
+            vec![button(pos, true), button(pos, false)],
+        );
+        assert!(
+            canvas.drawing.strokes()[1]
+                .points
+                .iter()
+                .all(|p| p.pressure.is_none())
+        );
+    }
+
+    #[test]
+    fn pressure_input_geometry_erasers_history_and_zoom() {
+        for (kind, surface) in [
+            (DocumentKind::Page, Surface::Page(0)),
+            (DocumentKind::Whiteboard, Surface::Canvas),
+        ] {
+            for scale in [0.25, 1.0, 4.0] {
+                let ctx = egui::Context::default();
+                let data = DocumentData::blank(kind);
+                let mut canvas = Canvas::new(&data);
+                canvas.width = 12.0;
+                canvas.smoothing_strength = 75;
+                let transform = Transform {
+                    origin: [20.0; 2],
+                    center: [0.0; 2],
+                    scale,
+                };
+                let pos = |x| {
+                    let p = transform.to_screen([x, 40.0]);
+                    Pos2::new(p[0] as f32, p[1] as f32)
+                };
+                let mut events = pen_events(0, pos(10.0), 0.0, egui::Modifiers::NONE);
+                for (x, pressure) in [(30.0, 0.25), (50.0, 0.5), (70.0, 0.75), (90.0, 1.0)] {
+                    events.extend(pen_events(1, pos(x), pressure, egui::Modifiers::NONE));
+                }
+                frame_transform(&ctx, &mut canvas, surface, events, transform);
+                let preview = match canvas.gesture.as_ref().unwrap() {
+                    Gesture::Pen(s) => s.clone(),
+                    _ => panic!(),
+                };
+                let cached_preview = canvas.cache[&preview.id].pressures.clone();
+                frame_transform(
+                    &ctx,
+                    &mut canvas,
+                    surface,
+                    pen_events(2, pos(90.0), 0.0, egui::Modifiers::NONE),
+                    transform,
+                );
+                let original = canvas.drawing.strokes()[0].clone();
+                assert_eq!(*original, preview);
+                assert_eq!(original.points[0].pressure, Some(0.0));
+                assert_eq!(original.points.last().unwrap().pressure, Some(1.0));
+                let cached = &canvas.cache[&original.id];
+                assert_eq!(cached.pressures, cached_preview);
+                assert_eq!(cached.path, original.path());
+                assert_eq!(cached.pressures.len(), cached.path.len());
+                assert!(cached.pressures.windows(2).all(|p| p[0] <= p[1]));
+                assert_eq!(cached.pressures, Cached::new(&original).pressures);
+                let shapes =
+                    rounded_shapes(&cached.path, &cached.pressures, transform, &original, false);
+                let radii: Vec<_> = shapes
+                    .iter()
+                    .filter_map(|s| {
+                        if let egui::Shape::Circle(c) = s {
+                            Some(c.radius)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                assert!((f64::from(radii[0]) / scale - 1.2).abs() < 1e-5);
+                assert!((f64::from(*radii.last().unwrap()) / scale - 6.0).abs() < 1e-5);
+                // Thin ink must not hit the nominal full-width envelope.
+                assert!(!pressure_hit(
+                    &cached.path,
+                    &cached.pressures,
+                    &original,
+                    [10.0, 44.0],
+                    [10.0, 44.0],
+                    0.1
+                ));
+                assert!(pressure_hit(
+                    &cached.path,
+                    &cached.pressures,
+                    &original,
+                    [90.0, 44.0],
+                    [90.0, 44.0],
+                    0.1
+                ));
+                canvas.tool = Tool::Eraser;
+                canvas.eraser_mode = EraserMode::Partial;
+                canvas.eraser_radius = 2.0 * scale;
+                let mut erase = vec![button(pos(50.0), true)];
+                erase.push(button(pos(50.0), false));
+                frame_transform(&ctx, &mut canvas, surface, erase, transform);
+                assert_eq!(canvas.drawing.strokes().len(), 2);
+                let fragments = canvas.drawing.strokes().to_vec();
+                for fragment in &fragments {
+                    assert_eq!(fragment.pressure_style, original.pressure_style);
+                    for point in &fragment.points {
+                        let expected = (point.position[0] - 10.0) / 80.0;
+                        assert!((f64::from(point.pressure.unwrap()) - expected).abs() < 1e-6);
+                    }
+                }
+                canvas.undo();
+                assert_eq!(canvas.drawing.strokes(), &[original]);
+                canvas.redo();
+                assert_eq!(canvas.drawing.strokes(), fragments);
+                canvas.eraser_mode = EraserMode::Stroke;
+                frame_transform(
+                    &ctx,
+                    &mut canvas,
+                    surface,
+                    vec![button(pos(15.0), true), button(pos(85.0), false)],
+                    transform,
+                );
+                assert!(canvas.drawing.strokes().is_empty());
+                canvas.undo();
+                assert_eq!(canvas.drawing.strokes(), fragments);
+                canvas.redo();
+                assert!(canvas.drawing.strokes().is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn mouse_fallback_and_pressure_disabled_keep_constant_width() {
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        let mut canvas = Canvas::new(&data);
+        let ctx = egui::Context::default();
+        frame(
+            &ctx,
+            &mut canvas,
+            Surface::Canvas,
+            vec![
+                button(Pos2::new(30.0, 30.0), true),
+                Event::PointerMoved(Pos2::new(90.0, 30.0)),
+                button(Pos2::new(90.0, 30.0), false),
+            ],
+        );
+        let stroke = &canvas.drawing.strokes()[0];
+        assert!(stroke.points.iter().all(|p| p.pressure.is_none()));
+        assert!(
+            canvas.cache[&stroke.id]
+                .pressures
+                .iter()
+                .all(Option::is_none)
+        );
+        for pressure in [None, Some(0.0), Some(0.5), Some(1.0)] {
+            let disabled = drawing::PressureStyle::default();
+            assert_eq!(disabled.factor(pressure), 1.0);
+        }
+    }
 
     #[test]
     #[ignore = "manual release-mode performance comparison"]

@@ -170,7 +170,7 @@ storage restrictions or native storage failures can prevent persistence.
 0% Off, 25% Light, 50% Medium (default), 75% Strong and 100% Maximum. It reduces
 small irregularities while preserving sharp turns and endpoints. Existing ink
 keeps its captured strength. **Eraser mode** also persists in Drawing settings;
-pressure settings remain future work.
+pressure settings are implemented under Drawing (see below).
 
 ## Checks
 
@@ -271,3 +271,14 @@ python3 -m unittest discover -s scripts -p 'test_*.py'
 cargo build --locked --release --target x86_64-unknown-linux-gnu --bin xitoc
 python3 scripts/release.py package --target x86_64-unknown-linux-gnu
 ```
+
+### Pressure-sensitive pen (M1.1)
+
+Settings → Drawing offers pressure enable, sensitivity strength and minimum width.
+New strokes use optional normalized force with the existing smoothing, rounded
+vector renderer, both erasers and undo/redo. Mouse and unavailable force keep a
+constant width. Preferences persist; ink still does not persist until M2.
+Browser pen PointerEvents are supported where force is reported. Windows has a
+source-verified egui/winit pen-force path; native Linux/macOS tablets currently
+fall back to constant width. No physical pen hardware was tested. Platform details
+and future native integration: [Pressure input](docs/PRESSURE_INPUT.md).

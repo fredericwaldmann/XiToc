@@ -69,6 +69,18 @@ impl SettingsDialog {
                             });
                             ui.weak("0% Off · 25% Light · 50% Medium · 75% Strong · 100% Maximum");
                             ui.add_space(style::GAP);
+                            ui.strong("Pen pressure");
+                            ui.checkbox(&mut prefs.drawing.pressure.enabled, "Enable pressure sensitivity");
+                            ui.scope(|ui| {
+                                let p = style::palette(ui);
+                                ui.visuals_mut().widgets.inactive.bg_fill = p.border;
+                                ui.add_enabled_ui(prefs.drawing.pressure.enabled, |ui| {
+                                    ui.add(egui::Slider::new(&mut prefs.drawing.pressure.strength, 0..=100).suffix("%").trailing_fill(true).text("Sensitivity strength"));
+                                    ui.add(egui::Slider::new(&mut prefs.drawing.pressure.minimum, 1..=100).suffix("%").trailing_fill(true).text("Minimum stroke width"));
+                                });
+                            });
+                            ui.weak("Applies to new strokes with pen/touch force. Mouse and devices without pressure keep constant width. Native Linux/macOS tablets currently use this fallback.");
+                            ui.add_space(style::GAP);
                             ui.strong("Eraser mode");
                             egui::ComboBox::from_id_salt("preferred-eraser-mode")
                                 .selected_text(prefs.drawing.eraser_mode.label())
@@ -83,7 +95,7 @@ impl SettingsDialog {
                             ui.checkbox(&mut prefs.middle_button_pan, "Middle-button pan on Whiteboards");
                             ui.label("Hand and Space-drag also pan. Ctrl/Cmd-wheel or pinch zooms.");
                             ui.add_space(style::GAP);
-                            ui.weak("Pressure-sensitive pen settings will arrive with pressure input support.");
+                            ui.weak("Pen pressure settings are in Drawing. Device support depends on the browser or native backend.");
                         }
                     }
                     ui.add_space(style::GAP);

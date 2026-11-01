@@ -92,7 +92,7 @@ Follow `UI_DESIGN.md` for dimensions, palette, interaction and responsiveness.
 its stable UUID, owning document UUID, `Surface::Page(index)` or `Surface::Canvas`,
 ordered `InkPoint { position: [f64; 2], pressure }`, RGBA color and width. Coordinates
 and widths are PDF points (72/inch); A4 geometry converts explicitly from mm.
-Mouse pressure defaults to 1.0; M1 uses constant width. Stroke types derive serde
+Pressure is now optional (see #15 below); unavailable input uses constant width. Stroke types derive serde
 for future integration, but are not written as a new format or added to schema 1.
 
 Each opened editor owns a `Drawing` with immutable owner/layout, strokes and a
@@ -169,10 +169,9 @@ Forced termination may interrupt a pending write. Clearing browser site data
 removes preferences. Unknown/malformed versions use defaults with a warning and
 remain untouched until the user explicitly changes a preference.
 
-Smoothing strength is implemented in #12 below. Future pressure options and
-eraser modes belong in typed preference groups with validation/defaults and an explicit schema migration.
-Add behavior and effective controls together; do not add unused pressure
-fields now. Smoothing changes must share renderer/eraser geometry and invalidate
+Smoothing strength, eraser modes and pressure are implemented in #12/#13/#15
+below, with typed preferences, validation/defaults and explicit schema migrations.
+Add behavior and effective controls together. Smoothing changes must share renderer/eraser geometry and invalidate
 geometry caches; application defaults remain independent from raw document ink.
 
 ## M1.1 configurable smoothing (#12)
@@ -193,7 +192,8 @@ at 75 degrees, retaining intentional corners/reversals and small sharp hooks.
 First/last points always remain exact. Calculations use relative f64 document
 coordinates, independent of zoom, DPI and camera. Convex combinations keep the
 path within raw input bounds, preserving A4 clipping and the eraser bounds index.
-Pressure samples remain untouched for future pressure interpolation/input work.
+Raw pressure samples remain untouched; #15 interpolates derived force using the
+same local smoothing weights.
 
 The approach draws on quadratic corner-cutting rather than a temporal low-pass
 filter. Background: [Chaikin/quadratic spline notes](https://www.cs.unc.edu/~dm/UNC/COMP258/LECTURES/Chaikins-Algorithm.pdf).
@@ -262,9 +262,48 @@ old/new geometry cannot collide in render caches keyed by stroke identity.
 Survivors use `Smoothing::PolylineV1`: their points are the exact retained rendered
 polyline vertices plus analytic cut endpoints. They are not smoothed a second
 time. Color, width, document/surface identity and vector editability are retained.
-Constant mouse pressure needs no pressure-map allocations; nonuniform pressure is
-interpolated along normalized raw/rendered arc length and at cut endpoints. This
-preserves pressure-ready vector data but does not introduce pressure-sensitive
-rendering or device input. M2 must version/serialize these explicit vectors and
+Missing/uniform force uses a constant pressure map. #15 now interpolates adaptive
+pressure with the spatial smoothing weights; legacy ink retains the original
+normalized-arc-length mapping. Cut endpoints interpolate matching path pressure. M2 must version/serialize these explicit vectors and
 processing tags in the same PDF as their visible graphics. The blank schema,
 canonical PDF storage and unsaved-ink guards remain unchanged.
+
+## M1.1 pressure input and geometry (#15)
+
+`InkPoint.pressure: Option<f32>` distinguishes absent force from normalized
+measurements, including a real zero. Finite device values clamp to [0,1]; invalid
+values become None. Old numeric sample JSON still decodes; missing/null values
+mean unavailable. Serde-defaulted `PressureStyle { enabled, strength, minimum }`
+captures the response at pointer-down. Missing style defaults to disabled, keeping
+old constant-width strokes unchanged. Preferences schema 4 migrates versions 1–3.
+No document/PDF schema changes or ink persistence are introduced.
+
+Width is nominal width times `1 - strength * (1 - minimum) * (1 - pressure)`
+(percent settings converted to fractions). Missing force always gives nominal
+width. Raw points stay editable. Adaptive smoothing applies identical convex
+weights to positions and pressure, updating only the bounded trailing geometry;
+preview and release agree. Partial fragments contain explicit interpolated force
+and captured style, preserving width through subsequent cuts and history.
+
+Cached paths retain corresponding force samples. Variable rendering uses the
+external tangents of adjacent round disks and round joins/caps, in document
+coordinates before the view transform. Constant-width input retains the existing
+line renderer. Mesh chunk caching, document bounds hierarchy and path-block
+partial-erasing index remain in use. Maximum nominal width bounds are conservative;
+pressure narrow-phase clipping solves piecewise quadratics with local radii, no
+per-segment heap allocation. Completed geometry and idle previews remain cached.
+
+Native egui-winit 0.37 forwards winit normalized/calibrated touch force before its
+emulated primary-pointer event. The controller pairs the first contact's force
+with the existing pointer stream and ignores secondary contacts for ink force.
+No force is inferred from mouse movement, zoom or DPI. See PRESSURE_INPUT.md for
+backend investigation and limitations.
+
+`web_pressure.rs` is a small wasm-bindgen inline-JS boundary using existing
+dependencies. Primary pen PointerEvents are captured, queued in order, and injected
+through eframe's raw-input hook as force plus primary-pointer events. Pointer
+capture retains off-canvas releases; cancellation/focus loss finishes safely.
+A page-lifetime Rust callback requests repaint when pen samples arrive.
+Preventing default on pen-down suppresses duplicate compatibility mouse input;
+ordinary mouse/finger events remain on eframe's path.
+Browser CSS positions divide by egui's UI zoom, matching eframe's coordinates.
