@@ -1,5 +1,9 @@
 # M0 review notes
 
+Historical review of the initial scaffold, not the current application. Its
+source-file count, disabled tools and mode switch apply only to M0. See
+[CODEBASE_GUIDE.md](CODEBASE_GUIDE.md) for current behavior.
+
 The shared shell uses eframe/egui 0.37.0, `App::ui`, and `Panel::left`.
 There are two Rust files: platform entry points and the shared UI. No domain,
 PDF or storage modules have been introduced. Both direct UI dependencies are

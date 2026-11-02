@@ -1,5 +1,11 @@
 # Tests and CI release gates
 
+The general lists include planned acceptance tests, not a statement that all
+features exist. Milestone result sections are historical observations; later
+results supersede earlier counts/scope. See [CODEBASE_GUIDE.md](CODEBASE_GUIDE.md)
+for current tests/CI and [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) for attribution.
+Ink PDF round trips, multipage creation and browser directory handles remain future gates.
+
 ## Always
 - cargo fmt --all -- --check
 - cargo clippy --all-targets -- -D warnings

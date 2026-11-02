@@ -1,7 +1,14 @@
 # Architecture
 
+For the current source map and data flow, see [CODEBASE_GUIDE.md](CODEBASE_GUIDE.md).
+[ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md) records decision evidence;
+[DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) distinguishes historical milestones.
+Sections below retain milestone contracts; later sections supersede earlier scope.
+
 ## Start simple
-Use one Rust crate before splitting into workspace crates. Suggested modules (introduce each as needed):
+The implementation is one binary crate with flat source modules (no `lib.rs` or
+`domain/` directory). The following tree is an original proposed organization,
+not the current filesystem layout; consult CODEBASE_GUIDE for actual modules:
 
 ```
 src/
@@ -18,7 +25,7 @@ src/
 ## Dependencies
 - egui/eframe 0.37 or same-family compatible verified versions, with supported renderer.
 - serde + serde_json: versioned editable document representation.
-- pdf-writer: generating visible PDF and embedded file objects; evaluate lopdf for reads or consider a dedicated reader, verify WASM support and security.
+- pdf-writer generates blank PDF pages/embedded file objects; lopdf is the implemented reader (default features disabled, wasm_js enabled). Visible handwriting serialization remains M2.
 - web-sys/wasm-bindgen for browser file APIs; JS interop only at the boundary.
 - Use egui tree widgets or small internal recursive tree; adopt third-party tree crate only after checking compatibility with current egui release.
 
@@ -62,15 +69,23 @@ src/
 that layout, so kind and editor settings cannot disagree. `Document` wraps data,
 a file locator and a read-only/external marker. The M0.5 schema permits only one
 blank A4 page (or a whiteboard fallback); future object fields/expanded schema
-must be versioned deliberately. No objects are flattened or serialized yet.
+must be versioned deliberately. No objects are flattened or serialized into PDFs yet.
 
-Later: Object variants Stroke { id, points, color, width }, Text, Shape and Image.
+Stroke and the shared object protocol are implemented in memory (see M1/M1.4 below).
+Text, Shape, Image and other semantic content variants remain future work.
 Keep stable IDs, logical f64 coordinates, command-based undo and one rendering
 pipeline. Camera changes in M0.5 are session-only; future trusted-model saves
 must serialize the current editor snapshot together with visible PDF graphics.
 
-## Storage lifecycle
-User opens a workspace. Explorer lists nested folders and actual PDFs. On edit, flag dirty; save serializes editable JSON + generates visible PDF + embeds metadata into PDF bytes. Native writes atomically where possible, web obtains explicit directory write permission or exports a new `.pdf`. Never silently claim a successful save after browser download when there was no write handle.
+## Storage lifecycle: implemented and planned
+Currently, opening a native workspace scans real folders/PDFs. Creation publishes
+blank PDFs; loading retains original bytes and starts an in-memory Drawing.
+Editing marks ink dirty but does not save it. Web uses explicit import/export
+fallback, with no directory handles. Dirty export is blocked.
+
+M2 must serialize editable objects plus matching visible graphics in the same PDF
+and implement safe updates; future browser directory support needs explicit
+permission. Never claim permanent save merely from browser dialog completion.
 
 ## Build constraint
 Make native and WASM compile from the first milestone. If a library is native-only, hide it behind target-specific modules, not behind a broken compile path.
@@ -171,8 +186,9 @@ remain untouched until the user explicitly changes a preference.
 
 Smoothing strength, eraser modes and pressure are implemented in #12/#13/#15
 below, with typed preferences, validation/defaults and explicit schema migrations.
-Add behavior and effective controls together. Smoothing changes must share renderer/eraser geometry and invalidate
-geometry caches; application defaults remain independent from raw document ink.
+Add behavior and effective controls together. New smoothing algorithms must share
+renderer/eraser geometry. Changing the preset smoothing setting affects future
+strokes only; it must not invalidate or change existing captured stroke geometry.
 
 ## M1.1 configurable smoothing (#12)
 

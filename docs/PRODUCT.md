@@ -1,5 +1,9 @@
 # XiToc — Product specification
 
+For implemented behavior and source references, see [CODEBASE_GUIDE.md](CODEBASE_GUIDE.md).
+The main-window/files requirements include planned work; milestone sections record
+staged delivery, with later sections superseding older scope.
+
 ## Goal
 A local-first note-taking editor with a VS Code-like explorer of actual directories/PDFs, and two document types sharing one Rust editor engine.
 
@@ -12,7 +16,7 @@ A local-first note-taking editor with a VS Code-like explorer of actual director
 - **Page Note:** A4 pages at 210×297 mm, stacked vertically with page scrolling.
   Logical millimeter/point coordinates and a page list prepare for multiple pages.
 - **Whiteboard:** borderless canvas with unbounded logical coordinates, pan/zoom
-  and the same future drawing tools. A finite PDF page is only its export view.
+  and the same implemented drawing tools. A finite PDF page is only its export view.
 - Type is chosen once via **New Document → New Page Note / New Whiteboard** or
   the Explorer context menu. Ask for a filename and use the selected real folder.
   Moving or renaming the PDF never changes its type. No conversion is offered.
@@ -33,7 +37,12 @@ A local-first note-taking editor with a VS Code-like explorer of actual director
   confirm the browser download or use Export PDF to retry.
 
 ## Editing
-MVP: pressure-agnostic freehand points, stroke width/color, erase a whole stroke, undo/redo, pan/zoom, zoom-to-content, autosave (debounced) and explicit save. Later: true stylus pressure, shape/text/image objects, partial stroke eraser, PDF background import, selection/lasso, tab management.
+Implemented in memory: editable freehand vectors, pen presets, captured smoothing
+and optional pressure, whole/partial erasers, undo/redo, pan/zoom, selection/lasso,
+move/proportional resize, clipboard and tabs. Rotation/arrange are domain APIs
+without controls. Shape/text/image/formula/connector objects, zoom-to-content,
+PDF background rendering, note autosave/recovery and explicit ink save remain
+planned. Application preference persistence does not save handwriting.
 
 ## Files
 - Canonical files are `.pdf` only; real filesystem tree. No proprietary note sidecar.
@@ -58,13 +67,13 @@ genuine dirty-state feedback for memory-only ink.
 
 ## M1 handwriting behavior
 
-Both document types now share mouse freehand pen drawing, opaque color/width
-settings and whole-stroke erasing. The toolbar's Pen, Eraser, Hand, Ink, Undo/Redo
-and View controls are functional. Hold Space to pan without changing tools;
-Whiteboards also support middle-button panning. Ctrl/Cmd-wheel or pinch zooms;
-Page Notes also scroll and clip ink to their A4 page. Navigation and settings
-belong to each open tab. Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z redoes. Selection,
-text and shapes remain unavailable until M6.
+Both document types share freehand vector drawing, captured pen settings and
+whole/partial erasing. The current top toolbar exposes presets/Pen settings,
+Selection/Lasso, Eraser, Hand, Undo/Redo and View. Hold Space to pan without
+changing tools; Whiteboards also support middle-button panning. Ctrl/Cmd-wheel or
+pinch zooms; Page Notes scroll and clip ink to A4. Navigation/history belong to
+each open tab; the preset library is shared application state. Ctrl/Cmd+Z undoes,
+Ctrl/Cmd+Shift+Z redoes. M1.4 implements Selection/Lasso; text/shapes remain planned.
 
 **Drawing changes are memory-only until M2.** A dirty tab and bottom status expose
 this limitation. Close/workspace replacement/native quit ask before discard;
@@ -76,17 +85,18 @@ that saving ink is unavailable. Blank creation/import/export retain M0.5 behavio
 ## Application Settings (M1.1)
 
 Edit → Settings provides General (Explorer visibility/editor behavior), Appearance
-(Light/Dark), Drawing (default pen color, width and eraser radius) and Input Devices
+(Light/Dark), Drawing (shared preset library and eraser defaults/mode) and Input Devices
 (middle-button Whiteboard panning). Done or Escape closes it. Preferences apply
-automatically and persist on the device, independently of workspace PDFs. Drawing
-defaults initialize newly created/opened tabs; Ink continues to adjust individual
-tabs. The Appearance menu and Explorer button use the same persisted preferences.
+automatically and persist on the device, independently of workspace PDFs.
+Drawing defaults initialize new editors; the top preset editor and Settings share
+the same library for subsequent strokes. Toolbar eraser radius is per-tab.
+The Appearance menu and Explorer button use the same persisted preferences.
 Pressure controls are available under Drawing; see the pressure input section below.
 
 ## Handwriting smoothing (M1.1)
 
-Settings → Drawing → Stroke Smoothing provides a persistent 0–100% strength
-slider (default 50%). Off preserves raw input, Light/Medium/Strong/Maximum
+Settings → Drawing and the toolbar preset editor provide a persistent per-preset
+0–100% strength slider (default 50%). Off preserves raw input, Light/Medium/Strong/Maximum
 progressively reduce small irregularities while retaining sharp turns. It affects
 new strokes in all open Page Notes and Whiteboards. Existing strokes retain their
 captured strength, raw editable samples, identity/style and undo/redo history.
@@ -95,9 +105,8 @@ Handwriting remains memory-only until M2; this does not add PDF ink saving.
 
 ## Two eraser modes (M1.1, #13)
 
-The existing eraser toolbar position now shows Stroke Eraser or Partial Eraser.
-Its compact dropdown activates either mode and offers the same screen-point
-radius control as Ink. The ring shows its effective eraser radius; hit testing
+The Eraser toolbar button opens a popover for Stroke Eraser or Partial Eraser
+and a per-tab screen-point radius control. The ring shows its effective eraser radius; hit testing
 also accounts for pen width. The selected mode persists as an application
 preference and is also available in Settings → Drawing.
 
@@ -111,7 +120,7 @@ M2; no PDF serialization or note sidecars are added.
 
 ## Pressure-sensitive handwriting (M1.1, #15)
 
-New pen strokes vary thickness using normalized device force when available.
+Pressure Pen strokes vary thickness using normalized device force when available.
 Drawing settings persist enable/strength/minimum width and affect future strokes,
 while existing ink retains its captured response. Mouse input stays constant-width.
 Both layouts, smoothing, both erasers and undo/redo retain editable pressure data.

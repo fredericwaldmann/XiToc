@@ -52,6 +52,11 @@ Each native XiToc note MUST be a single, valid, independently viewable PDF. All 
 6. If the environment cannot run a check, report it without claiming success.
 7. Do not downgrade security checks or remove tests to make CI green. Keep `Cargo.lock` committed for reproducibility.
 8. For each PR summarize behavior, manual test instructions, risks, and any follow-up issues.
+9. Keep documentation consistent with actual code: update `docs/CODEBASE_GUIDE.md`
+   when architecture changes, record significant decisions (and known/unknown
+   rationale) in `docs/ARCHITECTURE_DECISIONS.md`, and log substantial features in
+   `docs/DEVELOPMENT_LOG.md`. Reference affected documentation in the PR. Avoid
+   unrelated documentation churn for trivial changes.
 
 ## Product quality
 
