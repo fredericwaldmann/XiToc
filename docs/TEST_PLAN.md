@@ -673,3 +673,68 @@ selection must disappear without changing ink. Repeat after zoom/pan, with both
 themes and a narrow window; switch to Pen/Hand/both erasers and exercise undo/redo.
 Text editing and open popovers must retain their own shortcuts. Ink remains
 memory-only; do not discard drawings you need to keep.
+
+## M1.4 object manipulation and clipboard
+
+`manipulation_tests.rs` runs through the shared Canvas controller and real egui
+frames. Coverage includes:
+
+- Group rotation at 0.25×/1×/4×, raw points/style/pressure/IDs/order/ownership,
+  unchanged committed revision during preview, one commit per release and exact
+  undo/redo. Vertex positions are compared with an independent view/placement
+  mapping; base mesh Arcs and idle preview Arcs are retained.
+- Shift snapping, including pressing/releasing Shift without moving; Escape/late
+  release cancellation; full-turn angle unwrapping near 1e12 coordinates and
+  view-change cancellation.
+- Page rotation rejection, 1/10-point keyboard nudges, ownership, proportional
+  off-axis corner drags with/without Shift and a 1-point longest ink extent floor.
+  Handwriting intentionally has no independent X/Y stretch mode.
+- Cut/Paste across all Page/Whiteboard source/target combinations, fresh IDs,
+  complete captured style/placement, group offsets, native Cut-event/shortcut
+  deduplication, session fallback, delete and exact undo/redo. Oversized Cut keeps
+  objects, history, selection and the preceding clipboard untouched.
+- Text focus, modified navigation keys and active gestures retain input priority.
+  The complete rotation handle hit target stays outside contextual controls; this
+  regression failed with the earlier toolbar clearance and passed after the fix.
+
+Performed checks: formatting, Clippy with warnings denied, 111 tests passed
+(six ignored benchmarks), Linux native release build, wasm32 check and Trunk
+release build. All six ignored release benchmarks passed. The rotation fixture
+(2,000 strokes/40,000 samples) measured 44.01 ms first preview, 12.15 ms subsequent
+changed frame and 5.45 ms idle preview on this host during concurrent builds.
+Existing erasing/smoothing/lasso benchmarks passed too. These CPU observations do
+not certify physical-device/display latency. Ordinary drawing bypasses rotation
+preview transforms; live moves/resizes retain the original layer-transform path.
+The Linux release executable stayed alive for an eight-second timed startup with
+no emitted errors; that is not interactive native manipulation verification.
+
+Manual reproduction:
+1. Create scratch Page/Whiteboard notes. Draw several strokes, including supported
+   pressure input and translucent presets; select a group by Shift-click or Lasso.
+2. Drag ink, then a corner. Check relative placement, uniform nib/pressure scaling,
+   off-axis drags/Shift and the minimum extent. Undo/redo each completed gesture.
+3. Drag the round handle above the group through a full turn; Shift snaps to 15°.
+   Change Shift while stationary. Escape cancels and clears; release must not
+   commit. Repeat near page edges, after pan/zoom and far from Whiteboard origin.
+4. Use Ctrl/Cmd+D/C/X/V, paste into the other document type, Delete/Backspace,
+   arrows and Shift-arrows. Check fresh selected copies, undo/redo, exact styles
+   and preserved page ownership. Use Edit/right-click rotation and clipboard actions.
+5. Repeat with light/dark and narrow windows; edit preset names and ensure Cut/
+   arrows stay in text input. Toolbar remains below tabs; ink is memory-only.
+
+Physical stylus, interactive native manipulation/system clipboard durability,
+Windows/macOS runtime and low-end-device latency need their corresponding devices.
+
+Actual Firefox 157/WebGL2 release-app checks: scratch Whiteboard drawing, group
+rotation commit, rotation undo/redo, Ctrl+D offset duplicate/undo, Cut leaving an
+empty board and Paste restoring the group; cross-document paste into a Page Note,
+Shift-snapped rotation there, 1/10-point keyboard nudges, dark theme and 480×360
+layout. Inspected before/after captures under `/tmp/xitoc-manip-*.png` (session
+artifacts, not committed notes/fixtures). Initial browser testing reproduced native
+page Select All starting a browser drag and swallowing release. The canvas A/D
+key-default and dragstart guards fixed the observed event stream. A fresh load of
+the final packaged HTML passed DOM assertions: canvas Ctrl+A, Cmd+D and native
+DragStart are prevented, but a separate text field's Ctrl+A is not prevented.
+Clipboard key defaults remain available to eframe's native Copy/Cut/Paste events.
+This browser verification is headless mouse/keyboard input, not physical pen or
+interactive native clipboard certification.

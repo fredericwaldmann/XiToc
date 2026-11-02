@@ -14,6 +14,16 @@ pub(super) enum SelectionGesture {
         mode: Membership,
         overflow: bool,
     },
+    Rotate {
+        surface: Surface,
+        start: Point,
+        center: Point,
+        geometry: ObjectBounds,
+        last_angle: f64,
+        angle: f64,
+        delta: Placement,
+        moved: bool,
+    },
     Transform {
         surface: Surface,
         start: Point,
@@ -52,27 +62,12 @@ impl Canvas {
                 self.selection
                     .change(ids, Membership::Replace, &self.drawing);
             }
-            Copy => {
+            Copy | Cut => {
                 self.finish();
-                if let Some(bundle) = self.selected_bundle() {
-                    match bundle.encode() {
-                        Ok(text) => {
-                            ctx.copy_text(text);
-                            ctx.data_mut(|d| {
-                                d.insert_temp(
-                                    clipboard_id(),
-                                    SessionClipboard {
-                                        bundle: Arc::new(bundle),
-                                        count: 0,
-                                    },
-                                )
-                            });
-                            self.notice = Some(
-                                "Copied objects · XiToc session clipboard also available".into(),
-                            );
-                        }
-                        Err(e) => self.notice = Some(e),
-                    }
+                if self.copy_selection(ctx) && command == Cut {
+                    self.drawing.erase(&self.selection.ids);
+                    self.selection.clear();
+                    self.prune_cache();
                 }
             }
             Paste => {
@@ -94,6 +89,29 @@ impl Canvas {
                 self.selection.clear();
                 self.prune_cache();
             }
+            RotateLeft | RotateRight => {
+                self.finish();
+                if let (Some(bounds), Some(geometry)) =
+                    (self.selection.bounds, self.selection.geometry)
+                {
+                    let angle = std::f64::consts::PI / 12.0
+                        * if command == RotateLeft { -1.0 } else { 1.0 };
+                    if let Some(delta) = selection::rotation_about(
+                        geometry,
+                        bounds.center(),
+                        angle,
+                        self.drawing.bounds(self.selection.surface),
+                    ) {
+                        self.drawing.transform_objects(&self.selection.ids, delta);
+                        self.prune_cache();
+                    } else {
+                        self.notice = Some(
+                            "Rotation would leave this page. Move the selection inward first."
+                                .into(),
+                        );
+                    }
+                }
+            }
             Smaller | Larger => {
                 self.finish();
                 if let (Some(bounds), Some(geometry)) =
@@ -108,6 +126,45 @@ impl Canvas {
                     self.drawing.transform_objects(&self.selection.ids, p);
                     self.prune_cache();
                 }
+            }
+        }
+    }
+    fn copy_selection(&mut self, ctx: &egui::Context) -> bool {
+        let Some(bundle) = self.selected_bundle() else {
+            return false;
+        };
+        match bundle.encode() {
+            Ok(text) => {
+                // Establish a reliable application copy before a Cut can delete ink.
+                ctx.data_mut(|d| {
+                    d.insert_temp(
+                        clipboard_id(),
+                        SessionClipboard {
+                            bundle: Arc::new(bundle),
+                            count: 0,
+                        },
+                    )
+                });
+                ctx.copy_text(text);
+                self.notice =
+                    Some("Copied objects · XiToc session clipboard also available".into());
+                true
+            }
+            Err(e) => {
+                self.notice = Some(e);
+                false
+            }
+        }
+    }
+    fn nudge_selection(&mut self, delta: Point) {
+        if let Some(bounds) = self.selection.bounds {
+            let placement =
+                selection::move_by(bounds, delta, self.drawing.bounds(self.selection.surface));
+            if self
+                .drawing
+                .transform_objects(&self.selection.ids, placement)
+            {
+                self.prune_cache();
             }
         }
     }
@@ -203,9 +260,14 @@ impl Canvas {
         }
         let events = ui.input(|i| i.events.clone());
         let mut copied = false;
+        let mut cut = false;
         let mut pasted = false;
         for event in &events {
             match event {
+                Event::Cut => {
+                    self.selection_action(SelectionCommand::Cut, ui.ctx());
+                    cut = true;
+                }
                 Event::Copy => {
                     self.selection_action(SelectionCommand::Copy, ui.ctx());
                     copied = true;
@@ -232,10 +294,12 @@ impl Canvas {
             (egui::Key::A, SelectionCommand::SelectAll),
             (egui::Key::D, SelectionCommand::Duplicate),
             (egui::Key::C, SelectionCommand::Copy),
+            (egui::Key::X, SelectionCommand::Cut),
             (egui::Key::V, SelectionCommand::Paste),
         ] {
             if ui.input_mut(|i| i.consume_shortcut(&shortcut(key)))
                 && !(copied && key == egui::Key::C)
+                && !(cut && key == egui::Key::X)
                 && !(pasted && key == egui::Key::V)
             {
                 if command == SelectionCommand::Paste {
@@ -258,6 +322,28 @@ impl Canvas {
         {
             self.selection_action(SelectionCommand::Delete, ui.ctx());
         }
+        let modifiers = ui.input(|i| i.modifiers);
+        if matches!(self.tool, Tool::Select | Tool::Lasso)
+            && self.selection_gesture.is_none()
+            && !self.selection.ids.is_empty()
+            && !modifiers.alt
+            && !modifiers.ctrl
+            && !modifiers.command
+            && !modifiers.mac_cmd
+        {
+            for (key, direction) in [
+                (egui::Key::ArrowLeft, [-1., 0.]),
+                (egui::Key::ArrowRight, [1., 0.]),
+                (egui::Key::ArrowUp, [0., -1.]),
+                (egui::Key::ArrowDown, [0., 1.]),
+            ] {
+                if ui.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, key)) {
+                    self.nudge_selection(direction.map(|d| d * 10.));
+                } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key)) {
+                    self.nudge_selection(direction);
+                }
+            }
+        }
         if self
             .pending_paste
             .is_some_and(|deadline| ui.input(|i| i.time) >= deadline)
@@ -268,12 +354,20 @@ impl Canvas {
     }
     pub(super) fn selection_preview(&self, surface: Surface) -> Option<Placement> {
         match self.selection_gesture {
-            Some(SelectionGesture::Transform {
-                surface: s,
-                delta,
-                moved: true,
-                ..
-            }) if surface == s => Some(delta),
+            Some(
+                SelectionGesture::Transform {
+                    surface: s,
+                    delta,
+                    moved: true,
+                    ..
+                }
+                | SelectionGesture::Rotate {
+                    surface: s,
+                    delta,
+                    moved: true,
+                    ..
+                },
+            ) if surface == s => Some(delta),
             _ => None,
         }
     }
@@ -325,6 +419,34 @@ impl Canvas {
                 (c[0] - point[0]).hypot(c[1] - point[1]) * scale <= f64::from(style::SELECTION_HIT)
             })
     }
+    fn rotation_point(&self, scale: f64) -> Option<Point> {
+        let bounds = Self::display_bounds(self.selection.bounds?, scale);
+        Some([
+            bounds.center()[0],
+            bounds.min[1] - f64::from(style::ROTATION_OFFSET) / scale,
+        ])
+    }
+    fn rotation_hit(&self, point: Point, scale: f64) -> bool {
+        self.tool == Tool::Select
+            && self.rotation_point(scale).is_some_and(|p| {
+                (p[0] - point[0]).hypot(p[1] - point[1]) * scale <= f64::from(style::SELECTION_HIT)
+            })
+    }
+    fn start_rotation(&mut self, surface: Surface, point: Point) {
+        if let (Some(bounds), Some(geometry)) = (self.selection.bounds, self.selection.geometry) {
+            let center = bounds.center();
+            self.selection_gesture = Some(SelectionGesture::Rotate {
+                surface,
+                start: point,
+                center,
+                geometry,
+                last_angle: (point[1] - center[1]).atan2(point[0] - center[0]),
+                angle: 0.,
+                delta: Placement::default(),
+                moved: false,
+            });
+        }
+    }
     fn start_transform(
         &mut self,
         surface: Surface,
@@ -333,6 +455,12 @@ impl Canvas {
         scale: f64,
     ) {
         if let (Some(bounds), Some(geometry)) = (self.selection.bounds, self.selection.geometry) {
+            let extent = (bounds.max[0] - bounds.min[0]).max(bounds.max[1] - bounds.min[1]);
+            let minimum_factor = if extent > 0.0 {
+                (1.0 / extent).min(1.0)
+            } else {
+                1.0
+            };
             let bounds = if corner.is_some() {
                 Self::display_bounds(bounds, scale)
             } else {
@@ -348,6 +476,7 @@ impl Canvas {
                 limits.0 = limits.0.max(1e-4 / s.placement.scale);
                 limits.1 = limits.1.min(1e4 / s.placement.scale);
             }
+            limits.0 = limits.0.max(minimum_factor);
             self.selection_gesture = Some(SelectionGesture::Transform {
                 surface,
                 start: point,
@@ -360,7 +489,7 @@ impl Canvas {
             });
         }
     }
-    fn selection_sample(&mut self, surface: Surface, point: Point, scale: f64) {
+    fn selection_sample(&mut self, surface: Surface, point: Point, scale: f64, shift: bool) {
         match &mut self.selection_gesture {
             Some(SelectionGesture::Lasso {
                 surface: s,
@@ -377,6 +506,43 @@ impl Canvas {
                     } else {
                         *overflow = true;
                     }
+                }
+            }
+            Some(SelectionGesture::Rotate {
+                surface: s,
+                start,
+                center,
+                geometry,
+                last_angle,
+                angle,
+                delta,
+                moved,
+            }) if *s == surface => {
+                if (point[0] - center[0]).hypot(point[1] - center[1]) * scale < 1.0 {
+                    return;
+                }
+                let next = (point[1] - center[1]).atan2(point[0] - center[0]);
+                *angle += (next - *last_angle + std::f64::consts::PI)
+                    .rem_euclid(std::f64::consts::TAU)
+                    - std::f64::consts::PI;
+                *last_angle = next;
+                if !*moved && (point[0] - start[0]).hypot(point[1] - start[1]) * scale < 3.0 {
+                    return;
+                }
+                let step = std::f64::consts::PI / 12.0;
+                let rotation = if shift {
+                    (*angle / step).round() * step
+                } else {
+                    *angle
+                };
+                if let Some(valid) = selection::rotation_about(
+                    *geometry,
+                    *center,
+                    rotation,
+                    self.drawing.bounds(surface),
+                ) {
+                    *delta = valid;
+                    *moved = true;
                 }
             }
             Some(SelectionGesture::Transform {
@@ -413,9 +579,14 @@ impl Canvas {
     }
     fn commit_selection(&mut self) {
         match self.selection_gesture.take() {
-            Some(SelectionGesture::Transform {
-                delta, moved: true, ..
-            }) => {
+            Some(
+                SelectionGesture::Transform {
+                    delta, moved: true, ..
+                }
+                | SelectionGesture::Rotate {
+                    delta, moved: true, ..
+                },
+            ) => {
                 self.drawing.transform_objects(&self.selection.ids, delta);
                 self.prune_cache();
             }
@@ -486,7 +657,10 @@ impl Canvas {
         let selection_tool = self.tool == Tool::Select;
         let owns = |p: Pos2| {
             (bounds.contains(p)
-                || (selection_tool && bounds.expand(style::SELECTION_HIT).contains(p)))
+                || (selection_tool
+                    && bounds
+                        .expand(style::ROTATION_OFFSET + style::SELECTION_HIT)
+                        .contains(p)))
                 && ui.clip_rect().contains(p)
                 && ui.is_enabled()
                 && ui.input(|i| i.focused)
@@ -506,12 +680,18 @@ impl Canvas {
                     } else {
                         None
                     };
-                    if !self.drawing.contains(surface, point) && corner.is_none() {
+                    let rotation = self.selection.surface == surface
+                        && self.rotation_hit(point, transform.scale);
+                    if !self.drawing.contains(surface, point) && corner.is_none() && !rotation {
                         continue;
                     }
                     self.selection.scope(surface);
                     self.selection_view =
                         Some((surface, transform, bounds.intersect(ui.clip_rect())));
+                    if rotation {
+                        self.start_rotation(surface, point);
+                        continue;
+                    }
                     if let Some(corner) = corner {
                         self.start_transform(surface, point, Some(corner), transform.scale);
                         continue;
@@ -547,21 +727,37 @@ impl Canvas {
                         self.selection.clear();
                     }
                 }
+                Event::ModifiersChanged(modifiers) => {
+                    if matches!(
+                        self.selection_gesture,
+                        Some(SelectionGesture::Rotate { .. })
+                    ) && let Some(pos) = ui.input(|i| i.pointer.interact_pos())
+                    {
+                        self.selection_sample(
+                            surface,
+                            transform.to_document([pos.x as f64, pos.y as f64]),
+                            transform.scale,
+                            modifiers.shift,
+                        );
+                    }
+                }
                 Event::PointerMoved(pos) => self.selection_sample(
                     surface,
                     transform.to_document([pos.x as f64, pos.y as f64]),
                     transform.scale,
+                    ui.input(|i| i.modifiers.shift),
                 ),
                 Event::PointerButton {
                     pos,
                     button: PointerButton::Primary,
                     pressed: false,
-                    ..
+                    modifiers,
                 } => {
                     let active = match &self.selection_gesture {
                         Some(
                             SelectionGesture::Lasso { surface: s, .. }
-                            | SelectionGesture::Transform { surface: s, .. },
+                            | SelectionGesture::Transform { surface: s, .. }
+                            | SelectionGesture::Rotate { surface: s, .. },
                         ) => *s == surface,
                         _ => false,
                     };
@@ -570,6 +766,7 @@ impl Canvas {
                             surface,
                             transform.to_document([pos.x as f64, pos.y as f64]),
                             transform.scale,
+                            modifiers.shift,
                         );
                         self.commit_selection();
                     }
@@ -622,44 +819,59 @@ impl Canvas {
             );
         }
         if let Some(group) = self.selection.bounds {
-            let group = Self::display_bounds(group.placed(delta), transform.scale);
-            painter.rect_stroke(
-                Rect::from_min_max(screen(group.min), screen(group.max)),
-                0.0,
+            let group = Self::display_bounds(group, transform.scale);
+            let corners = group.corners().map(|point| screen(delta.apply(point)));
+            painter.add(egui::Shape::closed_line(
+                corners.to_vec(),
                 Line::new(1.0, p.accent),
-                egui::StrokeKind::Outside,
-            );
-            for corner in group
-                .corners()
-                .into_iter()
-                .filter(|_| self.tool == Tool::Select)
-            {
-                painter.rect(
-                    Rect::from_center_size(
-                        screen(corner),
-                        egui::Vec2::splat(style::SELECTION_HANDLE),
-                    ),
-                    1.0,
-                    p.surface,
-                    Line::new(1.0, p.accent),
-                    egui::StrokeKind::Inside,
-                );
+            ));
+            if self.tool == Tool::Select {
+                for corner in corners {
+                    painter.rect(
+                        Rect::from_center_size(corner, egui::Vec2::splat(style::SELECTION_HANDLE)),
+                        1.0,
+                        p.surface,
+                        Line::new(1.0, p.accent),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                if let Some(handle) = self.rotation_point(transform.scale) {
+                    let stem = [group.center()[0], group.min[1]];
+                    let handle = screen(delta.apply(handle));
+                    let handle_painter = ui.painter().with_clip_rect(ui.clip_rect());
+                    handle_painter
+                        .line_segment([screen(delta.apply(stem)), handle], Line::new(1., p.accent));
+                    handle_painter.circle(
+                        handle,
+                        style::SELECTION_HANDLE * 0.5,
+                        p.surface,
+                        Line::new(1., p.accent),
+                    );
+                }
             }
         }
-        if let Some(pos) = ui
-            .input(|i| i.pointer.hover_pos())
-            .filter(|p| bounds.contains(*p))
-        {
+        if let Some(pos) = ui.input(|i| i.pointer.hover_pos()).filter(|p| {
+            bounds
+                .expand(style::ROTATION_OFFSET + style::SELECTION_HIT)
+                .contains(*p)
+        }) {
             if ui.input(|i| i.key_down(egui::Key::Space)) {
                 return;
             }
             let point = transform.to_document([pos.x as f64, pos.y as f64]);
-            let cursor = if let Some(index) = self.handle(point, transform.scale) {
+            let cursor = if matches!(
+                self.selection_gesture,
+                Some(SelectionGesture::Rotate { .. })
+            ) {
+                egui::CursorIcon::Grabbing
+            } else if let Some(index) = self.handle(point, transform.scale) {
                 if index % 2 == 0 {
                     egui::CursorIcon::ResizeNwSe
                 } else {
                     egui::CursorIcon::ResizeNeSw
                 }
+            } else if self.rotation_hit(point, transform.scale) {
+                egui::CursorIcon::Grab
             } else if self.selection_preview(surface).is_some() {
                 egui::CursorIcon::Grabbing
             } else if self.tool == Tool::Lasso {
@@ -690,15 +902,17 @@ impl Canvas {
             && self.selection_gesture.is_none()
             && let Some(group) = self.selection.bounds
         {
-            let top = transform.to_screen([group.center()[0], group.min[1]]);
-            let bottom = transform.to_screen([group.center()[0], group.max[1]]);
+            let display = Self::display_bounds(group, transform.scale);
+            let top = transform.to_screen([display.center()[0], display.min[1]]);
+            let bottom = transform.to_screen([display.center()[0], display.max[1]]);
             let rect = Rect::from_min_max(
                 egui::pos2(transform.to_screen(group.min)[0] as f32, top[1] as f32),
                 egui::pos2(transform.to_screen(group.max)[0] as f32, bottom[1] as f32),
             );
             if rect.intersects(viewport) {
-                let y = if top[1] as f32 - 36.0 >= viewport.top() {
-                    top[1] as f32 - 36.0
+                let clearance = style::ROTATION_OFFSET + 44.0;
+                let y = if top[1] as f32 - clearance >= viewport.top() {
+                    top[1] as f32 - clearance
                 } else {
                     (bottom[1] as f32 + 8.0).min(viewport.bottom() - 34.0)
                 };
@@ -775,3 +989,7 @@ impl Canvas {
 #[cfg(test)]
 #[path = "selection_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "manipulation_tests.rs"]
+mod manipulation_tests;

@@ -313,6 +313,14 @@ size and clamps its 12-point offset to the page. Ink remains memory-only until M
 The shared canvas-object foundation in `src/object.rs` exposes stable identity,
 logical geometry, placement/rotation, pressure-aware hit testing and future
 connector anchors. Handwriting remains editable vector ink, with canonical order
-and transactional history in `Drawing`. Rotation and arrange are internal APIs;
+and transactional history in `Drawing`. Rotation uses the round group handle (Shift snaps to 15°); Arrange is an internal API;
 new object tools and PDF ink persistence remain future milestones. See
 `docs/ARCHITECTURE.md` for the extension contract.
+
+M1.4 manipulation: drag selected ink to move; corner handles resize handwriting
+proportionally (including off-axis drags/Shift) with uniform thickness scaling.
+Drag the round handle above the group to rotate, or use Edit/context rotation
+steps. Ctrl/Cmd+X cuts only after a validated internal copy; Ctrl/Cmd+C/V/D copy,
+paste and duplicate. Arrows move 1 document point, Shift-arrows 10. Each completed
+drag is one undo operation; Escape cancels and clears selection. Page ownership
+stays fixed; rotation stops at conservative page bounds. No PDF ink saving.

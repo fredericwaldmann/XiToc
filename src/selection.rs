@@ -9,6 +9,9 @@ use std::collections::HashSet;
 pub enum SelectionCommand {
     SelectAll,
     Copy,
+    Cut,
+    RotateLeft,
+    RotateRight,
     Paste,
     Duplicate,
     Delete,
@@ -272,6 +275,30 @@ pub fn scale_about(
         scale,
         rotation: 0.0,
     }
+}
+
+/// Conservative page constraint for rotation: all corners of the raw centerline
+/// bounds must remain on the owning page; ink edges are still clipped by paper.
+pub fn rotation_about(
+    geometry: ObjectBounds,
+    center: Point,
+    angle: f64,
+    page: Option<Point>,
+) -> Option<Placement> {
+    let placement = Placement {
+        origin: center,
+        position: center,
+        rotation: angle,
+        ..Default::default()
+    };
+    if !placement.valid() {
+        return None;
+    }
+    let bounds = geometry.placed(placement);
+    if page.is_some_and(|page| (0..2).any(|i| bounds.min[i] < 0.0 || bounds.max[i] > page[i])) {
+        return None;
+    }
+    Some(placement)
 }
 
 #[cfg(test)]

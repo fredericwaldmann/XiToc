@@ -39,8 +39,8 @@ A local-first note-taking editor with a VS Code-like explorer of actual director
 ## Editing
 Implemented in memory: editable freehand vectors, pen presets, captured smoothing
 and optional pressure, whole/partial erasers, undo/redo, pan/zoom, selection/lasso,
-move/proportional resize, clipboard and tabs. Rotation/arrange are domain APIs
-without controls. Shape/text/image/formula/connector objects, zoom-to-content,
+move/proportional resize/rotation, clipboard (including Cut), arrow nudges and
+tabs. Arrange remains an internal API without controls. Shape/text/image/formula/connector objects, zoom-to-content,
 PDF background rendering, note autosave/recovery and explicit ink save remain
 planned. Application preference persistence does not save handwriting.
 

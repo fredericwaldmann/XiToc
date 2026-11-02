@@ -13,7 +13,9 @@ See [architecture decisions](ARCHITECTURE_DECISIONS.md) for constraints and
 XiToc edits vector handwriting in memory on Page Notes and Whiteboards. Pen
 presets, smoothing, pressure where delivered, both erasers, selection/lasso,
 move/proportional resize, clipboard operations and undo/redo are implemented.
-Rotation and explicit z-order changes exist as domain APIs without GUI controls.
+Rotation has a live group handle and 15-degree Shift snapping; explicit z-order
+changes remain domain APIs without Arrange controls. Cut and arrow-key nudges are
+implemented alongside the existing clipboard and manipulation commands.
 Stroke is the only implemented canvas-object content type.
 
 The PDF codec creates and reopens **blank** native documents. It does not save or
@@ -38,7 +40,7 @@ egui/eframe 0.37.0, and eframe's Glow rendering and persistence features.
 | [editor.rs](../src/editor.rs) | `Editor`; layout, page scrolling, Whiteboard navigation/grid, calls into `Canvas` |
 | [drawing.rs](../src/drawing.rs) | `Stroke`, `InkPoint`, `Surface`, `PressureStyle`, `Smoothing`, `Transform`, `Drawing`, private `Command`; semantic mutations/history |
 | [object.rs](../src/object.rs) | `CanvasObject`, `ObjectId`, `ObjectType`, `ObjectSnapshot`, `ObjectBounds`, `Placement`, `hit_stroke_path` |
-| [canvas.rs](../src/canvas.rs) | `Canvas`, `Tool`, `Gesture`, `Erasing`, `Cached`, `PartialPreview`; ordered input, previews, cached mesh rendering |
+| [canvas.rs](../src/canvas.rs) | `Canvas`, `Tool`, `Gesture`, `Erasing`, `Cached`, `PartialPreview`, `RotationPreview`; ordered input, previews, cached mesh rendering |
 | [canvas_selection.rs](../src/canvas_selection.rs) | Private `canvas::selection_ui` submodule via `#[path]`; `SelectionGesture` and additional `impl Canvas` methods for selection/clipboard/previews |
 | [selection.rs](../src/selection.rs) | UI-independent `Selection`, `SelectionCommand`, `Membership`, `LassoRegion`, `move_by`, `scale_about` |
 | [object_clipboard.rs](../src/object_clipboard.rs) | `ObjectBundle`; capture, bounded validation/encode/decode, paste/duplicate with fresh IDs |
@@ -59,6 +61,10 @@ without egui or filesystem/browser APIs. `settings` includes framework storage;
 it is not a pure domain module. `canvas` deliberately combines input and egui
 rendering. `storage/web` also takes an egui context to wake the app on completion.
 These are current boundaries, rather than the proposed directory tree in older docs.
+`index.html` also confines Ctrl/Cmd+A/D browser defaults to the canvas and cancels
+native drags originating on it: otherwise browser page selection/bookmark behavior
+can steal the editor's drag/release stream. It does not suppress Copy/Cut/Paste,
+text-agent input shortcuts or incoming external dragover/drop events.
 
 ## Bootstrap, state and frame lifecycle
 
@@ -259,6 +265,16 @@ constant/variable-width geometry; translucent ink uses joined ribbon strips to
 avoid overpainting each sample join/chunk seam. Genuine crossings and separate
 strokes composite normally. Highlighter hit envelopes remain conservatively rounded.
 
+Move/resize use egui's existing translation/scale layer preview. egui's layer
+transform cannot rotate, so `Cached::paint_rotation` reuses base tessellation and
+transforms only vertex positions once per changed preview frame. It does not
+resmooth or clip paths per pointer event. `RotationPreview` keys the transformed
+meshes by placement/view/DPI; idle frames reuse the same Arcs, and mutable mesh
+capacity is reused when the renderer releases the prior frame. A renderer-held
+Arc may require a copy on the next changed frame. Culling encloses all transformed
+bounds corners. Commit rebuilds only affected committed-object geometry; cancel
+keeps base meshes and releases visible preview meshes on the next ordinary paint.
+
 ### Erasing
 
 Both modes use screen-point eraser radius divided by view scale, plus visible ink
@@ -331,10 +347,22 @@ and clears selection IDs/bounds/outlines in one frame, without changing ink,
 history or cached meshes; later pointer release cannot commit it. Focus loss or
 view changes cancel the preview while retaining membership. Canvas Escape defers
 to text-input focus and open popovers. Page moves/resizes stay on the source surface with
-centerlines constrained to its bounds; rendering clips ink edges. Rotation works
-in the domain and erasers but has no handle/control. Nonuniform scaling is absent.
+centerlines constrained to its bounds; rendering clips ink edges. The round handle
+24 screen points above the group rotates around its logical center; Shift snaps
+to 15 degrees, including modifier changes while stationary. Angle accumulation
+unwraps full turns. Conservative centerline bounds keep Page rotations on the
+source page, retaining the last valid preview; Whiteboards are unrestricted.
+Edit/context menus also offer left/right 15-degree rotation for keyboard access.
 
-Copy/duplicate/paste use the same `ObjectBundle` with tagged snapshots and version
+Handwriting always resizes proportionally, including off-axis drags and Shift;
+nominal width scales uniformly with the centerline, preserving pressure response.
+The longest ink extent cannot shrink below 1 logical point (already smaller ink
+cannot shrink further). Nonuniform resize is intentionally unavailable for ink;
+future box-like content can define a different resize policy without changing the
+shared gesture/journal contract. Arrows nudge by 1 logical point, Shift-arrows by
+10; text/popover focus, other modifiers and active drags retain input priority.
+
+Copy/cut/duplicate/paste use the same `ObjectBundle` with tagged snapshots and version
 1. Validation caps payloads at 4 MiB, 512 objects and 200,000 raw points; it rejects
 invalid geometry, duplicate IDs and unknown versions/variants. Paste remaps object,
 document and surface identities, preserving style/order and fitting the target
@@ -342,6 +370,11 @@ page when needed. Clipboard data is transient interchange, not a native note fil
 An egui-context session bundle supplements system clipboard text. Native menu
 Paste requests a paste event then falls back after a short timeout; web menu Paste
 uses the session bundle directly, while DOM paste can provide system payloads.
+Cut publishes a validated session copy and system clipboard request before a
+single deletion command. If capture/encoding exceeds limits, nothing is removed
+and the preceding clipboard remains available. egui cannot acknowledge native
+system clipboard durability, so the session fallback is the reliable app copy.
+Native Cut events and Ctrl/Cmd+X are deduplicated within a frame.
 
 `Drawing` owns an unbounded command vector, cursor and monotonically changing
 revision. Private `Command::{Insert, Erase, Replace}` retains affected Arc strokes
@@ -394,15 +427,19 @@ is included by the private selection adapter via `#[path]`; it is not a second
 editor implementation. Tests assert cache Arc reuse, index pruning, exact history,
 legacy decoding, clip geometry, ownership, layout/focus and discard behavior.
 
-The current source has 107 Rust tests: 102 normally run and five ignored
+The current source has 117 Rust tests: 111 normally run and six ignored
 release benchmarks (whole erase, partial document, partial geometry, smoothing,
-indexed lasso). Historical recorded results are in TEST_PLAN, not proof of hardware
+indexed lasso, and multi-stroke rotation preview). Historical recorded results are in TEST_PLAN, not proof of hardware
 latency or a fresh run of every platform. [scripts/test_release.py](../scripts/test_release.py)
 adds Python unittest fixtures for archive completeness, corruption/path safety,
 CPU headers, executable bits, manifest/tag matching and Cargo metadata discovery.
 Header fixtures do not prove that binaries launch. The Selection/Lasso follow-up
 adds controller regressions for idle/live-lasso Escape, zoom/pan hit envelopes,
 Page versus Whiteboard boundaries and drawing-tool handoff.
+[manipulation_tests.rs](../src/manipulation_tests.rs), included by the same selection
+adapter, covers rotation, snapping, full turns/far coordinates, cache reuse,
+page/nudge policy, constrained off-axis handwriting resize, Cut/Paste failure and
+cross-document history/focus regressions, plus a release preview benchmark.
 
 | Workflow | Trigger and checks |
 | --- | --- |

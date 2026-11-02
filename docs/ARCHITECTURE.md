@@ -443,3 +443,35 @@ return None, requiring a deliberate detach/delete policy in the connector task.
 No relations, connector object, routing or reactive graph are implemented here.
 Page ownership remains explicit Page(index); stable PageId migration is required
 before page reordering (#11), as already specified in M1.4.
+
+## M1.4 manipulation interaction contract
+
+Selected handwriting resizes proportionally about the opposite corner. Off-axis
+corner movement projects onto the selection diagonal; Shift explicitly constrains
+aspect ratio but does not enable anisotropic handwriting distortion. Nominal width
+scales by the same positive scalar as the centerline; raw pressure/style/smoothing
+remain unchanged. Nonuniform resize belongs to future content types whose geometry
+can define that policy (for example boxes), not an implicit elliptical ink nib.
+
+Rotation uses a screen-sized handle above the group and a logical center pivot.
+Shift snaps relative rotation to 15-degree steps. Page ownership is unchanged;
+rotations whose conservative centerline bounds would leave the source page retain
+the last valid preview. Whiteboard rotations are unrestricted. Preview changes
+only scalar placement, with one journal transaction at release; Escape cancels.
+The existing nonrotating layer-transform preview remains the fast move/resize path.
+Rotation reuses tessellated mesh vertices rather than resmoothing raw ink.
+
+Cut first captures a validated clipboard bundle and publishes the session fallback;
+only a successful copy removes selected objects in one history command. System
+clipboard writes have no durable acknowledgement through egui; the bounded session
+copy remains available on both platforms. Arrow keys nudge by 1 logical point,
+Shift-arrows by 10, constrained to the source page and ignored for text/popover
+focus, modified navigation shortcuts and active pointer gestures.
+
+Browser boundary: `index.html` prevents default canvas Ctrl/Cmd+A/D (page select/
+bookmark) and native dragstart originating on the canvas. An actual Firefox test
+showed native page selection starting a browser drag and swallowing the remaining
+move/release stream. Canvas-only handlers preserve the eframe text agent's native
+shortcuts, clipboard events and incoming external-file drops. Logical document
+axes are screen-oriented (positive Y downward); positive handle rotation appears
+clockwise, with units remaining PDF points independently of the view.

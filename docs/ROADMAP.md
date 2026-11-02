@@ -207,3 +207,14 @@ Add controller coverage for clearing, zoom/pan envelope picking, Page boundaries
 versus unbounded Whiteboards and handoff to Pen/Hand/both erasers. Preserve the
 existing top toolbar, object protocol, cached geometry and journal; add no tools,
 transforms or PDF persistence.
+
+### M1.4 — Object manipulation and clipboard completion
+
+Expose the existing rotation placement through a group handle, Shift snapping,
+rotated bounds/mesh preview and keyboard-accessible 15-degree menu actions.
+Add Cut with a validated internal clipboard before deletion and logical arrow/
+Shift-arrow nudges. Preserve existing movement, proportional handwriting resize,
+duplicate/paste/delete and exact transactional undo. Handwriting remains uniform-
+scale; off-axis resizing preserves its aspect ratio/pressure nib and a 1-point
+longest-extent minimum. Future nonuniform boxes require their own geometry policy.
+No future object creation, Arrange UI or PDF persistence is introduced.
