@@ -6,6 +6,9 @@ use egui::{Color32, Pos2, Rect, Stroke, StrokeKind, Vec2};
 #[derive(Clone, Copy)]
 pub enum Icon {
     Select,
+    Lasso,
+    Duplicate,
+    Delete,
     Settings,
     Undo,
     Redo,
@@ -38,6 +41,51 @@ pub fn paint(painter: &egui::Painter, center: Pos2, icon: Icon, color: Color32) 
     let point = |x: f32, y: f32| center + egui::vec2(x, y);
     let line = |a, b| painter.line_segment([a, b], stroke);
     match icon {
+        Icon::Duplicate => {
+            painter.rect_stroke(
+                rect.translate(egui::vec2(-2.0, -2.0)).shrink(2.0),
+                1.0,
+                stroke,
+                StrokeKind::Inside,
+            );
+            painter.rect_stroke(
+                rect.translate(egui::vec2(2.0, 2.0)).shrink(2.0),
+                1.0,
+                stroke,
+                StrokeKind::Inside,
+            );
+        }
+        Icon::Delete => {
+            line(point(-6.0, -4.0), point(6.0, -4.0));
+            line(point(-2.0, -7.0), point(2.0, -7.0));
+            painter.rect_stroke(
+                Rect::from_min_max(point(-4.0, -3.0), point(4.0, 7.0)),
+                1.0,
+                stroke,
+                StrokeKind::Inside,
+            );
+            for x in [-1.5, 1.5] {
+                line(point(x, -1.0), point(x, 5.0));
+            }
+        }
+        Icon::Lasso => {
+            painter.add(egui::Shape::line(
+                vec![
+                    point(2.0, 4.0),
+                    point(-4.0, 3.0),
+                    point(-7.0, -1.0),
+                    point(-5.0, -5.0),
+                    point(1.0, -6.0),
+                    point(6.0, -3.0),
+                    point(6.0, 1.0),
+                    point(2.0, 4.0),
+                    point(0.0, 6.0),
+                    point(2.0, 7.0),
+                    point(5.0, 5.0),
+                ],
+                stroke,
+            ));
+        }
         Icon::Select => {
             painter.add(egui::Shape::closed_line(
                 vec![

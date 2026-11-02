@@ -144,3 +144,15 @@ remains Monoline-tagged while its captured pressure behavior remains unchanged.
 Unknown type tags fail explicitly. M2 must version the payload, preserve these
 values and match visible PDF transparency/flat translucent nibs and rounded opaque
 geometry. The blank PDF codec/schema still cannot store ink and remains unchanged.
+
+## M1.4 object placement and future variant integration
+
+Stroke snapshots add a serde-defaulted validated uniform placement (identity for
+older semantic samples). Selection transforms retain raw samples, pen type/color,
+width/opacity, smoothing and pressure response; visible width scales with placement.
+Partial fragments retain placement and store surviving points in its local space.
+M2 must serialize placements with matching visible PDF transforms, stable object
+IDs, surface ownership and canonical stacking. Future shapes/text/formulas/images
+provide local geometry/resources; connector anchors reference stable object IDs.
+Transient selection/clipboard/handles are not canonical saved content. The blank
+schema/PDF codec remain unchanged and no editable-ink save is claimed in M1.4.

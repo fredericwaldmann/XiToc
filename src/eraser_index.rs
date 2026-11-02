@@ -89,15 +89,16 @@ impl EraserIndex {
                     max: [f64::NEG_INFINITY; 2],
                 };
                 for point in &stroke.points {
-                    for i in 0..2 {
-                        bounds.min[i] = bounds.min[i].min(point.position[i]);
-                        bounds.max[i] = bounds.max[i].max(point.position[i]);
+                    let position = stroke.placement.apply(point.position);
+                    for (i, value) in position.into_iter().enumerate() {
+                        bounds.min[i] = bounds.min[i].min(value);
+                        bounds.max[i] = bounds.max[i].max(value);
                     }
                 }
                 // Smoothing lies in the raw samples' convex hull. Include ink width.
                 for i in 0..2 {
-                    bounds.min[i] = (bounds.min[i] - stroke.width * 0.5).next_down();
-                    bounds.max[i] = (bounds.max[i] + stroke.width * 0.5).next_up();
+                    bounds.min[i] = (bounds.min[i] - stroke.visible_width() * 0.5).next_down();
+                    bounds.max[i] = (bounds.max[i] + stroke.visible_width() * 0.5).next_up();
                 }
                 Entry {
                     bounds,
@@ -109,6 +110,39 @@ impl EraserIndex {
             Self::build(&mut self.nodes, &mut self.entries, 0);
         }
         self.revision = Some(revision);
+    }
+    pub fn query_rect(
+        &self,
+        surface: Surface,
+        min: [f64; 2],
+        max: [f64; 2],
+        mut visit: impl FnMut(usize),
+    ) {
+        fn walk(
+            index: &EraserIndex,
+            node: usize,
+            surface: Surface,
+            bounds: Bounds,
+            visit: &mut impl FnMut(usize),
+        ) {
+            let n = &index.nodes[node];
+            if !n.bounds.intersects(bounds) {
+                return;
+            }
+            if let Some(right) = n.right {
+                walk(index, node + 1, surface, bounds, visit);
+                walk(index, right, surface, bounds, visit);
+            } else {
+                for entry in &index.entries[n.start..n.end] {
+                    if entry.surface == surface && entry.bounds.intersects(bounds) {
+                        visit(entry.index);
+                    }
+                }
+            }
+        }
+        if !self.nodes.is_empty() {
+            walk(self, 0, surface, Bounds { min, max }, &mut visit);
+        }
     }
     /// Temporary immutable segment index for a touched rendered centerline.
     pub fn for_path(path: &[[f64; 2]], width: f64, surface: Surface) -> Self {

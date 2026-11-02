@@ -83,3 +83,20 @@ The toolbar remains below tabs in every capture. Only the contextual popover
 overlays content. Browser Explorer shows session imports/exports; native real
 folder behavior remains unchanged. The native Linux executable also launched
 without startup errors; physical stylus and Windows/macOS runtime remain manual.
+
+## M1.4 universal selection and lasso
+
+Actual Firefox 157 / WebGL2 release application, Linux, November 2, 2026.
+
+- [Single selected stroke](m1.4/single.png)
+- [Live lasso](m1.4/lasso.png) and [completed multi-selection](m1.4/group.png)
+- [Movement preview](m1.4/preview.png) and [proportional resize](m1.4/resized.png)
+- [Cross-document paste into A4 Page Note](m1.4/page.png)
+- [Duplicate](m1.4/duplicate.png) and [delete followed by undo](m1.4/undo.png)
+- [480×360 Page Note selection](m1.4/small.png)
+
+Verified top toolbar, Explorer and tabs remain separate. Selection, live lasso,
+movement, resizing, duplicate, delete, undo/redo, Edit/context menus and cross-tab
+copy/paste were exercised in the browser. Both light and dark appearances were
+inspected. Native Linux launched without startup errors; interactive native
+selection and system clipboard behavior still require manual verification.

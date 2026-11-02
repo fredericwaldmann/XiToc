@@ -543,3 +543,54 @@ Manual reproduction:
    and confirm no bottom toolbar or overlap with Explorer/tabs.
 5. Restart/reload only after discarding scratch ink; presets survive independently
    of document bytes. Repeat on compatible physical stylus hardware for pressure.
+
+## M1.4 selection implementation gates
+
+Test shared identity/bounds/placement and backward semantic decoding; click/multi/
+full-envelope lasso (concave, crossing, degenerate, pressure and thick ink); uniform
+move/resize, cancel and one-command commit; copy/duplicate/paste/delete with fresh
+IDs, preserved properties/order and exact undo/redo. Test scope/page bounds, zoom,
+DPI and far-origin coordinates; transformed whole/partial erasing; focus/shortcut/
+context-control isolation; clipboard payload validation and cross-tab fallback.
+Run all existing fmt/Clippy/test/native/WASM/Trunk gates and retain cache/index
+performance checks. Actual native/browser observations must be recorded separately
+from compilation, including narrow windows, both themes and document types.
+
+
+### M1.4 performed verification
+
+Formatting, Clippy with warnings denied, all-target tests (95 passed, five ignored
+manual benchmarks), native build, wasm32 check and Trunk release build passed.
+All five ignored release benchmarks also passed, including indexed lasso with a
+4,000-edge region around a 100,000-point path (27.28 ms containment on this host).
+Cached mesh reuse during preview and indexed erasing remain covered. These CPU
+measurements do not measure physical stylus/display latency or establish a
+cross-device performance guarantee.
+
+Actual Firefox 157/WebGL2 release app was exercised at 1100×760 and 480×360:
+click/multiple selection, live lasso, move preview, corner resize, duplicate,
+copy between Whiteboard and Page, Edit-menu paste, delete/undo/redo, context
+controls and light/dark appearance. Browser inspection caught unsupported web
+RequestPaste dispatch; web menu Paste now uses the session bundle immediately,
+while standard DOM paste events can supply system payloads. Captures are linked
+in `screenshots/README.md`. Linux native startup passed; interactive native
+selection/system clipboard, Windows/macOS and physical pen remain manual.
+
+Manual reproduction:
+1. Run `cargo run --locked` or `trunk serve`; create scratch Page and Whiteboard
+   documents. Draw with multiple presets; ink remains memory-only until M2.
+2. Choose Selection, click ink, Shift-click to toggle others, click empty canvas
+   to clear. Choose Lasso, enclose complete strokes, release; Selection returns
+   with a group box. Touching or crossing the lasso boundary excludes a stroke.
+3. Drag selected ink; drag a corner to scale proportionally. Repeat after zoom
+   and pan, and on page edges. Escape cancels a drag. Undo/redo each gesture.
+4. Use Ctrl/Cmd+A/C/V/D, Delete and Ctrl/Cmd+Z/Shift+Z, then equivalent Edit and
+   context menus. Copy into another document; check fresh IDs through tests.
+   Edit text in a preset popover and confirm canvas shortcuts do not steal input.
+5. Erase transformed ink with both erasers; undo. Resize the window to 480×360,
+   check both themes and confirm contextual controls stay inside the editor.
+
+Intentional limits: page-local selection, proportional scaling only, conservative
+rounded highlighter envelope, 4,096 lasso vertices (overcomplex gestures cancel),
+and clipboard caps of 512 objects / 200,000 input points / 4 MiB. No PDF ink saving,
+future object creation, nonuniform scaling or rotation is implemented.

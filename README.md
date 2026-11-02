@@ -288,6 +288,18 @@ Select a pen preset with one click; use Pen settings to edit its name, Monoline 
 Pressure Pen / Highlighter type, color, width, opacity, smoothing and pressure.
 Use + to create a custom copy, or manage ordering/deletion/defaults in the popover.
 Settings → Drawing shares the same locally persisted preset library. Hand,
-both erasers, history and zoom remain available. Selection is planned/disabled.
+both erasers, history and zoom remain available. Selection and Lasso are functional as of M1.4.
 Ink remains memory-only until M2. See [UI specification](docs/UI_DESIGN.md) and
 [future creative tool dependencies](docs/CREATIVE_TOOLS.md).
+
+M1.4 selection: click Selection in the top toolbar, click ink, Shift-click to
+toggle multiple strokes, or draw a fully enclosing Lasso. Lasso returns to
+Selection. Drag selected ink to move; corner handles always resize proportionally.
+Ctrl/Cmd+A/C/V/D selects all/copies/pastes/duplicates; Delete removes selected ink;
+Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z undo/redo. Edit and canvas context menus provide
+the same commands. A small toolbar near the selection duplicates/deletes/scales.
+Selection is page-local; copied objects can be pasted into another document.
+Clipboard limits are 512 objects, 200,000 points and 4 MiB; the in-app session
+clipboard is used when system integration is unavailable. Paste centers objects
+in the visible scope and fits oversized groups to a page; Duplicate preserves
+size and clamps its 12-point offset to the page. Ink remains memory-only until M2.

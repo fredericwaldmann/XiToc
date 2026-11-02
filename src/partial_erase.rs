@@ -275,12 +275,12 @@ impl PartialCut {
         }
     }
     pub fn with_pressure(path: &[[f64; 2]], stroke: &Stroke, pressures: &[Option<f32>]) -> Self {
-        let mut cut = Self::new(path, stroke.width, stroke.surface);
+        let mut cut = Self::new(path, stroke.visible_width(), stroke.surface);
         if stroke.pressure_style.enabled && pressures.iter().any(Option::is_some) {
             cut.radii = Some(
                 pressures
                     .iter()
-                    .map(|p| stroke.width * 0.5 * stroke.pressure_style.factor(*p))
+                    .map(|p| stroke.visible_width() * 0.5 * stroke.pressure_style.factor(*p))
                     .collect(),
             );
         }
@@ -423,10 +423,12 @@ pub fn fragments(stroke: &Stroke, path: &[[f64; 2]], cuts: &Cuts) -> Vec<Stroke>
             stroke.color,
             stroke.width,
         );
+        piece.placement = stroke.placement;
         piece.pen_type = stroke.pen_type;
         piece.smoothing = Smoothing::PolylineV1;
         piece.pressure_style = stroke.pressure_style;
         visit_piece(path, start, end, |position, t| {
+            let position = stroke.placement.inverse(position);
             let pressure = if let Some(pressures) = &pressures {
                 let i = (t.floor() as usize).min(pressures.len() - 1);
                 let next = (i + 1).min(pressures.len() - 1);

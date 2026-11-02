@@ -6,7 +6,9 @@ For UI changes, also read and follow `docs/UI_DESIGN.md`; keep centralized token
 and the documented design system in sync. Follow its M1.3 top drawing toolbar, pen presets,
 contextual settings, responsive layout and light/dark interaction specification.
 Do not expose planned tools as working controls; consult `docs/CREATIVE_TOOLS.md`
-for object-model and persistence dependencies. Keep drawing tools directly below
+for object-model and persistence dependencies. M1.4 uses the shared CanvasObject
+identity/bounds/placement protocol; preserve immutable raw ink/style during object
+transforms and keep derived selection/handles out of canonical saved content. Keep drawing tools directly below
 the document tabs; never introduce a bottom floating drawing toolbar.
 
 ## Mission and non-negotiable requirements

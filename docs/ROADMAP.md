@@ -167,3 +167,14 @@ migration/validation/lifecycle, pressure fallback/type behavior, alpha joins/cac
 partial erasing/history and actual UI interactions. Gates: fmt/Clippy/tests,
 native/WASM/Trunk and narrow/wide visual smoke in both layouts/themes.
 No PDF persistence or note sidecars; M2 must version stroke pen type and opacity.
+
+## M1.4 — Universal selection and lasso (#23)
+
+Shared object identity/bounds/placement protocol with strokes as the only complete
+content type; page-local or Whiteboard scope, topmost click and full-envelope lasso,
+add/subtract/select-all, proportional resize and movement previews, batch journal
+commands for transform/duplicate/paste/delete, focus-aware shortcuts and Edit/canvas
+menus, constrained contextual controls. Preserve drawing caches/erasers and top
+main toolbar. No PDF persistence or other object creation. Validate geometry,
+identity/style/order/history, clipboard limits, page bounds and zoom/far-origin
+input on native/WASM; record real UI verification and any unmet #23 criteria.

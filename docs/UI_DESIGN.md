@@ -58,7 +58,7 @@ Fixed 40-point top panel directly below the document tabs, with 8×6 padding and
 and 1.25-point strokes. Preset buttons are 40×26. No floating palette or shadow.
 Never overlay Explorer, tabs or canvas with the drawing toolbar.
 
-Order: Selection (disabled until object selection), Hand, horizontal pen presets,
+Order: Selection, Lasso, Hand, horizontal pen presets,
 New preset (+), Pen settings, Eraser, Undo/Redo, zoom. No unfinished pen types.
 One click selects a preset and Pen; its preview combines a nib icon with its actual
 color/opacity and a thickness stripe clamped to 1–8 screen points. Hover and
@@ -172,3 +172,31 @@ Capture workspace, Page, Whiteboard, preset settings and Eraser popovers; confir
 with Explorer/tabs, no bottom palette, no accidental ink from controls, drawing/erasing/history,
 resize, grid and zoom. Record performed checks in TEST_PLAN, distinguish build
 checks from visual verification and physical pen/display latency tests.
+
+## M1.4 Selection, Lasso and contextual object controls
+
+Selection and Lasso are adjacent working controls at the left of the TOP toolbar.
+Selection clicks pick topmost visible ink (4 logical-screen-point tolerance);
+empty clicks clear. Shift-click toggles membership; Alt-click subtracts. Ctrl/Cmd+A
+selects all in the active page/canvas scope and activates Selection. Text-input
+focus retains its own shortcuts. Lasso draws a live outline and closes at release:
+only fully enclosed rounded stroke envelopes are selected, excluding boundary
+contact. Shift adds, Alt subtracts; a degenerate/cancelled lasso leaves selection.
+A completed valid lasso returns to Selection, exposing handles and direct movement.
+Select Lasso again to add/subtract another region.
+
+Selected ink has a subtle accent outline, group bounding rectangle and four
+7-point corner handles with 5-point-radius hit targets. A 22-point minimum visual
+selection rectangle keeps handles separated for dots and low zoom. Drag selected ink to move;
+corner drags always scale proportionally about the opposite corner. A small drag
+threshold avoids accidental transformations. One released drag is one undo entry;
+Escape/focus loss cancels the preview. Page ownership never changes by dragging.
+Pen/Eraser/Hand remain independent tools; Space temporarily pans without selection.
+
+A compact contextual toolbar near a visible selection offers Duplicate, Delete,
+Shrink and Grow. It stays constrained inside the editor viewport; the main toolbar
+never moves. Matching Copy/Paste/Duplicate/Delete/Select All and Undo/Redo commands
+are exposed through Edit and canvas context menus. Ctrl/Cmd+C/V/D, Delete/Backspace,
+Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z follow focus. The in-app clipboard remains available
+when system clipboard permissions/integration are unavailable; arbitrary clipboard
+text is not treated as a native note. No unfinished shape/style controls appear.

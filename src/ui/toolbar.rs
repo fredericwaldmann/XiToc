@@ -29,10 +29,12 @@ pub fn show(
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             if doc.external { ui.weak("Read-only PDF"); return; }
-            ui.add_enabled_ui(false, |ui| icons::button(ui, Icon::Select, "Selection", false))
-                .inner.on_disabled_hover_text("Selection is planned for the object-selection milestone");
+            for (tool,icon,label) in [(Tool::Select,Icon::Select,"Selection · Shift-click to toggle"),(Tool::Lasso,Icon::Lasso,"Lasso · enclose complete strokes; Shift adds, Alt subtracts")] {
+                if icons::button(ui,icon,label,editor.canvas.tool==tool).clicked(){editor.canvas.select(tool);}
+            }
             if icons::button(ui, Icon::Hand, "Hand · Space-drag to pan", editor.canvas.tool == Tool::Pan).clicked() { editor.canvas.select(Tool::Pan); }
             let reserved = if width >= 1000.0 { 480.0 } else if width >= 800.0 { 380.0 } else if width >= 500.0 { 268.0 } else { 210.0 };
+            let reserved=reserved+if width>=400.0{30.0}else{0.0};
             let strip_width = (width - reserved).max(24.0);
             ui.allocate_ui(egui::vec2(strip_width, style::CONTROL), |ui| {
                 egui::ScrollArea::horizontal().id_salt("pen-presets").min_scrolled_width(24.0).auto_shrink([false, false])
@@ -68,7 +70,7 @@ pub fn show(
                         });
                     });
             });
-            let added = ui.add_enabled_ui(prefs.presets.items.len() < crate::pen::MAX_PRESETS, |ui| icons::button(ui, Icon::Plus, "New pen preset · copy selected", false)).inner.clicked();
+            let added = width>=400.0 && ui.add_enabled_ui(prefs.presets.items.len() < crate::pen::MAX_PRESETS, |ui| icons::button(ui, Icon::Plus, "New pen preset · copy selected", false)).inner.clicked();
             if added { prefs.presets.duplicate(); editor.canvas.select(Tool::Pen); }
             let settings = icons::button(ui, Icon::Settings, "Pen settings", false);
             egui::Popup::from_toggle_button_response(&settings)
