@@ -38,12 +38,17 @@ enum Gesture {
     Pen(Stroke),
     Eraser(Erasing),
 }
+struct RotationPreview {
+    key: (crate::object::Placement, Transform, f32),
+    meshes: Vec<Arc<egui::Mesh>>,
+}
 struct Cached {
     placement: crate::object::Placement,
     path: Vec<[f64; 2]>,
     pressures: Vec<Option<f32>>,
     view: Option<(Transform, f32)>,
     meshes: Vec<Arc<egui::Mesh>>,
+    rotation_preview: Option<RotationPreview>,
     bounds: ([f64; 2], [f64; 2]),
 }
 impl Cached {
@@ -64,6 +69,7 @@ impl Cached {
             path,
             view: None,
             meshes: Vec::new(),
+            rotation_preview: None,
             bounds: (min, max),
         }
     }
@@ -71,6 +77,7 @@ impl Cached {
         let ppp = ui.ctx().pixels_per_point();
         if self.view != Some((transform, ppp)) {
             self.meshes.clear();
+            self.rotation_preview = None;
             self.view = Some((transform, ppp));
         }
         let chunks = self
@@ -134,7 +141,52 @@ impl Cached {
         stroke: &Stroke,
     ) {
         self.prepare_meshes(ui, transform, stroke);
+        self.rotation_preview = None;
         for mesh in &self.meshes {
+            painter.add(egui::Shape::Mesh(mesh.clone()));
+        }
+    }
+    /// egui layer transforms cannot rotate. Reuse tessellated base meshes and
+    /// update only vertex positions once per changed preview frame, never per
+    /// pointer event. Idle frames share the same preview Arcs. make_mut reuses
+    /// capacity when the renderer no longer holds the preceding frame's Arc.
+    fn paint_rotation(
+        &mut self,
+        ui: &egui::Ui,
+        painter: &egui::Painter,
+        transform: Transform,
+        stroke: &Stroke,
+        delta: crate::object::Placement,
+    ) {
+        self.prepare_meshes(ui, transform, stroke);
+        let key = (delta, transform, ui.ctx().pixels_per_point());
+        let preview = self
+            .rotation_preview
+            .get_or_insert_with(|| RotationPreview {
+                key,
+                meshes: Vec::new(),
+            });
+        if preview.key != key || preview.meshes.len() != self.meshes.len() {
+            let origin = transform.to_screen(delta.origin);
+            let position = transform.to_screen(delta.position);
+            let (sin, cos) = delta.rotation.sin_cos();
+            for (i, base) in self.meshes.iter().enumerate() {
+                if preview.meshes.len() <= i {
+                    preview.meshes.push(Arc::new((**base).clone()));
+                }
+                let target = Arc::make_mut(&mut preview.meshes[i]);
+                for (vertex, raw) in target.vertices.iter_mut().zip(&base.vertices) {
+                    let x = (f64::from(raw.pos.x) - origin[0]) * delta.scale;
+                    let y = (f64::from(raw.pos.y) - origin[1]) * delta.scale;
+                    vertex.pos = egui::pos2(
+                        (position[0] + x * cos - y * sin) as f32,
+                        (position[1] + x * sin + y * cos) as f32,
+                    );
+                }
+            }
+            preview.key = key;
+        }
+        for mesh in &preview.meshes {
             painter.add(egui::Shape::Mesh(mesh.clone()));
         }
     }
@@ -675,6 +727,7 @@ impl Canvas {
             pressures: Vec::new(),
             view: None,
             meshes: Vec::new(),
+            rotation_preview: None,
             bounds: ([0.0; 2], [0.0; 2]),
         });
         let drawing::Smoothing::AdaptiveV1 { strength } = stroke.smoothing else {
@@ -732,8 +785,18 @@ impl Canvas {
             let delta = selection_preview
                 .filter(|_| self.selection.ids.contains(&stroke.id))
                 .unwrap_or_default();
-            let min = transform.to_screen(delta.apply(cached.bounds.0));
-            let max = transform.to_screen(delta.apply(cached.bounds.1));
+            let base_bounds = crate::object::ObjectBounds {
+                min: cached.bounds.0,
+                max: cached.bounds.1,
+            };
+            // Ordinary drawing pays no four-corner transform cost for previews.
+            let world_bounds = if delta.is_identity() {
+                base_bounds
+            } else {
+                base_bounds.placed(delta)
+            };
+            let min = transform.to_screen(world_bounds.min);
+            let max = transform.to_screen(world_bounds.max);
             let screen_bounds = Rect::from_min_max(
                 Pos2::new(min[0] as f32, min[1] as f32),
                 Pos2::new(max[0] as f32, max[1] as f32),
@@ -751,6 +814,10 @@ impl Canvas {
                 if let Some(delta) =
                     selection_preview.filter(|_| self.selection.ids.contains(&stroke.id))
                 {
+                    if delta.rotation != 0.0 {
+                        cached.paint_rotation(ui, &painter, transform, stroke, delta);
+                        continue;
+                    }
                     let origin = transform.to_screen(delta.origin);
                     let position = transform.to_screen(delta.position);
                     let layer_transform = egui::emath::TSTransform {
@@ -783,6 +850,7 @@ impl Canvas {
                 pressures: Vec::new(),
                 view: None,
                 meshes: Vec::new(),
+                rotation_preview: None,
                 bounds: ([0.0; 2], [0.0; 2]),
             });
             let drawing::Smoothing::AdaptiveV1 { strength } = stroke.smoothing else {

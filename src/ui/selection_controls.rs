@@ -25,11 +25,14 @@ pub fn menu(ui: &mut egui::Ui, state: MenuState) -> Option<SelectionCommand> {
     for (label, key, enabled, value) in [
         ("Undo", "Ctrl/Cmd+Z", state.can_undo, Undo),
         ("Redo", "Ctrl/Cmd+Shift+Z", state.can_redo, Redo),
+        ("Cut", "Ctrl/Cmd+X", state.selected, Cut),
         ("Copy", "Ctrl/Cmd+C", state.selected, Copy),
         ("Paste", "Ctrl/Cmd+V", state.editable, Paste),
         ("Duplicate", "Ctrl/Cmd+D", state.selected, Duplicate),
         ("Delete", "Delete / Backspace", state.selected, Delete),
         ("Select All", "Ctrl/Cmd+A", state.has_objects, SelectAll),
+        ("Rotate left 15°", "", state.selected, RotateLeft),
+        ("Rotate right 15°", "", state.selected, RotateRight),
         ("Smaller", "Scale 90%", state.selected, Smaller),
         ("Larger", "Scale 110%", state.selected, Larger),
     ] {

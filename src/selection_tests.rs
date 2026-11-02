@@ -2,7 +2,7 @@ use super::*;
 use crate::document::DocumentKind;
 use crate::object::CanvasObject;
 
-fn pointer(point: Point, pressed: bool, modifiers: egui::Modifiers) -> Event {
+pub(super) fn pointer(point: Point, pressed: bool, modifiers: egui::Modifiers) -> Event {
     Event::PointerButton {
         pos: egui::pos2(point[0] as f32, point[1] as f32),
         button: PointerButton::Primary,
@@ -10,14 +10,14 @@ fn pointer(point: Point, pressed: bool, modifiers: egui::Modifiers) -> Event {
         modifiers,
     }
 }
-fn screen(t: Transform, p: Point) -> Point {
+pub(super) fn screen(t: Transform, p: Point) -> Point {
     t.to_screen(p)
 }
-fn moved(t: Transform, p: Point) -> Event {
+pub(super) fn moved(t: Transform, p: Point) -> Event {
     let p = t.to_screen(p);
     Event::PointerMoved(egui::pos2(p[0] as f32, p[1] as f32))
 }
-fn frame(
+pub(super) fn frame(
     ctx: &egui::Context,
     canvas: &mut Canvas,
     surface: Surface,
@@ -47,7 +47,7 @@ fn frame(
     );
     output.textures_delta.clear();
 }
-fn click(
+pub(super) fn click(
     ctx: &egui::Context,
     c: &mut Canvas,
     s: Surface,
@@ -74,14 +74,14 @@ fn click(
         true,
     );
 }
-fn t() -> Transform {
+pub(super) fn t() -> Transform {
     Transform {
         origin: [0.; 2],
         center: [0.; 2],
         scale: 1.,
     }
 }
-fn stroke(c: &mut Canvas, s: Surface, a: Point, b: Point) -> Uuid {
+pub(super) fn stroke(c: &mut Canvas, s: Surface, a: Point, b: Point) -> Uuid {
     let mut stroke = Stroke::new(c.drawing.owner(), s, [37, 99, 200, 255], 2.);
     stroke.smoothing = drawing::Smoothing::PolylineV1;
     stroke.push(a);
@@ -90,7 +90,7 @@ fn stroke(c: &mut Canvas, s: Surface, a: Point, b: Point) -> Uuid {
     assert!(c.drawing.add(stroke));
     id
 }
-fn setup(kind: DocumentKind) -> (Canvas, Surface) {
+pub(super) fn setup(kind: DocumentKind) -> (Canvas, Surface) {
     let data = DocumentData::blank(kind);
     let s = if kind == DocumentKind::Page {
         Surface::Page(0)

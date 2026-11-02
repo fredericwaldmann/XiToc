@@ -14,6 +14,21 @@
   <body>
     <canvas id="xitoc-canvas" aria-label="XiToc editor"></canvas>
     <script>
+      const editorCanvas = document.getElementById("xitoc-canvas");
+      // Keep Select All and Duplicate inside the editor (not browser bookmarks).
+      // Native page selection can make Firefox
+      // drag the canvas itself and swallow the app's move/release events.
+      // The text agent is a separate input element and keeps native text shortcuts.
+      editorCanvas.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey
+            && ["a", "d"].includes(event.key.toLowerCase())) {
+          event.preventDefault();
+        }
+      });
+      // This only stops drags originating on the canvas; external file drops
+      // still use their own dragover/drop events through eframe.
+      editorCanvas.addEventListener("dragstart", (event) => event.preventDefault());
+
       // Set by Rust after drawing changes. No storage, uploads or background work.
       window.addEventListener("beforeunload", (event) => {
         if (window.xitocHasUnsavedChanges) {

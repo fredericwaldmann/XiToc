@@ -260,3 +260,40 @@ click/Shift-click/lasso, live-lasso Escape and unchanged ink in both layouts,
 Ctrl+A/Escape, dark appearance and 480×360 layout. **Limitations:** no interactive
 native/physical stylus or Windows/macOS runtime test in this follow-up; future
 object types still need adapters in the same canonical store/selection dispatch.
+
+## M1.4 — Object manipulation and clipboard (2026-11-03)
+
+**Evidence:** branch `feat/object-manipulation`, starting from main `50cf36e`,
+related [issue #23](https://github.com/fredericwaldmann/XiToc/issues/23). The complete
+issue list contained no “Move, Resize, Rotate, Duplicate and Clipboard” title;
+#23's complete description/criteria and empty comments were reviewed.
+
+**Implemented:** live group rotation with a screen-sized handle, full-turn angle
+unwrapping and dynamic 15-degree Shift snapping; keyboard-accessible rotation
+steps; validated-copy-before-delete Cut and logical arrow nudges. Existing move,
+proportional resize, duplicate/copy/paste/delete and journal are reused. Handwriting
+keeps a uniform nib/pressure envelope, including off-axis resize drags, with a
+1-point longest-extent floor. Rotation previews reuse tessellation and cache idle
+meshes. Conservative page bounds and explicit ownership remain. A regression
+caught contextual controls overlapping the rotation hit target; clearance was fixed.
+
+**Verification:** fmt/Clippy, 111 passing tests (six ignored benchmarks), native
+release compilation, WASM check and Trunk release build. All six release benchmarks
+passed; the 2,000-stroke/40,000-sample rotation fixture measured 44.01 ms first
+preview, 12.15 ms subsequent changed frame, 5.45 ms unchanged frame under concurrent
+build load. These are host-dependent CPU measurements, not display latency promises.
+A timed Linux release startup stayed alive without emitted errors until deliberate
+termination. Interaction observations and remaining platform checks are in TEST_PLAN.
+
+**Limits:** no anisotropic handwriting stretch, new semantic object variants,
+connector relations, Arrange controls or PDF ink persistence. Future box-like
+objects need their own nonuniform resize policy. System clipboard durability has
+no egui acknowledgement; the app session copy protects Cut/Paste within XiToc.
+
+**Browser findings/verification:** actual Firefox release-app manipulation exposed
+native page selection/bookmark defaults interfering with canvas A/D gestures.
+Canvas-only key-default and native dragstart guards prevent browser DND from
+swallowing move/release. Verified rotation commit/undo/redo, duplicate, Cut/Paste,
+cross-document Page paste/Shift rotation/nudges, dark/narrow layout and fresh-load
+DOM guard assertions. Physical pen and interactive native manipulation remain
+unverified; see TEST_PLAN for exact observed scope.

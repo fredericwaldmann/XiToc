@@ -205,3 +205,26 @@ are exposed through Edit and canvas context menus. Ctrl/Cmd+C/V/D, Delete/Backsp
 Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z follow focus. The in-app clipboard remains available
 when system clipboard permissions/integration are unavailable; arbitrary clipboard
 text is not treated as a native note. No unfinished shape/style controls appear.
+
+### M1.4 rotation, Cut and keyboard movement
+
+A round rotation handle sits 24 screen points above the group box, connected by
+a thin stem. Drag around the selection center; hold Shift for 15-degree snapping.
+The preview outline follows the rotating group; after commit bounds are recomputed.
+Page rotations stop at the last valid conservative centerline bounds; ownership
+never changes. The handle may be reached in the page margin within the editor.
+Corner resizing remains proportional for handwriting, including off-axis drags
+and Shift; width/pressure appearance scales uniformly. Nonuniform boxes are future
+content, not a handwriting stretch mode.
+
+Cut appears alongside Copy/Paste in Edit and canvas context actions, using
+Ctrl/Cmd+X. Cut removes content only after a validated session clipboard copy is
+available. Arrows move selected objects 1 document point; Shift-arrows move 10.
+Text input, popovers and active drags retain input priority. Escape cancels the
+preview and clears selection as before. The top drawing toolbar and application
+layout remain unchanged.
+
+On web, canvas Ctrl/Cmd+A and Ctrl/Cmd+D belong to XiToc, not browser page
+selection/bookmark commands. Native HTML drag initiation on the canvas is blocked
+so it cannot swallow a manipulation release. Text fields keep native shortcuts,
+and Copy/Cut/Paste events are not suppressed by this guard.

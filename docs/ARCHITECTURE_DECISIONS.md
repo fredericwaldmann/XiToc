@@ -155,7 +155,8 @@ semantics. **Tradeoffs:** Derived paths and meshes must agree with erasing/hits;
 raw and derived geometry consume memory. Uniform scale avoids a more complex
 stroke-width rule, but nonuniform stretch is unavailable.
 
-**Future consequences:** Rotation/arrange APIs currently have no UI. New object
+**Future consequences:** Rotation now has a group handle/menu; Arrange remains
+an internal API. New object
 geometry must define local bounds, inverse transforms, width/resize semantics and
 page ownership. Page clipping and pressure envelopes must agree across rendering,
 selection, erasing and future PDF graphics.
@@ -318,3 +319,42 @@ copy semantics; text/font/image resource limits; formula renderer evaluation;
 browser directory capabilities; measured asynchronous IO and hardware support.
 The original toolkit/renderer selection comparison remains unknown rather than
 being backfilled with invented historical reasons.
+
+## ADR-014 — Uniform handwriting resize and cached rotation previews
+
+**Decision/status:** M1.4 manipulation implements a rotation handle with logical
+center pivot, angle unwrapping and 15-degree Shift snapping. Existing movement,
+uniform corner resize, duplication and journal commands remain shared. Cut stores
+a validated bounded clipboard bundle before deletion; arrow nudges reuse page-
+constrained translation. Evidence: `canvas_selection.rs`, `selection.rs`,
+`canvas.rs`, `manipulation_tests.rs` and the M1.4 manipulation interaction contract.
+
+**Rationale:** The requested manipulation task prioritizes editable raw ink,
+pressure appearance, one command per drag and responsiveness. Proportional resize
+preserves the circular pressure envelope; an anisotropic ink stretch would need
+a deliberately different nib/render/hit/erase contract. Future box-like types can
+opt into nonuniform resize via semantic geometry rather than silently distorting
+handwriting. The original toolkit choice is not reconsidered by this decision.
+
+**Benefits:** Raw samples/style/IDs remain unchanged; all edits use the same journal.
+Move/resize keep their layer-transform fast path. Rotation reuses tessellated mesh
+vertices, updates once per changed frame and shares idle preview Arcs.
+**Tradeoffs:** egui's layer transform cannot rotate; changed rotation frames must
+visit visible selected vertices and may copy renderer-held mesh Arcs. Page rotation
+uses conservative centerline bounds and can stop before a more exact contour would.
+Handwriting does not support independent X/Y stretch; a 1-point longest-extent
+minimum prevents further collapse. System clipboard completion is not acknowledged
+by egui, so Cut relies on the session copy as well as the standard clipboard request.
+
+**Future consequences:** New object types must supply geometry, bounds, resize
+policy, rendering/hits and relation-aware journal adapters in the existing store.
+They must not create a second selection/history engine. Box/text resizing can
+change intrinsic geometry under its own rules; any general affine ink transform
+needs an explicit elliptical-envelope contract. Connector anchors already resolve
+through placement but routing/remapping/deletion policies remain separate work.
+
+**Browser integration evidence:** Firefox page Select All included the HTML canvas;
+starting an object drag could initiate native browser DND and lose move/release
+input. A canvas-only A/D key-default/dragstart guard in `index.html` prevents that
+without suppressing clipboard events or eframe's separate text-agent shortcuts.
+This addition follows a reproduced runtime failure, rather than a toolkit rewrite.
