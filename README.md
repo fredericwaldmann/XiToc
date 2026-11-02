@@ -7,6 +7,10 @@ one-file blank PDF persistence. Uses pinned egui/eframe 0.37.0. No account,
 backend or full drawing serialization exists yet. **M1 ink is memory-only:**
 PDF saving/reopening of handwriting arrives in M2.
 
+Technical orientation: [Codebase guide](docs/CODEBASE_GUIDE.md),
+[Architecture decisions](docs/ARCHITECTURE_DECISIONS.md),
+[Development log](docs/DEVELOPMENT_LOG.md).
+
 ## Run
 
 Install current stable Rust (minimum 1.95), then:
@@ -107,25 +111,25 @@ existing-document saves and multi-page creation remain later milestones. See the
 
 ## Interface foundation (M0.6)
 
-Use **Appearance → Light / Dark** to change the session theme. The top sidebar
-button hides/shows the resizable Explorer. Document tabs show type icons, scroll
+Use **Appearance → Light / Dark** to change the persisted application theme.
+The top sidebar button hides/shows the resizable Explorer. Document tabs show type icons, scroll
 horizontally, switch documents and close without deleting files. Hover truncated
 labels to see full paths; the bottom **…** button opens the complete status message.
 
 Whiteboards offer zoom, Reset view and an optional dot-grid toggle; camera/grid
-changes are session-only. Narrow toolbars put controls in Tools/View or a typed
-document menu. Pen, Eraser, Hand and Undo/Redo now work in M1; Ink contains color/width settings.
-Select, Text and Shapes (M6) remain disabled with availability hints. No document conversion or fake save controls.
+changes are session-only. Narrow toolbars put history/zoom controls in the View menu.
+Selection/Lasso, Hand, pen presets, both erasers and Undo/Redo work in the top bar. Pen settings edits the shared preset library; eraser settings adjusts the
+per-tab radius. Text/shapes remain planned; no document conversion is offered.
 
 See [the design system](docs/UI_DESIGN.md) for palette, spacing, typography,
 component boundaries and interaction conventions. UI changes must follow it.
 
 ## Drawing (M1)
 
-Select **Pen** and drag with the mouse on either document type. Use **Ink** for
-opaque pen color and width (document points), or eraser radius (screen points).
-Use the **Stroke Eraser / Partial Eraser** dropdown between Pen and Hand to
-activate either mode and adjust radius. Stroke Eraser deletes touched strokes;
+Select a pen preset and drag on either document type. Use **Pen settings** for
+color, width (document points), opacity, smoothing and pressure. The **Eraser**
+popover selects Stroke Eraser / Partial Eraser and radius (screen points).
+Stroke Eraser deletes touched strokes;
 Partial Eraser removes intersecting portions and retains editable vector pieces.
 Its ring shows the actual eraser radius; detection includes pen thickness.
 The selected mode persists in application Settings. One sweep is one undo action.
@@ -155,10 +159,10 @@ cargo test --release eraser_performance -- --ignored --nocapture
 ## Settings
 
 Open **Edit → Settings**. General controls Explorer visibility; Appearance chooses
-Light/Dark; Drawing sets the pen color, width and eraser radius for newly opened
-or created tabs; Input Devices controls middle-button panning on Whiteboards.
-Changes apply automatically. Use **Done** or **Escape** to close. Existing Ink
-controls still adjust individual tabs.
+Light/Dark; Drawing edits the shared pen preset library and eraser defaults/mode;
+Input Devices controls middle-button panning on Whiteboards. Changes apply
+automatically. Use **Done** or **Escape** to close. Toolbar Pen settings shares
+the same library; toolbar eraser radius applies to the active tab.
 
 Application preferences persist separately from notes via eframe storage:
 Linux `$XDG_DATA_HOME/xitoc/app.ron` (default `~/.local/share/xitoc/app.ron`),
@@ -166,7 +170,7 @@ macOS `~/Library/Application Support/XiToc/app.ron`, Windows
 `%APPDATA%/XiToc/data/app.ron`; web uses the same-origin localStorage key
 `XiToc/preferences`. Clearing browser site data resets preferences. Browser
 storage restrictions or native storage failures can prevent persistence.
-**Stroke Smoothing** in Settings → Drawing controls new strokes in all open tabs:
+**Stroke Smoothing** in each preset editor controls subsequent strokes in all tabs:
 0% Off, 25% Light, 50% Medium (default), 75% Strong and 100% Maximum. It reduces
 small irregularities while preserving sharp turns and endpoints. Existing ink
 keeps its captured strength. **Eraser mode** also persists in Drawing settings;
@@ -275,8 +279,8 @@ python3 scripts/release.py package --target x86_64-unknown-linux-gnu
 ### Pressure-sensitive pen (M1.1)
 
 Settings → Drawing offers pressure enable, sensitivity strength and minimum width.
-New strokes use optional normalized force with the existing smoothing, rounded
-vector renderer, both erasers and undo/redo. Mouse and unavailable force keep a
+Pressure Pen strokes use optional normalized force with the existing smoothing,
+rounded vector renderer, both erasers and undo/redo. Mouse and unavailable force keep a
 constant width. Preferences persist; ink still does not persist until M2.
 Browser pen PointerEvents are supported where force is reported. Windows has a
 source-verified egui/winit pen-force path; native Linux/macOS tablets currently

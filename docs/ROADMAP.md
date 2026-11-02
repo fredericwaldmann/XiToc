@@ -1,5 +1,11 @@
 # Development roadmap (one Codex task / PR per slice)
 
+This file preserves original milestone scopes; later implemented slices supersede
+older exclusions. For current behavior see [CODEBASE_GUIDE.md](CODEBASE_GUIDE.md)
+and for merged delivery evidence see [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md).
+M2 ink persistence is still unimplemented; M1.4 selection and PR #29 object APIs
+are implemented. M3–M6 descriptions include both early groundwork and future work.
+
 ## M0 — Bootable project
 - Native app on Linux/Windows/macOS and WASM via Trunk.
 - Resizable Explorer placeholder, toolbar, tabs/header, gray work area, switch A4/Whiteboard preview.
@@ -57,7 +63,7 @@
 ## M1 — Shared drawing engine and basic handwriting
 - One mouse-input controller and vector renderer for Page Notes and Whiteboards.
   Smooth freehand ink, rounded caps/joins, opaque color and logical pen thickness;
-  pressure-ready samples default to 1.0 for mouse input.
+  mouse samples now use pressure=None (unavailable), with constant-width fallback.
 - Stable stroke/document UUIDs, explicit page index or canvas ownership, f64 PDF-
   point coordinates. A4 bounds are enforced; Whiteboards have no page bounds.
   Transforms subtract world centers before screen conversion. Completed stroke
@@ -138,7 +144,10 @@
 - Chromium permissioned directory picker where supported; same explorer semantics. Other browsers: explicit import/download fallback. Never simulate permanent disk write. Test in browser.
 
 ## M6 — More tools + polish
-- Move/select strokes, text/images, shapes, page templates, PDF import background, keyboard shortcuts, autosave recovery, smoke screenshots, accessible toolbar. Package signed installers eventually.
+- Move/select strokes and associated shortcuts were delivered earlier in M1.4.
+  Text/images, shapes, page templates, PDF import background, autosave recovery
+  and signed installers remain future work. Extend existing smoke/accessibility
+  coverage with each feature.
 
 ## M1.1 pressure-sensitive input (#15)
 
@@ -156,7 +165,7 @@ hardware has not been tested. M2 PDF serialization remains a separate milestone.
 
 Supersedes the previous bottom-floating-palette design. Keep drawing controls in
 a compact top panel immediately under document tabs; preserve Explorer, tabs,
-menus and Settings. Selection remains disabled pending its own object milestone.
+menus and Settings. Selection was disabled in M1.3 and is enabled by M1.4 below.
 Implement Monoline, Pressure Pen and semi-transparent Highlighter using shared
 input/smoothing/erasers/history and cached vector rendering. No realistic textures.
 

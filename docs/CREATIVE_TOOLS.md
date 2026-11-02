@@ -3,7 +3,10 @@
 M1.3 integrates Monoline, Pressure Pen, Highlighter presets, Stroke/Partial Eraser
 and Hand in the top toolbar. M1.4 adds stroke Selection/Lasso, uniform transforms
 and batch clipboard/history commands through the CanvasObject protocol (#23). The following are
-proposed issue titles ready for separate GitHub tasks, not implemented features.
+issue briefs. Selection/move/proportional resize have since shipped in M1.4;
+rotation, arrange and anchors now have domain APIs in PR #29, without controls.
+Remaining tools/persistence are not implemented. Current details are in
+[CODEBASE_GUIDE.md](CODEBASE_GUIDE.md).
 Existing #11 covers adding pages; #10 covers split editors. Do not expose future
 tools as working controls. Each slice needs desktop/WASM, both layouts, history,
 large-coordinate geometry and PDF semantic/viewer round-trip coverage.
@@ -11,7 +14,7 @@ large-coordinate geometry and PDF semantic/viewer round-trip coverage.
 | Proposed GitHub issue title | Dependencies | Architecture and intended interaction |
 | --- | --- | --- |
 | Version the editable object model before M2 PDF persistence | M1 stroke model | Tagged Object enum; stable IDs, ordered objects, immutable page/canvas ownership, local f64 bounds and affine transform. Keep raw samples, smoothing algorithm/strength, explicit partial polylines and pressure response. Define validation, limits, unknown-variant errors and blank-schema migration. |
-| Object selection, lasso and movement | Object model | Selection arrow hit-tests topmost visible object; Shift adds/removes. Lasso drag intersects visible geometry. Selection IDs and handles are transient editor state; one drag commits one undoable transform, Escape cancels, Space pans. Reuse spatial broad phase; never flatten ink. |
+| Object selection, lasso and movement (implemented M1.4) | Object model | Topmost envelope hit; Shift toggles, Alt subtracts. Lasso requires full strict envelope containment, excluding touch/crossing. Selection/handles are transient; one drag commits one transform, Escape cancels, Space pans. Shared spatial broad phase; no flattening. |
 | Resize, rotate and arrange selected objects | Selection + transforms | Screen-sized handles, opposite-anchor resizing, rotation handle with modifier snapping. One command per gesture; Bring Forward/Send Back change explicit object order. Preserve transforms in model/PDF; do not rebuild raw pen samples during pointer movement. |
 | Shape insertion with lines and arrows | Object model + selection | Shapes popover chooses rectangle/ellipse/line/arrow and style; drag previews, release inserts one semantic object, Escape cancels. Store geometry, fill/stroke, endpoint arrowheads and transform; selection edits later. |
 | Text boxes and sticky notes | Object model + selection + font strategy | Text tool click inserts and focuses inline editing; sticky note inserts a colored semantic text container. Escape exits editing before tool changes. Store text, layout box, font/style and sticky background. Define portable font embedding/fallback and PDF text metrics before export; no OS-specific text in shared types. |
