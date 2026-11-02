@@ -284,6 +284,40 @@ impl Drawing {
     pub fn strokes(&self) -> &[Arc<Stroke>] {
         &self.strokes
     }
+    /// Ordered object view, back to front. The stroke vector remains the single
+    /// canonical store until another content type is implemented.
+    #[allow(dead_code)] // Shared infrastructure; rendering retains its cached stroke adapter.
+    pub fn objects(&self) -> impl DoubleEndedIterator<Item = &dyn CanvasObject> {
+        self.strokes.iter().map(|s| s.as_ref() as &dyn CanvasObject)
+    }
+    #[allow(dead_code)] // Stable-ID relationships are exercised by domain tests, pending connectors.
+    pub fn object(&self, id: crate::object::ObjectId) -> Option<&dyn CanvasObject> {
+        self.objects().find(|object| object.object_id() == id)
+    }
+    /// Move one object to an absolute back-to-front slot in one undo transaction.
+    /// Only the affected interval is retained; no parallel z-index is stored.
+    #[allow(dead_code)] // Infrastructure for future Arrange commands; no new UI.
+    pub fn set_z_order(&mut self, id: crate::object::ObjectId, target: usize) -> bool {
+        let Some(source) = self.strokes.iter().position(|s| s.id == id) else {
+            return false;
+        };
+        if target >= self.strokes.len() || source == target {
+            return false;
+        }
+        let lo = source.min(target);
+        let hi = source.max(target);
+        let before: Vec<_> = (lo..=hi).map(|i| (i, self.strokes[i].clone())).collect();
+        let mut ordered: Vec<_> = before.iter().map(|(_, s)| s.clone()).collect();
+        let moved = ordered.remove(source - lo);
+        ordered.insert(target - lo, moved);
+        let after = ordered
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| (lo + i, s))
+            .collect();
+        self.execute(Command::Replace { before, after });
+        true
+    }
     pub fn dirty(&self) -> bool {
         !self.strokes.is_empty()
     }

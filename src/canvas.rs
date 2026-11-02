@@ -1,4 +1,5 @@
 //! Shared pointer controller and rounded vector renderer for every surface.
+use crate::object::hit_stroke_path as pressure_hit;
 use crate::{
     document::DocumentData,
     drawing::{self, Drawing, EraserMode, Stroke, Surface, Transform},
@@ -809,41 +810,6 @@ fn preview_layer_id(owner: Uuid) -> egui::LayerId {
         egui::Order::Middle,
         egui::Id::unique("object-preview").with(owner),
     )
-}
-
-fn pressure_hit(
-    path: &[[f64; 2]],
-    pressures: &[Option<f32>],
-    stroke: &Stroke,
-    from: [f64; 2],
-    to: [f64; 2],
-    radius: f64,
-) -> bool {
-    if !stroke.pressure_style.enabled || pressures.iter().all(Option::is_none) {
-        return drawing::hit_path(path, from, to, radius + stroke.visible_width() * 0.5);
-    }
-    if path.len() == 1 {
-        return drawing::hit_path(
-            path,
-            from,
-            to,
-            radius + stroke.visible_width() * 0.5 * stroke.pressure_style.factor(pressures[0]),
-        );
-    }
-    path.windows(2).enumerate().any(|(i, pair)| {
-        crate::partial_erase::clip_tapered(
-            pair[0],
-            pair[1],
-            from,
-            to,
-            radius,
-            [
-                stroke.visible_width() * 0.5 * stroke.pressure_style.factor(pressures[i]),
-                stroke.visible_width() * 0.5 * stroke.pressure_style.factor(pressures[i + 1]),
-            ],
-        )
-        .is_some()
-    })
 }
 
 fn pressure_at(pressures: &[Option<f32>], t: f64) -> Option<f32> {

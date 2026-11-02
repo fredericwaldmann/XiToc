@@ -156,3 +156,19 @@ IDs, surface ownership and canonical stacking. Future shapes/text/formulas/image
 provide local geometry/resources; connector anchors reference stable object IDs.
 Transient selection/clipboard/handles are not canonical saved content. The blank
 schema/PDF codec remain unchanged and no editable-ink save is claimed in M1.4.
+
+### Unified object foundation follow-up
+
+Semantic `ObjectSnapshot` is a serde-tagged content enum (only Stroke supported),
+now shared by clipboard interchange. Placement adds serde-defaulted `rotation`
+(radians, zero for older semantic samples). Unknown content tags fail; placements
+must pass domain validation before entering Drawing. Semantic serialization alone
+is not a trusted document decoder or a PDF format. The existing bounded clipboard
+version envelope validates IDs, geometry, ownership and resource limits.
+
+M2 must deliberately introduce a versioned editable document envelope, migrate
+blank schema 1 to an empty object sequence, reject unknown versions/required
+variants and duplicate IDs, validate transforms/resources/ownership, and write
+matching rotated visible graphics and edit snapshots in the same PDF. Canonical
+sequence is z-order; IDs and normalized anchors prepare future attached objects.
+This task changes neither schema 1 nor the PDF reader/writer or saving lifecycle.

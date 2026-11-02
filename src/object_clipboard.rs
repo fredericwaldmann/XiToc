@@ -10,11 +10,7 @@ pub const PREFIX: &str = "XiToc clipboard v1\n";
 pub const MAX_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_OBJECTS: usize = 512;
 pub const MAX_POINTS: usize = 200_000;
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "data", deny_unknown_fields)]
-pub enum ClipboardObject {
-    Stroke(Stroke),
-}
+use crate::object::ObjectSnapshot as ClipboardObject;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObjectBundle {
@@ -111,6 +107,7 @@ impl ObjectBundle {
             origin: center,
             position,
             scale,
+            rotation: 0.0,
         };
         self.insert_placed(drawing, surface, delta)
     }

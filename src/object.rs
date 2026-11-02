@@ -12,6 +12,9 @@ pub struct Placement {
     pub origin: Point,
     pub position: Point,
     pub scale: f64,
+    /// Counterclockwise radians in logical coordinates; absent in older snapshots.
+    #[serde(default)]
+    pub rotation: f64,
 }
 impl Default for Placement {
     fn default() -> Self {
@@ -19,6 +22,7 @@ impl Default for Placement {
             origin: [0.0; 2],
             position: [0.0; 2],
             scale: 1.0,
+            rotation: 0.0,
         }
     }
 }
@@ -28,23 +32,28 @@ impl Placement {
             .iter()
             .chain(&self.position)
             .all(|x| x.is_finite())
+            && self.rotation.is_finite()
             && self.scale.is_finite()
             && (1e-4..=1e4).contains(&self.scale)
     }
     pub fn is_identity(self) -> bool {
-        self.scale == 1.0 && self.origin == self.position
+        self.scale == 1.0 && self.rotation == 0.0 && self.origin == self.position
     }
     pub fn apply(self, point: Point) -> Point {
         if self.is_identity() {
             return point;
         }
-        std::array::from_fn(|i| self.position[i] + (point[i] - self.origin[i]) * self.scale)
+        let offset = std::array::from_fn(|i| (point[i] - self.origin[i]) * self.scale);
+        let rotated = rotate(offset, self.rotation);
+        std::array::from_fn(|i| self.position[i] + rotated[i])
     }
     pub fn inverse(self, point: Point) -> Point {
         if self.is_identity() {
             return point;
         }
-        std::array::from_fn(|i| self.origin[i] + (point[i] - self.position[i]) / self.scale)
+        let offset = std::array::from_fn(|i| point[i] - self.position[i]);
+        let rotated = rotate(offset, -self.rotation);
+        std::array::from_fn(|i| self.origin[i] + rotated[i] / self.scale)
     }
     /// Re-anchor composition at a raw point to retain precision far from origin.
     pub fn then(self, next: Self, reference: Point) -> Self {
@@ -52,8 +61,32 @@ impl Placement {
             origin: reference,
             position: next.apply(self.apply(reference)),
             scale: self.scale * next.scale,
+            rotation: self.rotation + next.rotation,
         }
     }
+}
+
+fn rotate([x, y]: Point, angle: f64) -> Point {
+    if angle == 0.0 {
+        return [x, y];
+    }
+    let (sin, cos) = angle.sin_cos();
+    [x * cos - y * sin, x * sin + y * cos]
+}
+
+/// Only implemented content kinds belong here; unknown serde tags fail explicitly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(dead_code)] // Domain dispatch tag, currently only handwriting is implemented.
+pub enum ObjectType {
+    Stroke,
+}
+
+/// Tagged semantic object snapshot shared with bounded clipboard interchange.
+/// M2 must wrap this in a versioned document envelope before PDF persistence.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data", deny_unknown_fields)]
+pub enum ObjectSnapshot {
+    Stroke(Stroke),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -90,10 +123,7 @@ impl ObjectBounds {
         }
     }
     pub fn placed(self, p: Placement) -> Self {
-        Self {
-            min: p.apply(self.min),
-            max: p.apply(self.max),
-        }
+        Self::from_points(self.corners().map(|point| p.apply(point))).unwrap()
     }
     pub fn center(self) -> Point {
         std::array::from_fn(|i| self.min[i] + (self.max[i] - self.min[i]) * 0.5)
@@ -113,8 +143,26 @@ impl ObjectBounds {
 
 /// Future semantic content types implement this same protocol. Stroke storage is
 /// the first adapter; no dummy Shape/Text/Formula/Connector/Image variants exist.
+#[allow(dead_code)] // Shared domain API; some operations await future object tools.
 pub trait CanvasObject {
     fn object_id(&self) -> ObjectId;
+    fn object_type(&self) -> ObjectType;
+    /// Exact stroke envelope test in document coordinates, tolerance in PDF points.
+    fn hit_test(&self, point: Point, tolerance: f64) -> bool;
+    /// Resolve a normalized local-bounds anchor after placement. Future connectors
+    /// store the target ID and normalized anchor, never a stale world position.
+    fn anchor(&self, normalized: Point) -> Option<Point> {
+        if !normalized
+            .iter()
+            .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+        {
+            return None;
+        }
+        let b = self.local_bounds()?;
+        Some(self.placement().apply(std::array::from_fn(|i| {
+            b.min[i] + (b.max[i] - b.min[i]) * normalized[i]
+        })))
+    }
     fn document_id(&self) -> Uuid;
     fn surface(&self) -> Surface;
     fn placement(&self) -> Placement;
@@ -124,6 +172,23 @@ pub trait CanvasObject {
     }
 }
 impl CanvasObject for Stroke {
+    fn object_type(&self) -> ObjectType {
+        ObjectType::Stroke
+    }
+    fn hit_test(&self, point: Point, tolerance: f64) -> bool {
+        if self.points.is_empty()
+            || !tolerance.is_finite()
+            || tolerance < 0.0
+            || !point.iter().all(|v| v.is_finite())
+            || !self.placement.valid()
+        {
+            return false;
+        }
+        let path = self.path();
+        let pressures = crate::partial_erase::path_pressures(self, &path)
+            .unwrap_or_else(|| vec![self.points[0].pressure; path.len()]);
+        hit_stroke_path(&path, &pressures, self, point, point, tolerance)
+    }
     fn object_id(&self) -> ObjectId {
         self.id
     }
@@ -168,7 +233,8 @@ mod tests {
             Placement {
                 origin: [20., 30.],
                 position: [40., 50.],
-                scale: 2.
+                scale: 2.,
+                rotation: 0.0,
             }
         ));
         let moved = drawing.strokes()[0].clone();
@@ -233,6 +299,7 @@ mod group_tests {
             origin: [10., 100.],
             position: [50., 150.],
             scale: 2.,
+            rotation: 0.0,
         };
         assert!(drawing.transform_objects(&ids, transform));
         assert!(std::sync::Arc::ptr_eq(&original[1], &drawing.strokes()[1]));
@@ -259,9 +326,214 @@ mod group_tests {
             Placement {
                 origin: [10., 100.],
                 position: [20., 110.],
-                scale: 1.
+                scale: 1.,
+                rotation: 0.0,
             }
         ));
         assert!(!drawing.can_redo());
+    }
+}
+
+pub(crate) fn hit_stroke_path(
+    path: &[[f64; 2]],
+    pressures: &[Option<f32>],
+    stroke: &Stroke,
+    from: [f64; 2],
+    to: [f64; 2],
+    radius: f64,
+) -> bool {
+    if !stroke.pressure_style.enabled || pressures.iter().all(Option::is_none) {
+        return crate::drawing::hit_path(path, from, to, radius + stroke.visible_width() * 0.5);
+    }
+    if path.len() == 1 {
+        return crate::drawing::hit_path(
+            path,
+            from,
+            to,
+            radius + stroke.visible_width() * 0.5 * stroke.pressure_style.factor(pressures[0]),
+        );
+    }
+    path.windows(2).enumerate().any(|(i, pair)| {
+        crate::partial_erase::clip_tapered(
+            pair[0],
+            pair[1],
+            from,
+            to,
+            radius,
+            [
+                stroke.visible_width() * 0.5 * stroke.pressure_style.factor(pressures[i]),
+                stroke.visible_width() * 0.5 * stroke.pressure_style.factor(pressures[i + 1]),
+            ],
+        )
+        .is_some()
+    })
+}
+
+#[cfg(test)]
+mod architecture_tests {
+    use super::*;
+    use crate::{
+        document::{DocumentData, DocumentKind},
+        drawing::{Drawing, Smoothing},
+    };
+    use std::collections::HashSet;
+
+    fn ink(doc: &DocumentData, surface: Surface) -> Stroke {
+        let mut stroke = Stroke::new(doc.id(), surface, [20, 50, 90, 255], 4.);
+        stroke.smoothing = Smoothing::PolylineV1;
+        stroke.push([20., 30.]);
+        stroke.push([40., 30.]);
+        stroke
+    }
+    fn near(a: Point, b: Point) {
+        for i in 0..2 {
+            assert!((a[i] - b[i]).abs() < 1e-8, "{a:?} != {b:?}");
+        }
+    }
+
+    #[test]
+    fn identity_lookup_ownership_order_and_transaction_history() {
+        for (kind, surface) in [
+            (DocumentKind::Page, Surface::Page(0)),
+            (DocumentKind::Whiteboard, Surface::Canvas),
+        ] {
+            let doc = DocumentData::blank(kind);
+            let mut drawing = Drawing::new(&doc);
+            let strokes: Vec<_> = (0..4).map(|_| ink(&doc, surface)).collect();
+            let ids: Vec<_> = strokes.iter().map(|s| s.id).collect();
+            assert_eq!(ids.iter().collect::<HashSet<_>>().len(), 4);
+            assert!(drawing.insert_objects(strokes.clone()));
+            assert!(!drawing.add(strokes[0].clone()));
+            assert!(drawing.object(Uuid::new_v4()).is_none());
+            let object = drawing.object(ids[0]).unwrap();
+            assert_eq!(object.object_type(), ObjectType::Stroke);
+            assert_eq!(object.surface(), surface);
+            assert_eq!(object.document_id(), doc.id());
+            assert_eq!(
+                drawing
+                    .objects()
+                    .map(CanvasObject::object_id)
+                    .collect::<Vec<_>>(),
+                ids
+            );
+            assert!(drawing.set_z_order(ids[0], 2));
+            let order = vec![ids[1], ids[2], ids[0], ids[3]];
+            assert_eq!(
+                drawing
+                    .objects()
+                    .map(CanvasObject::object_id)
+                    .collect::<Vec<_>>(),
+                order
+            );
+            drawing.undo();
+            assert_eq!(
+                drawing
+                    .objects()
+                    .map(CanvasObject::object_id)
+                    .collect::<Vec<_>>(),
+                ids
+            );
+            drawing.redo();
+            assert_eq!(
+                drawing
+                    .objects()
+                    .map(CanvasObject::object_id)
+                    .collect::<Vec<_>>(),
+                order
+            );
+            assert!(!drawing.set_z_order(ids[0], 99));
+            assert!(!drawing.set_z_order(ids[0], 2));
+            drawing.undo();
+            assert!(drawing.set_z_order(ids[3], 0));
+            assert!(!drawing.can_redo());
+            let mut foreign = ink(&doc, surface);
+            foreign.document_id = Uuid::new_v4();
+            assert!(!drawing.add(foreign));
+            assert!(!drawing.add(ink(&doc, Surface::Page(99))));
+            if kind == DocumentKind::Page {
+                assert!(!drawing.add(ink(&doc, Surface::Canvas)));
+            }
+        }
+    }
+
+    #[test]
+    fn rotation_bounds_anchors_and_composition_preserve_raw_ink() {
+        let doc = DocumentData::blank(DocumentKind::Whiteboard);
+        let mut drawing = Drawing::new(&doc);
+        let stroke = ink(&doc, Surface::Canvas);
+        let id = stroke.id;
+        assert!(drawing.add(stroke.clone()));
+        let turn = Placement {
+            origin: [20., 30.],
+            position: [100., 200.],
+            scale: 2.,
+            rotation: std::f64::consts::FRAC_PI_2,
+        };
+        assert!(drawing.transform_objects(&HashSet::from([id]), turn));
+        let object = drawing.object(id).unwrap();
+        let b = object.world_bounds().unwrap();
+        near(b.min, [96., 196.]);
+        near(b.max, [104., 244.]);
+        near(object.anchor([0.5, 0.5]).unwrap(), [100., 220.]);
+        near(object.anchor([1., 0.5]).unwrap(), [100., 244.]);
+        assert!(object.anchor([2., 0.]).is_none());
+        assert!(object.hit_test([100., 220.], 0.));
+        assert!(!object.hit_test([105., 220.], 0.));
+        assert!(object.hit_test([105., 220.], 2.));
+        let moved = drawing.strokes()[0].clone();
+        assert_eq!(moved.points, stroke.points);
+        assert_eq!(moved.width, stroke.width);
+        assert_eq!(moved.smoothing, stroke.smoothing);
+        assert_eq!(moved.color, stroke.color);
+        let next = Placement {
+            origin: [100., 200.],
+            position: [-30., 70.],
+            scale: 0.5,
+            rotation: -0.3,
+        };
+        let composed = turn.then(next, [20., 30.]);
+        for point in [[20., 30.], [40., 30.], [-7., 99.]] {
+            near(turn.inverse(turn.apply(point)), point);
+            near(composed.apply(point), next.apply(turn.apply(point)));
+        }
+        assert_eq!(
+            serde_json::from_str::<Stroke>(&serde_json::to_string(&*moved).unwrap()).unwrap(),
+            *moved
+        );
+        drawing.undo();
+        assert_eq!(*drawing.strokes()[0], stroke);
+        drawing.redo();
+        assert_eq!(drawing.strokes()[0], moved);
+        assert!(!drawing.transform_objects(
+            &HashSet::from([id]),
+            Placement {
+                rotation: f64::NAN,
+                ..Default::default()
+            }
+        ));
+    }
+
+    #[test]
+    fn pressure_hits_dots_and_legacy_placement() {
+        let doc = DocumentData::blank(DocumentKind::Whiteboard);
+        let mut stroke = ink(&doc, Surface::Canvas);
+        stroke.width = 10.;
+        stroke.pressure_style.enabled = true;
+        stroke.points[0].pressure = Some(0.);
+        stroke.points[1].pressure = Some(1.);
+        assert!(!stroke.hit_test([20., 34.], 0.));
+        assert!(stroke.hit_test([40., 34.], 0.));
+        stroke.points.truncate(1);
+        assert!(stroke.hit_test([20., 30.5], 0.));
+        assert!(!stroke.hit_test([20., 32.], 0.));
+        assert!(!stroke.hit_test([f64::NAN, 0.], 1.));
+        assert!(!stroke.hit_test([20., 30.], -1.));
+        let mut json = serde_json::to_value(&stroke).unwrap();
+        json["placement"]
+            .as_object_mut()
+            .unwrap()
+            .remove("rotation");
+        assert_eq!(serde_json::from_value::<Stroke>(json).unwrap(), stroke);
+        assert!(serde_json::from_str::<ObjectType>("\"FutureShape\"").is_err());
     }
 }

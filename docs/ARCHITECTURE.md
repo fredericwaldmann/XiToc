@@ -384,3 +384,42 @@ On native, menu Paste requests a platform paste event, falling back to the sessi
 bundle. On web, menu Paste uses the session bundle directly because eframe's web
 backend does not implement RequestPaste; keyboard DOM paste events accept the
 same validated payload. Arbitrary clipboard text does not create canvas objects.
+
+## Unified canvas object foundation (M1.4 follow-up)
+
+`object::CanvasObject` is the UI-independent semantic protocol: UUID identity,
+object type, document/surface ownership, local geometry bounds, placement, world
+bounds, point hit testing and normalized local-bounds anchors. `ObjectType` and
+serde-tagged `ObjectSnapshot` contain only Stroke today; the latter is shared by
+clipboard interchange rather than defining a second stroke payload. Future shape,
+line/arrow, connector, text, sticky, formula and image milestones add real variants
+and dispatch implementations together. No placeholder tools or payloads are added.
+
+`Drawing::objects` exposes objects in canonical back-to-front order and `object`
+resolves stable IDs (currently linear lookup; do not call it per sample in a large
+selection). The stroke vector remains the sole store and order authority, retaining
+existing Arc identity, caches and indexes. When a second content type ships, extend
+this store and journal to the tagged content representation; do not create a
+parallel collection/order. `set_z_order` journals only the affected interval and
+restores exact sequence and object Arcs on undo/redo. Existing insert, erase,
+partial replacement and transform transactions remain shared commands.
+
+Placement now supports translation, positive uniform resize and rotation:
+`world = position + R(rotation) * scale * (local - origin)`. Radians are measured
+in logical coordinates; screen orientation follows the existing view transform.
+Composition reanchors at a raw sample for far-origin precision. Rotation is finite,
+scale remains bounded to 1e-4..1e4, and inverse mapping preserves local ink.
+World AABBs enclose all four transformed local-bound corners. Bounds are
+conservative raw-ink envelopes, while narrow-phase hits reuse the existing
+pressure-aware vector test moved from the UI into `object.rs`. Cached selection
+and erasing call that function directly, avoiding per-frame path reconstruction.
+No rotation UI or nonuniform stretch is introduced.
+
+Future connectors can resolve `(ObjectId, normalized local-bounds anchor)` through
+`Drawing::object` and `CanvasObject::anchor`, so movement/resize/rotation derive
+new endpoint positions without mutating raw geometry. Anchors range from [0,0]
+to [1,1], including center [0.5,0.5]; invalid anchors return None. Missing IDs
+return None, requiring a deliberate detach/delete policy in the connector task.
+No relations, connector object, routing or reactive graph are implemented here.
+Page ownership remains explicit Page(index); stable PageId migration is required
+before page reordering (#11), as already specified in M1.4.

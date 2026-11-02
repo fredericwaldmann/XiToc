@@ -594,3 +594,30 @@ Intentional limits: page-local selection, proportional scaling only, conservativ
 rounded highlighter envelope, 4,096 lasso vertices (overcomplex gestures cancel),
 and clipboard caps of 512 objects / 200,000 input points / 4 MiB. No PDF ink saving,
 future object creation, nonuniform scaling or rotation is implemented.
+
+## Unified canvas object architecture follow-up
+
+Automated gates cover unique object creation and duplicate rejection, lookup and
+missing IDs, object type/ownership, ordered traversal, undoable stacking in both
+directions and redo branching, rotated AABBs/anchors/hits, inverse/composed
+transforms, raw style/sample preservation, pressure/dot hits and legacy placement
+JSON. Controller regression exercises both erasers on scaled and rotated ink in
+Page and Whiteboard with exact undo/redo; existing input/presets/smoothing/cache/
+index tests remain required. Rotation is a domain API, with no new UI control.
+
+Manual verification: run `cargo run --locked` or `trunk serve`, create scratch
+Page and Whiteboard notes, draw with every preset and varying supported pressure,
+select/move/resize, erase using both modes, undo/redo, pan with Space and zoom
+with Ctrl/Cmd-wheel. Check existing clipboard/duplicate/delete and overlapping
+stroke selection. No new toolbar controls should appear; ink remains memory-only.
+Physical pen, native Windows/macOS and interactive browser behavior require
+separate runtime verification; compilation and headless UI tests do not certify them.
+
+Performed for this follow-up: formatting, Clippy with warnings denied, 98 tests
+passed (five benchmarks ignored by default), Linux native build, wasm32 check and
+Trunk release build passed. All five ignored release benchmarks also passed.
+On this host, 10,000 strokes: index build 8.86 ms, 2,000 partial samples 5.11 ms,
+commit 10.65 ms; 100,000-segment path: index 4.72 ms, 2,000 samples 8.86 ms.
+Host load affects these CPU measurements; they are not input/display latency
+measurements. No interactive runtime or physical stylus smoke was performed in
+this follow-up. Existing headless controller/UI regression tests passed.
