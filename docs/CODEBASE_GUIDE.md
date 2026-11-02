@@ -1,7 +1,8 @@
 # XiToc codebase guide
 
-This is an implementation map audited against main commit `8fc0f94` (2026-11-02,
-including PR #29). It describes shipped source, not the entire product roadmap.
+This implementation map began with an audit of main `8fc0f94` (2026-11-02,
+including PR #29) and includes the subsequent Selection/Lasso Escape follow-up.
+It describes implemented source, not the entire product roadmap.
 See [architecture decisions](ARCHITECTURE_DECISIONS.md) for constraints and
 [development log](DEVELOPMENT_LOG.md) for evidence of how the code evolved.
 [ARCHITECTURE.md](ARCHITECTURE.md) retains milestone contracts;
@@ -325,8 +326,11 @@ self-crossing cases use segment/edge tests, not only bounds. The gesture caps at
 
 Move/proportional corner-resize gestures preview cached geometry without changing
 committed objects on every pointer move. Release commits one `transform_objects`
-transaction, retaining IDs/raw ink/style. Escape, focus loss or view changes
-cancel selection previews. Page moves/resizes stay on the source surface with
+transaction, retaining IDs/raw ink/style. Escape cancels a live selection gesture
+and clears selection IDs/bounds/outlines in one frame, without changing ink,
+history or cached meshes; later pointer release cannot commit it. Focus loss or
+view changes cancel the preview while retaining membership. Canvas Escape defers
+to text-input focus and open popovers. Page moves/resizes stay on the source surface with
 centerlines constrained to its bounds; rendering clips ink edges. Rotation works
 in the domain and erasers but has no handle/control. Nonuniform scaling is absent.
 
@@ -390,13 +394,15 @@ is included by the private selection adapter via `#[path]`; it is not a second
 editor implementation. Tests assert cache Arc reuse, index pruning, exact history,
 legacy decoding, clip geometry, ownership, layout/focus and discard behavior.
 
-At the audited revision there are 103 Rust tests: 98 normally run and five ignored
+The current source has 107 Rust tests: 102 normally run and five ignored
 release benchmarks (whole erase, partial document, partial geometry, smoothing,
 indexed lasso). Historical recorded results are in TEST_PLAN, not proof of hardware
 latency or a fresh run of every platform. [scripts/test_release.py](../scripts/test_release.py)
 adds Python unittest fixtures for archive completeness, corruption/path safety,
 CPU headers, executable bits, manifest/tag matching and Cargo metadata discovery.
-Header fixtures do not prove that binaries launch.
+Header fixtures do not prove that binaries launch. The Selection/Lasso follow-up
+adds controller regressions for idle/live-lasso Escape, zoom/pan hit envelopes,
+Page versus Whiteboard boundaries and drawing-tool handoff.
 
 | Workflow | Trigger and checks |
 | --- | --- |

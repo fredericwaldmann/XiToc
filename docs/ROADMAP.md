@@ -198,3 +198,12 @@ ownership, rotation/inversion/composition/bounds/anchors, pressure/dots, legacy
 semantic decoding, stacking and exact history including transformed erasing.
 Future content types extend the same protocol/store/journal. Rotation/arrange UI,
 connectors and all new object creation remain separate tasks; M2 saving is unchanged.
+
+### Selection/Lasso acceptance follow-up (#23)
+
+Selection/Lasso already shipped in PR #28. Canvas Escape now cancels the active
+selection gesture and clears membership in one step, including during a lasso.
+Add controller coverage for clearing, zoom/pan envelope picking, Page boundaries
+versus unbounded Whiteboards and handoff to Pen/Hand/both erasers. Preserve the
+existing top toolbar, object protocol, cached geometry and journal; add no tools,
+transforms or PDF persistence.

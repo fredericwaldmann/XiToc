@@ -181,7 +181,11 @@ empty clicks clear. Shift-click toggles membership; Alt-click subtracts. Ctrl/Cm
 selects all in the active page/canvas scope and activates Selection. Text-input
 focus retains its own shortcuts. Lasso draws a live outline and closes at release:
 only fully enclosed rounded stroke envelopes are selected, excluding boundary
-contact. Shift adds, Alt subtracts; a degenerate/cancelled lasso leaves selection.
+contact. Shift adds, Alt subtracts; a degenerate or focus-cancelled lasso leaves
+selection. Escape cancels any live selection gesture and clears membership,
+bounds and outlines, including the previous selection during an additive lasso.
+A later pointer release cannot commit the cancelled gesture. Text editors and
+open popovers retain their own Escape handling.
 A completed valid lasso returns to Selection, exposing handles and direct movement.
 Select Lasso again to add/subtract another region.
 
@@ -190,7 +194,8 @@ Selected ink has a subtle accent outline, group bounding rectangle and four
 selection rectangle keeps handles separated for dots and low zoom. Drag selected ink to move;
 corner drags always scale proportionally about the opposite corner. A small drag
 threshold avoids accidental transformations. One released drag is one undo entry;
-Escape/focus loss cancels the preview. Page ownership never changes by dragging.
+Escape cancels the preview and clears selection; focus loss cancels only the
+preview. Neither cancellation edits ink/history. Page ownership never changes by dragging.
 Pen/Eraser/Hand remain independent tools; Space temporarily pans without selection.
 
 A compact contextual toolbar near a visible selection offers Duplicate, Delete,

@@ -239,3 +239,24 @@ added maintenance rules to AGENTS and corrected conflicting current-state claims
 in existing documents. No application code, dependency, workflow or functionality
 changed. Documentation checks and their actual results are reported in the PR;
 older milestone test counts above remain explicitly historical.
+
+## Selection/Lasso acceptance follow-up (2026-11-02)
+
+**Evidence:** related [issue #23](https://github.com/fredericwaldmann/XiToc/issues/23),
+branch `feat/selection-lasso-followup`, based on main `2c24481`. The requested title
+“Selection and Lasso Selection” was absent from the complete issue list; #23 is
+“[M1.4] Lasso Selection and Object Manipulation,” with no comments at inspection.
+
+**Changed:** retained existing PR #28 Selection/Lasso controls and geometry engine;
+canvas Escape now cancels a live gesture and clears selection in one step. Four
+new controller tests verify Escape/late release/history/mesh reuse, zoomed and
+panned geometry picking, Page versus Whiteboard boundaries, and tool handoff.
+No new movement/resize/rotation controls, object variants or PDF persistence.
+
+**Performed verification:** fmt, Clippy with warnings denied, 102 passing tests
+(five ignored benchmarks), Linux native build, WASM check, Trunk release build and
+all five ignored release benchmarks. Real Firefox release-app smoke exercised
+click/Shift-click/lasso, live-lasso Escape and unchanged ink in both layouts,
+Ctrl+A/Escape, dark appearance and 480×360 layout. **Limitations:** no interactive
+native/physical stylus or Windows/macOS runtime test in this follow-up; future
+object types still need adapters in the same canonical store/selection dispatch.

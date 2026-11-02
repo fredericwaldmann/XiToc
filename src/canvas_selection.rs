@@ -245,9 +245,9 @@ impl Canvas {
                 }
             }
         }
-        if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-            && self.selection_gesture.take().is_none()
-        {
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            // Cancel first so a later pointer release cannot commit a preview.
+            self.selection_gesture = None;
             self.selection.clear();
         }
         if matches!(self.tool, Tool::Select | Tool::Lasso)

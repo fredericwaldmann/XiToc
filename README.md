@@ -299,6 +299,8 @@ Ink remains memory-only until M2. See [UI specification](docs/UI_DESIGN.md) and
 M1.4 selection: click Selection in the top toolbar, click ink, Shift-click to
 toggle multiple strokes, or draw a fully enclosing Lasso. Lasso returns to
 Selection. Drag selected ink to move; corner handles always resize proportionally.
+Escape clears selection and cancels a live lasso/transform without editing ink;
+release after cancellation cannot commit the preview.
 Ctrl/Cmd+A/C/V/D selects all/copies/pastes/duplicates; Delete removes selected ink;
 Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z undo/redo. Edit and canvas context menus provide
 the same commands. A small toolbar near the selection duplicates/deletes/scales.

@@ -627,3 +627,49 @@ commit 10.65 ms; 100,000-segment path: index 4.72 ms, 2,000 samples 8.86 ms.
 Host load affects these CPU measurements; they are not input/display latency
 measurements. No interactive runtime or physical stylus smoke was performed in
 this follow-up. Existing headless controller/UI regression tests passed.
+
+## Selection/Lasso acceptance follow-up (#23)
+
+The top-toolbar controls, pressure-envelope picking and full-envelope lasso were
+already implemented by PR #28. The follow-up changes canvas Escape to cancel a
+live gesture and clear membership/bounds/outlines together. It adds four tests in
+`selection_tests.rs` using actual ordered egui pointer/key frames:
+
+- Idle and active additive-lasso Escape on both layouts; late pointer release
+  cannot select/commit; original vectors, revision, undo sequence and cached mesh
+  Arc remain unchanged. The active-lasso assertion failed before the fix.
+- Single/multiple selection at 0.25×/1×/4× with view offsets; a point inside a
+  diagonal AABB but outside its ink is rejected, and screen-point tolerance stays
+  consistent with visible ink width.
+- Outside-paper click and lasso-start rejection, contrasted with the same logical
+  positions on an unbounded Whiteboard; ownership and history stay unchanged.
+- Cancel lasso by changing tools, draw a dot, select it, erase in both modes,
+  undo and switch to Hand without creating accidental ink.
+
+Performed: fmt check, Clippy (`--locked --all-targets -- -D warnings`), full tests
+(102 passed, five ignored), Linux native build, wasm32 check and Trunk release
+build. All five ignored release benchmarks passed. On this host, indexed lasso
+containment on 100,000 points/4,000 polygon edges took 48.94 ms; 10,000-stroke
+partial erasing took 8.00 ms for 2,000 samples and 13.99 ms commit. Benchmarks ran
+alongside other work; timings are host-dependent CPU observations, not hardware
+input/display latency or a cross-device guarantee. Drawing hot paths are unchanged.
+
+Actual Firefox 157/WebGL2 release app, controlled through WebDriver BiDi: created
+scratch Page and Whiteboard PDFs, cancelled export dialogs, drew two strokes,
+selected by click, Shift-added on Whiteboard, watched live lasso, completed lasso
+and pressed Escape during another live lasso. Inspected before/after captures:
+all outlines disappeared, pointer release did not restore selection, both vectors
+remained. Ctrl+A/Escape, dark appearance, tabs/Explorer and 480×360 layouts also
+worked. No bottom drawing toolbar appeared. Session captures are under
+`/tmp/xitoc-selection-*.png`; these are local test artifacts, not saved note data
+or committed fixtures. Headless browser mouse events do not verify physical pen,
+interactive native input or Windows/macOS runtime.
+
+Manual reproduction: run `cargo run --locked` or `trunk serve`, create scratch
+notes of both kinds, draw multiple strokes, click Selection and Shift-click another
+stroke. Click empty canvas to clear. Select Lasso, enclose strokes, release, then
+start another lasso and press Escape before releasing. Both the lasso and existing
+selection must disappear without changing ink. Repeat after zoom/pan, with both
+themes and a narrow window; switch to Pen/Hand/both erasers and exercise undo/redo.
+Text editing and open popovers must retain their own shortcuts. Ink remains
+memory-only; do not discard drawings you need to keep.

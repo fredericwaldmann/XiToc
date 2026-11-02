@@ -737,3 +737,252 @@ fn over_complex_lasso_preserves_previous_selection() {
             .is_some_and(|text| text.contains("too complex"))
     );
 }
+
+#[test]
+fn escape_clears_idle_and_active_lasso_selection_without_editing_ink() {
+    for kind in [DocumentKind::Page, DocumentKind::Whiteboard] {
+        for active_lasso in [false, true] {
+            let (mut c, s) = setup(kind);
+            let ctx = egui::Context::default();
+            let id = stroke(&mut c, s, [30., 60.], [90., 60.]);
+            stroke(&mut c, s, [30., 110.], [90., 110.]);
+            c.selection_action(SelectionCommand::SelectAll, &ctx);
+            frame(&ctx, &mut c, s, t(), vec![], 0., true);
+            let original = c.drawing.strokes().to_vec();
+            let revision = c.drawing.revision();
+            let mesh = c.cache[&id].meshes[0].clone();
+            if active_lasso {
+                c.select(Tool::Lasso);
+                frame(
+                    &ctx,
+                    &mut c,
+                    s,
+                    t(),
+                    vec![
+                        pointer([20., 90.], true, egui::Modifiers::SHIFT),
+                        moved(t(), [100., 90.]),
+                        moved(t(), [100., 130.]),
+                        moved(t(), [20., 130.]),
+                    ],
+                    1.,
+                    true,
+                );
+                assert!(matches!(
+                    c.selection_gesture,
+                    Some(SelectionGesture::Lasso { .. })
+                ));
+            }
+            frame(
+                &ctx,
+                &mut c,
+                s,
+                t(),
+                vec![Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                2.,
+                true,
+            );
+            assert!(
+                c.selection.ids.is_empty(),
+                "Escape must clear even during a lasso"
+            );
+            assert!(c.selection.bounds.is_none());
+            assert!(c.selection.geometry.is_none());
+            assert!(c.selection.objects.is_empty());
+            assert!(c.selection_gesture.is_none());
+            frame(
+                &ctx,
+                &mut c,
+                s,
+                t(),
+                vec![pointer([20., 130.], false, egui::Modifiers::NONE)],
+                2.1,
+                true,
+            );
+            assert!(
+                c.selection.ids.is_empty(),
+                "Release must not commit the cancelled lasso"
+            );
+            assert_eq!(c.drawing.revision(), revision);
+            assert_eq!(c.drawing.strokes(), original);
+            assert!(!c.drawing.can_redo());
+            assert!(Arc::ptr_eq(&mesh, &c.cache[&id].meshes[0]));
+            c.undo();
+            assert_eq!(
+                c.drawing.strokes(),
+                &original[..1],
+                "Escape must not add a history entry"
+            );
+        }
+    }
+}
+
+#[test]
+fn click_selection_uses_geometry_and_screen_tolerance_under_zoom_and_pan() {
+    for kind in [DocumentKind::Page, DocumentKind::Whiteboard] {
+        for scale in [0.25, 1., 4.] {
+            let (mut c, s) = setup(kind);
+            let ctx = egui::Context::default();
+            let t = Transform {
+                origin: [50., 40.],
+                center: [10., 20.],
+                scale,
+            };
+            let a = stroke(&mut c, s, [40., 60.], [100., 120.]);
+            let b = stroke(&mut c, s, [40., 145.], [100., 145.]);
+            let original = c.drawing.strokes().to_vec();
+            let revision = c.drawing.revision();
+            c.select(Tool::Select);
+            click(&ctx, &mut c, s, t, [70., 90.], egui::Modifiers::NONE);
+            assert_eq!(c.selection.ids, HashSet::from([a]));
+            click(&ctx, &mut c, s, t, [70., 145.], egui::Modifiers::SHIFT);
+            assert_eq!(c.selection.ids, HashSet::from([a, b]));
+            // Inside the diagonal's AABB but outside its visible envelope/tolerance.
+            click(&ctx, &mut c, s, t, [95., 85.], egui::Modifiers::NONE);
+            assert!(c.selection.ids.is_empty());
+            // Three screen points from the centerline is within click tolerance.
+            click(
+                &ctx,
+                &mut c,
+                s,
+                t,
+                [70., 145. + 3. / scale],
+                egui::Modifiers::NONE,
+            );
+            assert_eq!(c.selection.ids, HashSet::from([b]));
+            // Four screen points of tolerance plus ink half-width, then two outside.
+            click(
+                &ctx,
+                &mut c,
+                s,
+                t,
+                [70., 145. + (4. + scale + 2.) / scale],
+                egui::Modifiers::NONE,
+            );
+            assert!(c.selection.ids.is_empty());
+            assert_eq!(c.drawing.revision(), revision);
+            for (before, after) in original.iter().zip(c.drawing.strokes()) {
+                assert!(Arc::ptr_eq(before, after));
+            }
+        }
+    }
+}
+
+#[test]
+fn page_selection_rejects_outside_paper_while_whiteboard_has_no_paper_boundary() {
+    let edge = 210. * drawing::POINTS_PER_MM;
+    for kind in [DocumentKind::Page, DocumentKind::Whiteboard] {
+        let (mut c, s) = setup(kind);
+        let ctx = egui::Context::default();
+        let id = stroke(&mut c, s, [edge - 20., 100.], [edge, 100.]);
+        let original = c.drawing.strokes().to_vec();
+        let revision = c.drawing.revision();
+        c.select(Tool::Select);
+        // Outside paper, but close enough to the ink to pass its hit tolerance.
+        click(
+            &ctx,
+            &mut c,
+            s,
+            t(),
+            [edge + 3., 100.],
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(
+            c.selection.ids.contains(&id),
+            kind == DocumentKind::Whiteboard
+        );
+        click(
+            &ctx,
+            &mut c,
+            s,
+            t(),
+            [edge - 10., 100.],
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(c.selection.ids, HashSet::from([id]));
+        c.selection.clear();
+        c.select(Tool::Lasso);
+        frame(
+            &ctx,
+            &mut c,
+            s,
+            t(),
+            vec![
+                pointer([edge + 10., 80.], true, egui::Modifiers::NONE),
+                moved(t(), [edge + 10., 120.]),
+                moved(t(), [edge - 30., 120.]),
+                moved(t(), [edge - 30., 80.]),
+                pointer([edge - 30., 80.], false, egui::Modifiers::NONE),
+            ],
+            1.,
+            true,
+        );
+        assert_eq!(
+            c.selection.ids.contains(&id),
+            kind == DocumentKind::Whiteboard
+        );
+        assert_eq!(c.drawing.revision(), revision);
+        assert_eq!(c.drawing.strokes(), original);
+        assert_eq!(c.drawing.strokes()[0].surface(), s);
+    }
+}
+
+#[test]
+fn selection_tool_handoff_preserves_pen_and_both_erasers() {
+    for kind in [DocumentKind::Page, DocumentKind::Whiteboard] {
+        for mode in [EraserMode::Stroke, EraserMode::Partial] {
+            let (mut c, s) = setup(kind);
+            let ctx = egui::Context::default();
+            let id = stroke(&mut c, s, [30., 100.], [130., 100.]);
+            let original = c.drawing.strokes()[0].clone();
+            c.selection_action(SelectionCommand::SelectAll, &ctx);
+            c.select(Tool::Lasso);
+            frame(
+                &ctx,
+                &mut c,
+                s,
+                t(),
+                vec![
+                    pointer([20., 80.], true, egui::Modifiers::NONE),
+                    moved(t(), [140., 80.]),
+                ],
+                1.,
+                true,
+            );
+            c.select(Tool::Pen);
+            assert!(c.selection.ids.is_empty());
+            frame(
+                &ctx,
+                &mut c,
+                s,
+                t(),
+                vec![pointer([140., 80.], false, egui::Modifiers::NONE)],
+                1.1,
+                true,
+            );
+            assert_eq!(c.drawing.strokes(), std::slice::from_ref(&original));
+            click(&ctx, &mut c, s, t(), [200., 200.], egui::Modifiers::NONE);
+            assert_eq!(c.drawing.strokes().len(), 2);
+            let dot = c.drawing.strokes()[1].clone();
+            c.select(Tool::Select);
+            click(&ctx, &mut c, s, t(), [200., 200.], egui::Modifiers::NONE);
+            assert_eq!(c.selection.ids, HashSet::from([dot.id]));
+            c.select(Tool::Eraser);
+            c.eraser_mode = mode;
+            c.eraser_radius = 4.;
+            click(&ctx, &mut c, s, t(), [200., 200.], egui::Modifiers::NONE);
+            assert_eq!(c.drawing.strokes(), std::slice::from_ref(&original));
+            c.undo();
+            assert_eq!(c.drawing.strokes()[1], dot);
+            c.select(Tool::Pan);
+            click(&ctx, &mut c, s, t(), [200., 200.], egui::Modifiers::NONE);
+            assert_eq!(c.drawing.strokes().len(), 2);
+            assert_eq!(c.drawing.strokes()[0].id, id);
+        }
+    }
+}

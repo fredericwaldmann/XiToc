@@ -375,6 +375,10 @@ style are never refit by selection. Committed transforms replace only affected
 objects in the shared journal, preserving IDs and order; duplicate/paste insert
 fresh IDs in one transaction. Selection/handles/lasso/previews are transient.
 Movement preview reuses cached geometry; no per-pointer mutation of the document.
+Escape in the canvas cancels a live selection gesture and clears transient IDs,
+bounds and outlines in the same frame, so subsequent pointer release cannot
+commit it. It creates no command and does not invalidate stroke meshes. Popup
+and text-input focus retain priority over canvas shortcuts.
 
 Scope is Surface::Page(index) or Surface::Canvas. Page selections never span
 pages or silently change ownership; moving/resizing keeps source centerlines
