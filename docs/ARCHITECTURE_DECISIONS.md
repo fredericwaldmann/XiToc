@@ -250,7 +250,10 @@ versioned PDF resource contracts remain prerequisites for their related features
 
 **Decision/status:** Implemented. Selection IDs/derived bounds and gestures stay in
 the editor. Picking chooses topmost envelope; lasso requires full strict envelope
-containment. Move/resize previews reuse caches and commit on release. Clipboard
+containment. Move/resize previews reuse caches and commit on release.
+The Selection/Lasso follow-up makes canvas Escape cancel a live gesture and clear
+membership together, as explicitly requested; focus-loss cancellation retains
+membership. This changes transient interaction only, without adding history. Clipboard
 version 1 shares snapshots with limits and a session fallback. Evidence:
 [selection.rs](../src/selection.rs), [canvas_selection.rs](../src/canvas_selection.rs),
 [object_clipboard.rs](../src/object_clipboard.rs), [UI_DESIGN.md](UI_DESIGN.md).
