@@ -182,7 +182,15 @@ impl XiTocApp {
         self.preferences.theme.apply(ui.ctx());
         ui.set_style(ui.ctx().global_style());
         let mut action = None;
-        self.chrome.top(ui, &mut self.preferences, &mut action);
+        let selection = self
+            .active
+            .filter(|i| !self.documents[*i].loaded.document.external)
+            .map(|i| {
+                ui::selection_controls::MenuState::for_canvas(&self.documents[i].editor.canvas)
+            })
+            .unwrap_or_default();
+        self.chrome
+            .top(ui, &mut self.preferences, &mut action, selection);
         let context = self
             .active
             .map(|index| self.documents[index].loaded.document.data.kind().label())
@@ -360,6 +368,7 @@ impl XiTocApp {
                     } else {
                         opened.editor.middle_button_pan = self.preferences.middle_button_pan;
                         opened.editor.show(ui, &opened.loaded.document.data);
+                        if let Some(notice)=opened.editor.canvas.notice.take(){self.status=notice;}
                     }
                 } else {
                     ui::chrome::empty(ui, self.can_create(), &self.selected_folder, action);
@@ -432,6 +441,20 @@ impl XiTocApp {
 
     fn act(&mut self, action: Action, _ctx: &egui::Context) {
         match action {
+            Action::Selection(command) => {
+                if let Some(index) = self
+                    .active
+                    .filter(|i| !self.documents[*i].loaded.document.external)
+                {
+                    self.documents[index]
+                        .editor
+                        .canvas
+                        .selection_action(command, _ctx);
+                    if let Some(notice) = self.documents[index].editor.canvas.notice.take() {
+                        self.status = notice;
+                    }
+                }
+            }
             Action::Settings => {
                 if let Some(index) = self.active {
                     self.documents[index].editor.canvas.finish();
@@ -697,6 +720,82 @@ fn collect_entries<'a>(folder: &'a Folder, entries: &mut Vec<&'a crate::storage:
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn edit_menu_manipulates_the_active_selection_without_changing_preferences() {
+        use crate::ui::settings::tests::{pointer, render};
+        let ctx = egui::Context::default();
+        let mut app = XiTocApp::default();
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        let mut stroke = crate::drawing::Stroke::new(
+            data.id(),
+            crate::drawing::Surface::Canvas,
+            [0, 0, 0, 255],
+            2.,
+        );
+        stroke.push([20., 20.]);
+        stroke.push([40., 20.]);
+        app.open(Loaded {
+            bytes: crate::pdf::encode(&data).unwrap().into(),
+            document: Document {
+                data,
+                location: Location::new("test.pdf".into()),
+                external: false,
+            },
+        });
+        app.documents[0].editor.canvas.drawing.add(stroke);
+        app.documents[0]
+            .editor
+            .canvas
+            .selection_action(crate::selection::SelectionCommand::SelectAll, &ctx);
+        let preferences = app.preferences.clone();
+        fn click(ctx: &egui::Context, app: &mut XiTocApp, label: &str) {
+            render(ctx, vec![], |ui| app.show(ui));
+            let labels = render(ctx, vec![], |ui| app.show(ui));
+            let pos = labels[label];
+            render(ctx, pointer(pos, true), |ui| app.show(ui));
+            render(ctx, pointer(pos, false), |ui| app.show(ui));
+        }
+        click(&ctx, &mut app, "Edit");
+        click(&ctx, &mut app, "Duplicate");
+        assert_eq!(app.documents[0].editor.canvas.drawing.strokes().len(), 2);
+        click(&ctx, &mut app, "Edit");
+        click(&ctx, &mut app, "Delete");
+        assert_eq!(app.documents[0].editor.canvas.drawing.strokes().len(), 1);
+        click(&ctx, &mut app, "Edit");
+        click(&ctx, &mut app, "Undo");
+        assert_eq!(app.documents[0].editor.canvas.drawing.strokes().len(), 2);
+        assert_eq!(app.preferences, preferences);
+        click(&ctx, &mut app, "Edit");
+        click(&ctx, &mut app, "Copy");
+        let data = DocumentData::blank(DocumentKind::Page);
+        app.open(Loaded {
+            bytes: crate::pdf::encode(&data).unwrap().into(),
+            document: Document {
+                data,
+                location: Location::new("target.pdf".into()),
+                external: false,
+            },
+        });
+        render(&ctx, vec![], |ui| app.show(ui));
+        click(&ctx, &mut app, "Edit");
+        click(&ctx, &mut app, "Paste");
+        let time = ctx.input(|i| i.time) + 1.0;
+        let mut out = ctx.run_ui(
+            egui::RawInput {
+                time: Some(time),
+                focused: true,
+                ..Default::default()
+            },
+            |ui| app.show(ui),
+        );
+        out.textures_delta.clear();
+        assert_eq!(
+            app.documents[1].editor.canvas.drawing.strokes().len(),
+            1,
+            "Edit-menu paste into a new document must complete"
+        );
+    }
+
     #[test]
     fn settings_open_through_edit_change_appearance_and_close() {
         use crate::ui::settings::tests::{pointer, render};

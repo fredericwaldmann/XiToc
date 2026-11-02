@@ -4,6 +4,7 @@ pub mod dialog;
 pub mod drawing_controls;
 pub mod explorer;
 pub mod icons;
+pub mod selection_controls;
 pub mod settings;
 pub mod style;
 pub mod tabs;
@@ -12,6 +13,7 @@ pub mod toolbar;
 use crate::document::DocumentKind;
 
 pub enum Action {
+    Selection(crate::selection::SelectionCommand),
     Settings,
     #[cfg(not(target_arch = "wasm32"))]
     Workspace,

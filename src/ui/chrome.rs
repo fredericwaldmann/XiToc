@@ -17,6 +17,7 @@ impl Chrome {
         ui: &mut egui::Ui,
         prefs: &mut crate::settings::Preferences,
         action: &mut Option<Action>,
+        selection: super::selection_controls::MenuState,
     ) {
         let p = style::palette(ui);
         egui::Panel::top("application-bar")
@@ -37,6 +38,11 @@ impl Chrome {
                     }
                     ui.label(RichText::new("XiToc").size(16.0).strong());
                     ui.menu_button("Edit", |ui| {
+                        if let Some(command) = super::selection_controls::menu(ui, selection) {
+                            *action = Some(Action::Selection(command));
+                            ui.close();
+                        }
+                        ui.separator();
                         if ui.button("Settings…").clicked() {
                             *action = Some(Action::Settings);
                             ui.close();

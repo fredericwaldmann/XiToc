@@ -9,12 +9,17 @@ use std::{
     sync::Arc,
 };
 use uuid::Uuid;
+#[path = "canvas_selection.rs"]
+mod selection_ui;
+use selection_ui::SelectionGesture;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
     Pen,
     Eraser,
     Pan,
+    Select,
+    Lasso,
 }
 
 struct Erasing {
@@ -33,6 +38,7 @@ enum Gesture {
     Eraser(Erasing),
 }
 struct Cached {
+    placement: crate::object::Placement,
     path: Vec<[f64; 2]>,
     pressures: Vec<Option<f32>>,
     view: Option<(Transform, f32)>,
@@ -51,6 +57,7 @@ impl Cached {
             }
         }
         Self {
+            placement: stroke.placement,
             pressures: crate::partial_erase::path_pressures(stroke, &path)
                 .unwrap_or_else(|| vec![stroke.points[0].pressure; path.len()]),
             path,
@@ -88,7 +95,7 @@ impl Cached {
                 translucent_shapes(
                     &points,
                     &self.pressures[lo..hi],
-                    (stroke.width * transform.scale) as f32,
+                    (stroke.visible_width() * transform.scale) as f32,
                     ink_color(stroke),
                     stroke.pressure_style,
                     start - lo..end - lo,
@@ -208,6 +215,11 @@ pub struct Canvas {
     pub eraser_radius: f64,
     pub smoothing_strength: u8,
     pub pressure_style: drawing::PressureStyle,
+    pub selection: crate::selection::Selection,
+    pub notice: Option<String>,
+    selection_gesture: Option<SelectionGesture>,
+    selection_view: Option<(Surface, Transform, Rect)>,
+    pending_paste: Option<f64>,
     input_pressure: Option<f32>,
     touch_id: Option<egui::TouchId>,
     pub eraser_mode: EraserMode,
@@ -241,6 +253,17 @@ impl Canvas {
                 enabled: true,
                 ..Default::default()
             },
+            selection: crate::selection::Selection::new(
+                if data.kind() == crate::document::DocumentKind::Page {
+                    Surface::Page(0)
+                } else {
+                    Surface::Canvas
+                },
+            ),
+            notice: None,
+            selection_gesture: None,
+            selection_view: None,
+            pending_paste: None,
             input_pressure: None,
             touch_id: None,
             eraser_mode: EraserMode::Stroke,
@@ -254,13 +277,15 @@ impl Canvas {
         }
     }
     pub fn interacting(&self) -> bool {
-        self.gesture.is_some()
+        self.gesture.is_some() || self.selection_gesture.is_some()
     }
     pub fn dirty(&self) -> bool {
         self.drawing.dirty()
             || matches!(&self.gesture, Some(Gesture::Pen(stroke)) if !stroke.points.is_empty())
     }
     pub fn finish(&mut self) {
+        self.selection_gesture = None;
+        self.pending_paste = None;
         match self.gesture.take() {
             Some(Gesture::Pen(stroke)) => {
                 self.update_preview(&stroke);
@@ -299,27 +324,40 @@ impl Canvas {
     }
     pub fn undo(&mut self) {
         self.finish();
-        self.drawing.undo();
+        let ids = self.drawing.undo();
         self.prune_cache();
+        if matches!(self.tool, Tool::Select | Tool::Lasso) && !ids.is_empty() {
+            self.selection
+                .change(ids, crate::selection::Membership::Replace, &self.drawing);
+        }
     }
     pub fn redo(&mut self) {
         self.finish();
-        self.drawing.redo();
+        let ids = self.drawing.redo();
         self.prune_cache();
+        if matches!(self.tool, Tool::Select | Tool::Lasso) && !ids.is_empty() {
+            self.selection
+                .change(ids, crate::selection::Membership::Replace, &self.drawing);
+        }
     }
     pub fn select(&mut self, tool: Tool) {
         self.finish();
         self.tool = tool;
+        if !matches!(tool, Tool::Select | Tool::Lasso) {
+            self.selection.clear();
+        }
     }
 
     fn prune_cache(&mut self) {
-        let live: HashSet<_> = self
+        let live: HashMap<_, _> = self
             .drawing
             .strokes()
             .iter()
-            .map(|stroke| stroke.id)
+            .map(|s| (s.id, s.placement))
             .collect();
-        self.cache.retain(|id, _| live.contains(id));
+        self.cache
+            .retain(|id, cached| live.get(id).is_some_and(|p| *p == cached.placement));
+        self.selection.refresh(&self.drawing);
     }
 
     pub fn begin_frame(&mut self, ui: &egui::Ui) {
@@ -334,7 +372,9 @@ impl Canvas {
         if !ui.is_enabled() {
             return;
         }
+        self.selection.refresh(&self.drawing);
         if !ui.ctx().text_edit_focused() {
+            self.selection_keys(ui);
             let (undo, redo) = ui.input_mut(|i| {
                 let redo = i.consume_shortcut(&egui::KeyboardShortcut::new(
                     egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
@@ -356,12 +396,31 @@ impl Canvas {
     }
     pub fn end_frame(&mut self, ui: &egui::Ui) {
         // A release can occur outside the canvas/window or on a hidden page.
-        if !ui.input(|i| i.pointer.button_down(PointerButton::Primary)) {
+        if !ui.input(|i| i.pointer.button_down(PointerButton::Primary)) && self.gesture.is_some() {
             self.finish();
         }
     }
 
     pub fn surface(&mut self, ui: &egui::Ui, bounds: Rect, surface: Surface, transform: Transform) {
+        if matches!(self.tool, Tool::Select | Tool::Lasso) {
+            let preview_layer = egui::LayerId::new(
+                egui::Order::Middle,
+                egui::Id::unique("object-preview").with(self.drawing.owner()),
+            );
+            if surface == self.selection.surface {
+                ui.ctx()
+                    .set_transform_layer(preview_layer, egui::emath::TSTransform::IDENTITY);
+            }
+        }
+        if !matches!(self.tool, Tool::Select | Tool::Lasso) && self.selection.surface == surface {
+            self.selection_view = Some((surface, transform, bounds.intersect(ui.clip_rect())));
+        }
+        if matches!(self.tool, Tool::Select | Tool::Lasso) {
+            self.selection_surface(ui, bounds, surface, transform);
+            self.paint(ui, bounds, surface, transform);
+            self.paint_selection(ui, bounds, surface, transform);
+            return;
+        }
         if !self.processed.contains(&surface) {
             self.processed.push(surface);
             if self.surface_active(surface)
@@ -406,6 +465,9 @@ impl Canvas {
                         if !self.drawing.contains(surface, point) {
                             continue;
                         }
+                        self.selection.scope(surface);
+                        self.selection_view =
+                            Some((surface, transform, bounds.intersect(ui.clip_rect())));
                         self.gesture_transform = Some(transform);
                         if self.tool == Tool::Pen {
                             let mut stroke =
@@ -607,6 +669,7 @@ impl Canvas {
     }
     fn update_preview(&mut self, stroke: &Stroke) {
         let cached = self.cache.entry(stroke.id).or_insert_with(|| Cached {
+            placement: stroke.placement,
             path: Vec::new(),
             pressures: Vec::new(),
             view: None,
@@ -644,6 +707,7 @@ impl Canvas {
         let painter = ui
             .painter()
             .with_clip_rect(bounds.intersect(ui.clip_rect()));
+        let selection_preview = self.selection_preview(surface);
         let mut erasing = match &mut self.gesture {
             Some(Gesture::Eraser(e)) => Some(e),
             _ => None,
@@ -664,13 +728,16 @@ impl Canvas {
                 .cache
                 .entry(stroke.id)
                 .or_insert_with(|| Cached::new(stroke));
-            let min = transform.to_screen(cached.bounds.0);
-            let max = transform.to_screen(cached.bounds.1);
+            let delta = selection_preview
+                .filter(|_| self.selection.ids.contains(&stroke.id))
+                .unwrap_or_default();
+            let min = transform.to_screen(delta.apply(cached.bounds.0));
+            let max = transform.to_screen(delta.apply(cached.bounds.1));
             let screen_bounds = Rect::from_min_max(
                 Pos2::new(min[0] as f32, min[1] as f32),
                 Pos2::new(max[0] as f32, max[1] as f32),
             )
-            .expand((stroke.width * transform.scale) as f32);
+            .expand((stroke.visible_width() * delta.scale * transform.scale) as f32);
             if !screen_bounds.intersects(painter.clip_rect()) {
                 continue;
             }
@@ -680,13 +747,37 @@ impl Canvas {
             {
                 cached.paint_partial(ui, &painter, transform, stroke, partial);
             } else {
-                cached.paint(ui, &painter, transform, stroke);
+                if let Some(delta) =
+                    selection_preview.filter(|_| self.selection.ids.contains(&stroke.id))
+                {
+                    let origin = transform.to_screen(delta.origin);
+                    let position = transform.to_screen(delta.position);
+                    let layer_transform = egui::emath::TSTransform {
+                        scaling: delta.scale as f32,
+                        translation: egui::vec2(
+                            (position[0] - origin[0] * delta.scale) as f32,
+                            (position[1] - origin[1] * delta.scale) as f32,
+                        ),
+                    };
+                    ui.ctx().set_transform_layer(
+                        preview_layer_id(self.drawing.owner()),
+                        layer_transform,
+                    );
+                    let selected_painter = painter
+                        .clone()
+                        .with_layer_id(preview_layer_id(self.drawing.owner()))
+                        .with_clip_rect(layer_transform.inverse() * painter.clip_rect());
+                    cached.paint(ui, &selected_painter, transform, stroke);
+                } else {
+                    cached.paint(ui, &painter, transform, stroke);
+                }
             }
         }
         if let Some(Gesture::Pen(stroke)) = &self.gesture
             && stroke.surface == surface
         {
             let cached = self.cache.entry(stroke.id).or_insert_with(|| Cached {
+                placement: stroke.placement,
                 path: Vec::new(),
                 pressures: Vec::new(),
                 view: None,
@@ -713,6 +804,13 @@ impl Canvas {
     }
 }
 
+fn preview_layer_id(owner: Uuid) -> egui::LayerId {
+    egui::LayerId::new(
+        egui::Order::Middle,
+        egui::Id::unique("object-preview").with(owner),
+    )
+}
+
 fn pressure_hit(
     path: &[[f64; 2]],
     pressures: &[Option<f32>],
@@ -722,14 +820,14 @@ fn pressure_hit(
     radius: f64,
 ) -> bool {
     if !stroke.pressure_style.enabled || pressures.iter().all(Option::is_none) {
-        return drawing::hit_path(path, from, to, radius + stroke.width * 0.5);
+        return drawing::hit_path(path, from, to, radius + stroke.visible_width() * 0.5);
     }
     if path.len() == 1 {
         return drawing::hit_path(
             path,
             from,
             to,
-            radius + stroke.width * 0.5 * stroke.pressure_style.factor(pressures[0]),
+            radius + stroke.visible_width() * 0.5 * stroke.pressure_style.factor(pressures[0]),
         );
     }
     path.windows(2).enumerate().any(|(i, pair)| {
@@ -740,8 +838,8 @@ fn pressure_hit(
             to,
             radius,
             [
-                stroke.width * 0.5 * stroke.pressure_style.factor(pressures[i]),
-                stroke.width * 0.5 * stroke.pressure_style.factor(pressures[i + 1]),
+                stroke.visible_width() * 0.5 * stroke.pressure_style.factor(pressures[i]),
+                stroke.visible_width() * 0.5 * stroke.pressure_style.factor(pressures[i + 1]),
             ],
         )
         .is_some()
@@ -774,7 +872,7 @@ fn rounded_shapes(
     skip_first_cap: bool,
 ) -> Vec<egui::Shape> {
     let color = ink_color(stroke);
-    let width = (stroke.width * transform.scale) as f32;
+    let width = (stroke.visible_width() * transform.scale) as f32;
     let points: Vec<_> = path
         .iter()
         .map(|point| {
@@ -1288,7 +1386,7 @@ mod tests {
                         &canvas.cache[&stroke.id].path,
                         previous,
                         point,
-                        14.0 + stroke.width * 0.5,
+                        14.0 + stroke.visible_width() * 0.5,
                     ) {
                         ids.insert(stroke.id);
                     }
@@ -1395,7 +1493,7 @@ mod tests {
                                 &stroke.path(),
                                 pair[0],
                                 pair[1],
-                                14.0 / scale + stroke.width * 0.5,
+                                14.0 / scale + stroke.visible_width() * 0.5,
                             ) {
                                 expected.insert(stroke.id);
                             }

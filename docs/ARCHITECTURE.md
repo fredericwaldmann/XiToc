@@ -341,3 +341,46 @@ The blank PDF codec/schema and save lifecycle are unchanged; ink remains in
 memory until M2. M2 must serialize semantic pen types and style snapshots together
 with matching visible transparency/pressure geometry. No preset lookup may be
 required to reopen ink. See `CREATIVE_TOOLS.md` for remaining object dependencies.
+
+## M1.4 selection contract (settled before implementation)
+
+`object.rs` defines the shared CanvasObject protocol (stable ID, document/surface
+ownership, local bounds, placement and world bounds), ObjectBounds and a validated
+f64 uniform placement transform. Stroke implements this protocol without adding
+unimplemented content variants. The existing ordered stroke collection is the
+initial object-store adapter: its sequence remains the single z-order authority.
+Future Shape/Text/Formula/Connector/Image variants implement this same protocol
+and enter the same command, selection and rendering dispatch, not a second editor.
+
+Placements map immutable raw document-point samples into current document space;
+positive uniform scale and anchored translation preserve shape/pressure/pen style.
+Only proportional corner resizing is offered in M1.4. Raw samples and captured
+style are never refit by selection. Committed transforms replace only affected
+objects in the shared journal, preserving IDs and order; duplicate/paste insert
+fresh IDs in one transaction. Selection/handles/lasso/previews are transient.
+Movement preview reuses cached geometry; no per-pointer mutation of the document.
+
+Scope is Surface::Page(index) or Surface::Canvas. Page selections never span
+pages or silently change ownership; moving/resizing keeps source centerlines
+inside the same A4 surface and paper clips ink edges as before. #11 must migrate
+page indexes to stable PageIds before page reordering is introduced; schema 1 is
+still blank-only. Whiteboards retain f64 precision far from the origin.
+
+Lasso uses an explicitly closed even-odd polygon, rejects degenerate gestures,
+and requires the entire rounded pressure-width stroke envelope to lie strictly
+inside it. This conservative envelope includes flat highlighter end caps too;
+touching/intersecting strokes are excluded. Segment/edge checks prevent concave
+polygons from selecting strokes that leave and re-enter the region. Future
+partial-intersection selection is a separate policy, not a silent behavior change.
+
+Clipboard bundles are bounded, versioned, tagged object snapshots, shared within
+the current app session; supported system clipboard text carries the same payload.
+This is a transient interchange payload, never a native note format or sidecar.
+Paste remaps object/document/surface identities and fits the target page; repeated
+paste/duplicate offsets are logical document coordinates. Future linked-object
+bundles must remap included IDs and detach references to uncopied targets.
+
+On native, menu Paste requests a platform paste event, falling back to the session
+bundle. On web, menu Paste uses the session bundle directly because eframe's web
+backend does not implement RequestPaste; keyboard DOM paste events accept the
+same validated payload. Arbitrary clipboard text does not create canvas objects.

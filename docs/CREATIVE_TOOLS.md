@@ -1,7 +1,8 @@
 # Creative tools — proposed GitHub issue briefs and dependencies
 
 M1.3 integrates Monoline, Pressure Pen, Highlighter presets, Stroke/Partial Eraser
-and Hand in the top toolbar. Selection remains disabled. The following are
+and Hand in the top toolbar. M1.4 adds stroke Selection/Lasso, uniform transforms
+and batch clipboard/history commands through the CanvasObject protocol (#23). The following are
 proposed issue titles ready for separate GitHub tasks, not implemented features.
 Existing #11 covers adding pages; #10 covers split editors. Do not expose future
 tools as working controls. Each slice needs desktop/WASM, both layouts, history,

@@ -1,6 +1,9 @@
 //! XiToc design tokens. See docs/UI_DESIGN.md before extending the interface.
 use egui::{Color32, FontFamily, FontId, Margin, Stroke, TextStyle};
 
+pub const SELECTION_HANDLE: f32 = 7.0;
+pub const SELECTION_HIT: f32 = 5.0;
+pub const SELECTION_MIN: f32 = 22.0;
 pub const PRESET_WIDTH: f32 = 40.0;
 pub const TOOL_POPOVER_WIDTH: f32 = 280.0;
 pub const CONTROL: f32 = 26.0;

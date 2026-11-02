@@ -1,12 +1,13 @@
 //! In-memory editable ink and reversible commands. No UI, IO or PDF dependencies.
 use crate::document::{DocumentData, Layout};
+use crate::object::CanvasObject;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
 pub const POINTS_PER_MM: f64 = 72.0 / 25.4;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Surface {
     Page(usize),
     Canvas,
@@ -99,6 +100,8 @@ pub enum Smoothing {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Stroke {
     #[serde(default)]
+    pub placement: crate::object::Placement,
+    #[serde(default)]
     pub pen_type: crate::pen::PenType,
     #[serde(default)]
     pub pressure_style: PressureStyle,
@@ -115,6 +118,7 @@ pub struct Stroke {
 impl Stroke {
     pub fn new(document_id: Uuid, surface: Surface, color: [u8; 4], width: f64) -> Self {
         Self {
+            placement: Default::default(),
             pen_type: crate::pen::PenType::Monoline,
             pressure_style: PressureStyle::default(),
             id: Uuid::new_v4(),
@@ -127,11 +131,20 @@ impl Stroke {
         }
     }
     pub fn path(&self) -> Vec<[f64; 2]> {
-        match self.smoothing {
+        let mut path = match self.smoothing {
             Smoothing::Legacy => smooth(&self.points),
             Smoothing::PolylineV1 => self.points.iter().map(|p| p.position).collect(),
             Smoothing::AdaptiveV1 { strength } => crate::smoothing::path(&self.points, strength),
+        };
+        if !self.placement.is_identity() {
+            for p in &mut path {
+                *p = self.placement.apply(*p);
+            }
         }
+        path
+    }
+    pub fn visible_width(&self) -> f64 {
+        self.width * self.placement.scale
     }
     pub fn push_pressure(&mut self, position: [f64; 2], pressure: Option<f32>) {
         let pressure = normalize_pressure(pressure);
@@ -303,8 +316,9 @@ impl Drawing {
             _ => false,
         }
     }
-    fn valid_stroke(&self, stroke: &Stroke) -> bool {
-        stroke.document_id == self.owner
+    pub(crate) fn valid_stroke(&self, stroke: &Stroke) -> bool {
+        stroke.placement.valid()
+            && stroke.document_id() == self.owner
             && !stroke.id.is_nil()
             && !matches!(stroke.smoothing, Smoothing::AdaptiveV1 { strength } if strength > 100)
             && stroke.pressure_style.strength <= 100
@@ -313,7 +327,7 @@ impl Drawing {
             && stroke.width.is_finite()
             && (0.1..=24.0).contains(&stroke.width)
             && stroke.points.iter().all(|p| {
-                self.contains(stroke.surface, p.position)
+                self.contains(stroke.surface, stroke.placement.apply(p.position))
                     && p.pressure
                         .is_none_or(|p| p.is_finite() && (0.0..=1.0).contains(&p))
             })
@@ -362,6 +376,7 @@ impl Drawing {
                         || s.surface != source.surface
                         || s.pen_type != source.pen_type
                         || s.color != source.color
+                        || s.placement != source.placement
                         || s.width != source.width
                         || s.pressure_style != source.pressure_style
                         || s.smoothing != Smoothing::PolylineV1
@@ -392,6 +407,57 @@ impl Drawing {
             false
         }
     }
+    /// Insert a batch in one transaction; vector sequence is canonical z-order.
+    pub fn insert_objects(&mut self, objects: Vec<Stroke>) -> bool {
+        let mut ids: std::collections::HashSet<_> = self.strokes.iter().map(|s| s.id).collect();
+        if objects.is_empty()
+            || objects
+                .iter()
+                .any(|s| !self.valid_stroke(s) || !ids.insert(s.id))
+        {
+            return false;
+        }
+        let start = self.strokes.len();
+        self.execute(Command::Replace {
+            before: Vec::new(),
+            after: objects
+                .into_iter()
+                .enumerate()
+                .map(|(i, s)| (start + i, Arc::new(s)))
+                .collect(),
+        });
+        true
+    }
+    pub fn transform_objects(
+        &mut self,
+        ids: &std::collections::HashSet<Uuid>,
+        delta: crate::object::Placement,
+    ) -> bool {
+        if !delta.valid() || delta.is_identity() || ids.is_empty() {
+            return false;
+        }
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        for (index, source) in self
+            .strokes
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| ids.contains(&s.id))
+        {
+            let mut target = (**source).clone();
+            target.placement = source.placement.then(delta, source.points[0].position);
+            if !self.valid_stroke(&target) {
+                return false;
+            }
+            before.push((index, source.clone()));
+            after.push((index, Arc::new(target)));
+        }
+        if before.len() != ids.len() {
+            return false;
+        }
+        self.execute(Command::Replace { before, after });
+        true
+    }
     fn execute(&mut self, command: Command) {
         self.history.truncate(self.cursor);
         command.apply(&mut self.strokes);
@@ -399,19 +465,36 @@ impl Drawing {
         self.cursor += 1;
         self.revision += 1;
     }
-    pub fn undo(&mut self) {
-        if self.can_undo() {
-            self.cursor -= 1;
-            self.revision += 1;
-            self.history[self.cursor].revert(&mut self.strokes);
+    pub fn undo(&mut self) -> Vec<Uuid> {
+        if !self.can_undo() {
+            return Vec::new();
+        }
+        self.cursor -= 1;
+        self.revision += 1;
+        let command = &self.history[self.cursor];
+        command.revert(&mut self.strokes);
+        match command {
+            Command::Insert { .. } => Vec::new(),
+            Command::Erase(objects)
+            | Command::Replace {
+                before: objects, ..
+            } => objects.iter().map(|(_, s)| s.id).collect(),
         }
     }
-    pub fn redo(&mut self) {
-        if self.can_redo() {
-            self.history[self.cursor].apply(&mut self.strokes);
-            self.cursor += 1;
-            self.revision += 1;
+    pub fn redo(&mut self) -> Vec<Uuid> {
+        if !self.can_redo() {
+            return Vec::new();
         }
+        let command = &self.history[self.cursor];
+        command.apply(&mut self.strokes);
+        let ids = match command {
+            Command::Insert { stroke, .. } => vec![stroke.id],
+            Command::Erase(_) => Vec::new(),
+            Command::Replace { after, .. } => after.iter().map(|(_, s)| s.id).collect(),
+        };
+        self.cursor += 1;
+        self.revision += 1;
+        ids
     }
 }
 
