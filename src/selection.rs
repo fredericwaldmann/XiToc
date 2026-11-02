@@ -240,6 +240,7 @@ pub fn move_by(bounds: ObjectBounds, mut delta: Point, page: Option<Point>) -> P
         origin: bounds.min,
         position: std::array::from_fn(|i| bounds.min[i] + delta[i]),
         scale: 1.0,
+        rotation: 0.0,
     }
 }
 pub fn scale_about(
@@ -269,6 +270,7 @@ pub fn scale_about(
         origin: anchor,
         position: anchor,
         scale,
+        rotation: 0.0,
     }
 }
 
@@ -353,6 +355,7 @@ mod tests {
                 origin,
                 position: [origin[0] + 40., origin[1] - 20.],
                 scale: 2.,
+                rotation: 0.0,
             };
             let point = [origin[0] + 0.125, origin[1] + 3.5];
             assert_eq!(p.inverse(p.apply(point)), point);
@@ -361,6 +364,7 @@ mod tests {
                     origin: p.apply(point),
                     position: p.apply(point),
                     scale: 0.5,
+                    rotation: 0.0,
                 },
                 point,
             );

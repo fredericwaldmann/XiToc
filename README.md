@@ -303,3 +303,10 @@ Clipboard limits are 512 objects, 200,000 points and 4 MiB; the in-app session
 clipboard is used when system integration is unavailable. Paste centers objects
 in the visible scope and fits oversized groups to a page; Duplicate preserves
 size and clamps its 12-point offset to the page. Ink remains memory-only until M2.
+
+The shared canvas-object foundation in `src/object.rs` exposes stable identity,
+logical geometry, placement/rotation, pressure-aware hit testing and future
+connector anchors. Handwriting remains editable vector ink, with canonical order
+and transactional history in `Drawing`. Rotation and arrange are internal APIs;
+new object tools and PDF ink persistence remain future milestones. See
+`docs/ARCHITECTURE.md` for the extension contract.

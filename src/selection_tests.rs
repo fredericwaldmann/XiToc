@@ -379,39 +379,46 @@ fn duplicate_delete_copy_paste_are_atomic_across_documents_and_owners() {
 #[test]
 fn transformed_ink_remains_erasable_in_both_modes_with_exact_history() {
     for kind in [DocumentKind::Page, DocumentKind::Whiteboard] {
-        for mode in [EraserMode::Stroke, EraserMode::Partial] {
-            let (mut c, s) = setup(kind);
-            let ctx = egui::Context::default();
-            let t = t();
-            stroke(&mut c, s, [30., 100.], [130., 100.]);
-            c.selection_action(SelectionCommand::SelectAll, &ctx);
-            let ids = c.selection.ids.clone();
-            assert!(c.drawing.transform_objects(
-                &ids,
-                Placement {
-                    origin: [30., 100.],
-                    position: [60., 120.],
-                    scale: 2.
+        for rotation in [0.0, std::f64::consts::FRAC_PI_2] {
+            for mode in [EraserMode::Stroke, EraserMode::Partial] {
+                let (mut c, s) = setup(kind);
+                let ctx = egui::Context::default();
+                let t = t();
+                stroke(&mut c, s, [30., 100.], [130., 100.]);
+                c.selection_action(SelectionCommand::SelectAll, &ctx);
+                let ids = c.selection.ids.clone();
+                assert!(c.drawing.transform_objects(
+                    &ids,
+                    Placement {
+                        origin: [30., 100.],
+                        position: [60., 120.],
+                        scale: 2.,
+                        rotation,
+                    }
+                ));
+                c.prune_cache();
+                frame(&ctx, &mut c, s, t, vec![], 0., true);
+                let source = c.drawing.strokes()[0].clone();
+                c.select(Tool::Eraser);
+                c.eraser_radius = 4.;
+                c.eraser_mode = mode;
+                let midpoint = source.placement.apply([80., 100.]);
+                click(&ctx, &mut c, s, t, midpoint, egui::Modifiers::NONE);
+                if mode == EraserMode::Partial {
+                    assert_eq!(c.drawing.strokes().len(), 2);
+                    for p in c.drawing.strokes() {
+                        assert_eq!(p.placement, source.placement);
+                        assert_eq!(p.width, source.width);
+                    }
+                } else {
+                    assert!(c.drawing.strokes().is_empty());
                 }
-            ));
-            c.prune_cache();
-            frame(&ctx, &mut c, s, t, vec![], 0., true);
-            let source = c.drawing.strokes()[0].clone();
-            c.select(Tool::Eraser);
-            c.eraser_radius = 4.;
-            c.eraser_mode = mode;
-            click(&ctx, &mut c, s, t, [160., 120.], egui::Modifiers::NONE);
-            if mode == EraserMode::Partial {
-                assert_eq!(c.drawing.strokes().len(), 2);
-                for p in c.drawing.strokes() {
-                    assert_eq!(p.placement, source.placement);
-                    assert_eq!(p.width, source.width);
-                }
-            } else {
-                assert!(c.drawing.strokes().is_empty());
+                let erased = c.drawing.strokes().to_vec();
+                c.undo();
+                assert_eq!(c.drawing.strokes(), &[source]);
+                c.redo();
+                assert_eq!(c.drawing.strokes(), erased);
             }
-            c.undo();
-            assert_eq!(c.drawing.strokes(), &[source]);
         }
     }
 }

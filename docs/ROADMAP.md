@@ -178,3 +178,14 @@ menus, constrained contextual controls. Preserve drawing caches/erasers and top
 main toolbar. No PDF persistence or other object creation. Validate geometry,
 identity/style/order/history, clipboard limits, page bounds and zoom/far-origin
 input on native/WASM; record real UI verification and any unmet #23 criteria.
+
+### Unified canvas object architecture — M1.4 foundation follow-up
+
+Extend the existing semantic protocol with object types, shared tagged snapshots,
+ID lookup/ordered traversal, pressure-aware hits, normalized local anchors,
+rotation-aware placement/bounds and undoable z-order. Preserve raw vectors/style,
+caches/indexes, current UI and both layouts. Tests cover lookup/unique IDs,
+ownership, rotation/inversion/composition/bounds/anchors, pressure/dots, legacy
+semantic decoding, stacking and exact history including transformed erasing.
+Future content types extend the same protocol/store/journal. Rotation/arrange UI,
+connectors and all new object creation remain separate tasks; M2 saving is unchanged.
