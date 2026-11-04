@@ -58,7 +58,7 @@ Fixed 40-point top panel directly below the document tabs, with 8×6 padding and
 and 1.25-point strokes. Preset buttons are 40×26. No floating palette or shadow.
 Never overlay Explorer, tabs or canvas with the drawing toolbar.
 
-Order: Selection, Lasso, Hand, horizontal pen presets,
+Order: Selection with mode dropdown, Hand, horizontal pen presets,
 New preset (+), Pen settings, Eraser, Undo/Redo, zoom. No unfinished pen types.
 One click selects a preset and Pen; its preview combines a nib icon with its actual
 color/opacity and a thickness stripe clamped to 1–8 screen points. Hover and
@@ -175,19 +175,39 @@ checks from visual verification and physical pen/display latency tests.
 
 ## M1.4 Selection, Lasso and contextual object controls
 
-Selection and Lasso are adjacent working controls at the left of the TOP toolbar.
-Selection clicks pick topmost visible ink (4 logical-screen-point tolerance);
-empty clicks clear. Shift-click toggles membership; Alt-click subtracts. Ctrl/Cmd+A
-selects all in the active page/canvas scope and activates Selection. Text-input
-focus retains its own shortcuts. Lasso draws a live outline and closes at release:
-only fully enclosed rounded stroke envelopes are selected, excluding boundary
-contact. Shift adds, Alt subtracts; a degenerate or focus-cancelled lasso leaves
-selection. Escape cancels any live selection gesture and clears membership,
-bounds and outlines, including the previous selection during an additive lasso.
-A later pointer release cannot commit the cancelled gesture. Text editors and
-open popovers retain their own Escape handling.
-A completed valid lasso returns to Selection, exposing handles and direct movement.
-Select Lasso again to add/subtract another region.
+One Selection button and its small dropdown arrow occupy the left of the TOP
+toolbar. The dropdown offers Rectangle Selection (default) and Lasso Selection.
+The chosen mode remains active until changed, including after closing a lasso;
+returning from Pen/Hand/Eraser recalls it. Both modes click topmost visible ink
+with a 4-screen-point tolerance. Normal click replaces membership, except an
+already selected object preserves the group for dragging. Shift-click adds
+idempotently; Alt/Option-click removes. Alt takes precedence over Shift.
+Empty click clears membership on release. Ctrl/Cmd+A selects the active scope.
+Text focus and open popovers retain their shortcuts; Space temporarily pans.
+
+Dragging empty canvas at least 3 screen points starts a rectangle. Horizontal
+endpoint displacement determines policy independently of vertical direction:
+left-to-right contains the complete rounded pressure envelope; right-to-left
+crosses any part of it, including boundary contact. Zero horizontal displacement
+uses containment; changing direction immediately updates policy. Blue solid
+borders mark containment; green dashed borders mark crossing, with 10% fills.
+Centralized containment/crossing tokens are #286ED2/#238C50 in Light and
+#6EAAFF/#64D291 in Dark. Matching object outlines highlight while dragging. Tests and
+geometry use document coordinates independently of camera pan/zoom.
+
+Lasso draws a freeform live outline, closes on release and retains its existing
+strict rounded-envelope containment (boundary contact excluded). Both area modes
+capture modifiers at pointer-down: none replaces, Shift adds, Alt/Option removes.
+Invalid short lasso replaces with an empty selection; an over-complex outline
+retains membership and explains the 4096-vertex limit. Handles take priority over
+area gestures in both modes (Shift still snaps rotation); Alt bypasses handles
+for subtraction. Modified object clicks change membership without moving it;
+unmodified object drags select/move the object or existing group.
+Escape cancels a live gesture and clears selection. Focus loss or camera changes
+cancel previews without altering membership. A later release cannot commit a
+cancelled gesture. OS-reserved Alt-drag may be intercepted by window managers;
+use the corresponding area gesture with Shift where available or change the OS
+binding. Browser canvas guards preserve text-agent and system clipboard behavior.
 
 Selected ink has a subtle accent outline, group bounding rectangle and four
 7-point corner handles with 5-point-radius hit targets. A 22-point minimum visual

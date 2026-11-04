@@ -390,8 +390,11 @@ Lasso uses an explicitly closed even-odd polygon, rejects degenerate gestures,
 and requires the entire rounded pressure-width stroke envelope to lie strictly
 inside it. This conservative envelope includes flat highlighter end caps too;
 touching/intersecting strokes are excluded. Segment/edge checks prevent concave
-polygons from selecting strokes that leave and re-enter the region. Future
-partial-intersection selection is a separate policy, not a silent behavior change.
+polygons from selecting strokes that leave and re-enter the region. Directional
+Rectangle selection adds a separate crossing policy; Lasso retains
+strict containment. Rectangle gestures reuse the revision-keyed object index and
+cached world paths. Exact rounded/tapered envelope tests live in selection.rs;
+UI feedback and mode state remain transient in Canvas, outside saved content.
 
 Clipboard bundles are bounded, versioned, tagged object snapshots, shared within
 the current app session; supported system clipboard text carries the same payload.

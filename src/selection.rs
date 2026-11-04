@@ -26,7 +26,6 @@ pub enum Membership {
     Replace,
     Add,
     Subtract,
-    Toggle,
 }
 
 pub struct Selection {
@@ -75,11 +74,6 @@ impl Selection {
                 Membership::Subtract => {
                     self.ids.remove(&id);
                 }
-                Membership::Toggle => {
-                    if !self.ids.remove(&id) {
-                        self.ids.insert(id);
-                    }
-                }
                 _ => {
                     self.ids.insert(id);
                 }
@@ -121,6 +115,47 @@ impl Selection {
         }
         self.ids = live;
     }
+}
+
+/// Exact rounded, linearly tapered path envelope against an axis-aligned region.
+/// Crossing includes boundary contact; containment includes the whole envelope.
+pub fn rectangle_matches(
+    bounds: ObjectBounds,
+    crossing: bool,
+    path: &[Point],
+    pressures: &[Option<f32>],
+    width: f64,
+    pressure: PressureStyle,
+) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+    let radius = |i| width * 0.5 * pressure.factor(pressures[i]);
+    if !crossing {
+        return path.iter().enumerate().all(|(i, p)| {
+            (0..2).all(|axis| {
+                p[axis] - radius(i) >= bounds.min[axis] && p[axis] + radius(i) <= bounds.max[axis]
+            })
+        });
+    }
+    if path.iter().any(|p| bounds.contains(*p)) {
+        return true;
+    }
+    let corners = bounds.corners();
+    (0..path.len().saturating_sub(1).max(1)).any(|i| {
+        let next = (i + 1).min(path.len() - 1);
+        (0..4).any(|edge| {
+            crate::partial_erase::clip_tapered(
+                path[i],
+                path[next],
+                corners[edge],
+                corners[(edge + 1) % 4],
+                0.0,
+                [radius(i), radius(next)],
+            )
+            .is_some()
+        })
+    })
 }
 
 pub fn inside(point: Point, polygon: &[Point]) -> bool {
@@ -423,5 +458,54 @@ mod performance {
         let start = std::time::Instant::now();
         assert!(region.encloses(&path, &pressures, 2., PressureStyle::default()));
         eprintln!("100,000-point containment: {:?}", start.elapsed());
+    }
+}
+
+#[cfg(test)]
+mod rectangle_tests {
+    use super::*;
+    #[test]
+    fn exact_envelope_rejects_empty_bounds_overlap_and_handles_pressure_and_dots() {
+        let b = ObjectBounds {
+            min: [0., 0.],
+            max: [10., 10.],
+        };
+        let p = PressureStyle::default();
+        assert!(!rectangle_matches(
+            b,
+            true,
+            &[[-5., 9.], [9., 15.]],
+            &[None; 2],
+            1.,
+            p
+        ));
+        assert!(rectangle_matches(
+            b,
+            true,
+            &[[-5., 5.], [15., 5.]],
+            &[None; 2],
+            1.,
+            p
+        ));
+        assert!(!rectangle_matches(
+            b,
+            false,
+            &[[-5., 5.], [15., 5.]],
+            &[None; 2],
+            1.,
+            p
+        ));
+        assert!(rectangle_matches(
+            b,
+            false,
+            &[[1., 1.], [9., 9.]],
+            &[None; 2],
+            2.,
+            p
+        ));
+        assert!(!rectangle_matches(b, false, &[[0.5, 5.]], &[None], 2., p));
+        assert!(rectangle_matches(b, true, &[[-0.5, 5.]], &[None], 2., p));
+        assert!(!rectangle_matches(b, true, &[[-2., 5.]], &[None], 2., p));
+        assert!(rectangle_matches(b, true, &[[5., 5.]], &[None], 100., p));
     }
 }

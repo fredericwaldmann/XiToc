@@ -8,6 +8,14 @@ use crate::{
 };
 
 pub(super) enum SelectionGesture {
+    Rectangle {
+        surface: Surface,
+        start: Point,
+        end: Point,
+        mode: Membership,
+        moved: bool,
+        matches: Vec<Uuid>,
+    },
     Lasso {
         surface: Surface,
         points: Vec<Point>,
@@ -51,7 +59,7 @@ impl Canvas {
             Undo => self.undo(),
             Redo => self.redo(),
             SelectAll => {
-                self.select(Tool::Select);
+                self.select(self.selection_mode);
                 let ids = self
                     .drawing
                     .strokes()
@@ -79,7 +87,7 @@ impl Canvas {
                     let ids = bundle.duplicate(&mut self.drawing, self.selection.surface);
                     self.selection
                         .change(ids, Membership::Replace, &self.drawing);
-                    self.tool = Tool::Select;
+                    self.tool = self.selection_mode;
                     self.prune_cache();
                 }
             }
@@ -251,7 +259,7 @@ impl Canvas {
         }
         self.selection
             .change(ids, Membership::Replace, &self.drawing);
-        self.tool = Tool::Select;
+        self.tool = self.selection_mode;
         self.prune_cache();
     }
     pub(super) fn selection_keys(&mut self, ui: &egui::Ui) {
@@ -409,7 +417,7 @@ impl Canvas {
         bounds
     }
     fn handle(&self, point: Point, scale: f64) -> Option<usize> {
-        if self.tool != Tool::Select {
+        if !matches!(self.tool, Tool::Select | Tool::Lasso) {
             return None;
         }
         Self::display_bounds(self.selection.bounds?, scale)
@@ -427,7 +435,7 @@ impl Canvas {
         ])
     }
     fn rotation_hit(&self, point: Point, scale: f64) -> bool {
-        self.tool == Tool::Select
+        matches!(self.tool, Tool::Select | Tool::Lasso)
             && self.rotation_point(scale).is_some_and(|p| {
                 (p[0] - point[0]).hypot(p[1] - point[1]) * scale <= f64::from(style::SELECTION_HIT)
             })
@@ -491,6 +499,41 @@ impl Canvas {
     }
     fn selection_sample(&mut self, surface: Surface, point: Point, scale: f64, shift: bool) {
         match &mut self.selection_gesture {
+            Some(SelectionGesture::Rectangle {
+                surface: s,
+                start,
+                end,
+                moved,
+                matches,
+                ..
+            }) if *s == surface => {
+                *end = point;
+                *moved |= (point[0] - start[0]).hypot(point[1] - start[1]) * scale >= 3.0;
+                if *moved {
+                    matches.clear();
+                    let bounds = ObjectBounds::from_points([*start, point]).unwrap();
+                    self.eraser_index
+                        .sync(self.drawing.revision(), self.drawing.strokes());
+                    self.eraser_index
+                        .query_rect(surface, bounds.min, bounds.max, |index| {
+                            let stroke = &self.drawing.strokes()[index];
+                            let cached = self
+                                .cache
+                                .entry(stroke.id)
+                                .or_insert_with(|| Cached::new(stroke));
+                            if selection::rectangle_matches(
+                                bounds,
+                                point[0] < start[0],
+                                &cached.path,
+                                &cached.pressures,
+                                stroke.visible_width(),
+                                stroke.pressure_style,
+                            ) {
+                                matches.push(stroke.id);
+                            }
+                        });
+                }
+            }
             Some(SelectionGesture::Lasso {
                 surface: s,
                 points,
@@ -579,6 +622,19 @@ impl Canvas {
     }
     fn commit_selection(&mut self) {
         match self.selection_gesture.take() {
+            Some(SelectionGesture::Rectangle {
+                mode: Membership::Replace,
+                moved: false,
+                ..
+            }) => self.selection.clear(),
+            Some(SelectionGesture::Rectangle {
+                mode,
+                moved: true,
+                matches,
+                ..
+            }) => {
+                self.selection.change(matches, mode, &self.drawing);
+            }
             Some(
                 SelectionGesture::Transform {
                     delta, moved: true, ..
@@ -604,6 +660,9 @@ impl Canvas {
                     return;
                 }
                 let Some(region) = selection::LassoRegion::new(points) else {
+                    if mode == Membership::Replace {
+                        self.selection.clear();
+                    }
                     return;
                 };
                 let bounds = region.bounds;
@@ -627,7 +686,6 @@ impl Canvas {
                         }
                     });
                 self.selection.change(selected, mode, &self.drawing);
-                self.tool = Tool::Select;
             }
             _ => {}
         }
@@ -654,7 +712,7 @@ impl Canvas {
             return;
         }
         self.processed.push(surface);
-        let selection_tool = self.tool == Tool::Select;
+        let selection_tool = matches!(self.tool, Tool::Select | Tool::Lasso);
         let owns = |p: Pos2| {
             (bounds.contains(p)
                 || (selection_tool
@@ -675,12 +733,13 @@ impl Canvas {
                     modifiers,
                 } if owns(pos) && !ui.input(|i| i.key_down(egui::Key::Space)) => {
                     let point = transform.to_document([pos.x as f64, pos.y as f64]);
-                    let corner = if self.selection.surface == surface {
+                    let corner = if self.selection.surface == surface && !modifiers.alt {
                         self.handle(point, transform.scale)
                     } else {
                         None
                     };
                     let rotation = self.selection.surface == surface
+                        && !modifiers.alt
                         && self.rotation_hit(point, transform.scale);
                     if !self.drawing.contains(surface, point) && corner.is_none() && !rotation {
                         continue;
@@ -699,22 +758,11 @@ impl Canvas {
                     let mode = if modifiers.alt {
                         Membership::Subtract
                     } else if modifiers.shift {
-                        Membership::Toggle
+                        Membership::Add
                     } else {
                         Membership::Replace
                     };
-                    if self.tool == Tool::Lasso {
-                        self.selection_gesture = Some(SelectionGesture::Lasso {
-                            surface,
-                            points: vec![point],
-                            mode: if mode == Membership::Toggle {
-                                Membership::Add
-                            } else {
-                                mode
-                            },
-                            overflow: false,
-                        });
-                    } else if let Some(id) = self.pick(surface, point, 4.0 / transform.scale) {
+                    if let Some(id) = self.pick(surface, point, 4.0 / transform.scale) {
                         if mode != Membership::Replace {
                             self.selection.change([id], mode, &self.drawing);
                         } else {
@@ -723,8 +771,24 @@ impl Canvas {
                             }
                             self.start_transform(surface, point, None, transform.scale);
                         }
-                    } else if mode == Membership::Replace {
-                        self.selection.clear();
+                    } else {
+                        self.selection_gesture = Some(if self.tool == Tool::Lasso {
+                            SelectionGesture::Lasso {
+                                surface,
+                                points: vec![point],
+                                mode,
+                                overflow: false,
+                            }
+                        } else {
+                            SelectionGesture::Rectangle {
+                                surface,
+                                start: point,
+                                end: point,
+                                mode,
+                                moved: false,
+                                matches: Vec::new(),
+                            }
+                        });
                     }
                 }
                 Event::ModifiersChanged(modifiers) => {
@@ -756,6 +820,7 @@ impl Canvas {
                     let active = match &self.selection_gesture {
                         Some(
                             SelectionGesture::Lasso { surface: s, .. }
+                            | SelectionGesture::Rectangle { surface: s, .. }
                             | SelectionGesture::Transform { surface: s, .. }
                             | SelectionGesture::Rotate { surface: s, .. },
                         ) => *s == surface,
@@ -795,6 +860,48 @@ impl Canvas {
             let point = transform.to_screen(point);
             egui::pos2(point[0] as f32, point[1] as f32)
         };
+        if let Some(SelectionGesture::Rectangle {
+            surface: s,
+            start,
+            end,
+            moved: true,
+            matches,
+            ..
+        }) = &self.selection_gesture
+            && *s == surface
+        {
+            let crossing = end[0] < start[0];
+            let color = if crossing { p.crossing } else { p.containment };
+            let rect = Rect::from_two_pos(screen(*start), screen(*end));
+            for id in matches {
+                if let Some(cached) = self.cache.get(id) {
+                    painter.rect_stroke(
+                        Rect::from_min_max(screen(cached.bounds.0), screen(cached.bounds.1)),
+                        1.0,
+                        Line::new(1.5, color),
+                        egui::StrokeKind::Outside,
+                    );
+                }
+            }
+            painter.rect_filled(rect, 0.0, color.gamma_multiply(0.10));
+            if crossing {
+                let corners = [
+                    rect.left_top(),
+                    rect.right_top(),
+                    rect.right_bottom(),
+                    rect.left_bottom(),
+                    rect.left_top(),
+                ];
+                painter.extend(egui::Shape::dashed_line(
+                    &corners,
+                    Line::new(1.25, color),
+                    5.0,
+                    4.0,
+                ));
+            } else {
+                painter.rect_stroke(rect, 0.0, Line::new(1.25, color), egui::StrokeKind::Inside);
+            }
+        }
         if let Some(SelectionGesture::Lasso {
             surface: s, points, ..
         }) = &self.selection_gesture
@@ -825,7 +932,7 @@ impl Canvas {
                 corners.to_vec(),
                 Line::new(1.0, p.accent),
             ));
-            if self.tool == Tool::Select {
+            if matches!(self.tool, Tool::Select | Tool::Lasso) {
                 for corner in corners {
                     painter.rect(
                         Rect::from_center_size(corner, egui::Vec2::splat(style::SELECTION_HANDLE)),
@@ -897,7 +1004,7 @@ impl Canvas {
         };
         let viewport = bounds.intersect(ui.clip_rect());
         let p = style::palette(ui);
-        if self.tool == Tool::Select
+        if matches!(self.tool, Tool::Select | Tool::Lasso)
             && self.selection.surface == surface
             && self.selection_gesture.is_none()
             && let Some(group) = self.selection.bounds

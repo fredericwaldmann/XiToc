@@ -738,3 +738,47 @@ DragStart are prevented, but a separate text field's Ctrl+A is not prevented.
 Clipboard key defaults remain available to eframe's native Copy/Cut/Paste events.
 This browser verification is headless mouse/keyboard input, not physical pen or
 interactive native clipboard certification.
+
+## Unified Selection (#34, 2026-11-04)
+
+Automated gates: fmt, Clippy `-D warnings`, 117 tests pass; seven manual benchmarks
+ignored by the normal suite. Native release build, WASM check and Trunk release
+build pass. New tests cover both layouts, all four rectangle diagonals, full versus
+partial envelope selection, Shift/Alt area membership, zoom/pan, repeated Shift
+clicks, both-mode movement/undo/redo, direction changes/Escape, rotated objects,
+zero-width containment and exact crossing rejection for empty bounds overlap.
+The toolbar event test opens the actual dropdown, selects Lasso and recalls it.
+Existing lasso, resize/rotation, clipboard, focus and drawing regressions pass.
+`cargo test --release indexed_rectangle_large_selection_performance -- --ignored --nocapture`
+passes: 2,000 objects / 100 warmed samples in 27.56 ms (geometry only, host dependent).
+A timed Linux native release launch remained alive without errors until timeout.
+
+Manual review procedure:
+1. Create a Page Note and a Whiteboard; draw separated, overlapping and diagonal ink.
+2. Select using the single top Selection button. Open its arrow and verify Rectangle
+   and Lasso choices; switch to Pen and back to verify mode recall.
+3. Click ink, Shift-click twice (membership stays), Alt/Option-click to subtract,
+   then click empty space to clear. Drag selected ink to move its group.
+4. Drag empty canvas left-to-right in both vertical directions: solid blue and only
+   complete envelopes. Reverse horizontal direction: dashed green and crossing ink.
+   Reverse direction during a drag; verify immediate policy/preview changes.
+5. Repeat under zoom/pan and with Shift/Alt captured at pointer-down. In Lasso mode,
+   enclose complete ink, add/remove regions, then repeat without reselecting the mode.
+6. Resize/rotate (Shift snaps), duplicate/copy/paste/delete and undo/redo. Escape
+   cancels gestures; text and popup focus retain shortcuts. Verify both themes and
+   narrow layout. A window manager reserving Alt-drag may require rebinding that OS
+   gesture; the app cannot receive events intercepted before its input pipeline.
+
+Interactive Windows/macOS, physical stylus and native gesture performance still
+require those devices. Build/controller checks do not claim those observations.
+
+Firefox WebDriver BiDi smoke on the rebuilt WASM app: fresh-load document creation,
+single top Selection control and Rectangle/Lasso dropdown, drawing two strokes,
+solid blue containment excluding the partial stroke, dashed green crossing
+including both, and lasso selecting one while retaining Lasso/transform handles.
+Screenshots: [dropdown](screenshots/unified-selection/dropdown.png),
+[containment](screenshots/unified-selection/containment.png),
+[crossing](screenshots/unified-selection/crossing.png),
+[lasso](screenshots/unified-selection/lasso.png). Desktop/browser modifier paths
+are covered by the shared ordered-event tests; this smoke did not interactively
+exercise every modifier, both themes or Windows/macOS window-manager bindings.

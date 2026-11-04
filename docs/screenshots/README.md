@@ -100,3 +100,12 @@ movement, resizing, duplicate, delete, undo/redo, Edit/context menus and cross-t
 copy/paste were exercised in the browser. Both light and dark appearances were
 inspected. Native Linux launched without startup errors; interactive native
 selection and system clipboard behavior still require manual verification.
+
+## Unified Selection (#34)
+
+`unified-selection/` records the release WASM app in Firefox at 1100×760:
+`dropdown.png` shows the one top Selection button and mode menu;
+`containment.png` and `crossing.png` show live solid-blue/dashed-green rectangles
+around the same two strokes; `lasso.png` shows completed strict lasso selection
+with the mode still active and existing transform handles. Automated BiDi pointer
+input drove these captures. See TEST_PLAN for verification limits.

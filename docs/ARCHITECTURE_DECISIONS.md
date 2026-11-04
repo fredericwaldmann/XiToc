@@ -358,3 +358,22 @@ starting an object drag could initiate native browser DND and lose move/release
 input. A canvas-only A/D key-default/dragstart guard in `index.html` prevents that
 without suppressing clipboard events or eframe's separate text-agent shortcuts.
 This addition follows a reproduced runtime failure, rather than a toolkit rewrite.
+
+## 2026-11-04 — Unified Selection modes (#34)
+
+Keep the existing Select/Lasso dispatch values as transient Rectangle/Lasso modes
+behind one top-toolbar button. Both modes share picking, handles and transform
+commands; the dropdown mode is recalled when returning from another drawing tool.
+Rectangle geometry uses the same transformed path/pressure cache and object bounds
+index as lasso/erasers. Its exact predicate covers the rounded tapered envelope,
+using horizontal endpoint direction for containment versus crossing. Zero horizontal
+displacement is containment; changing direction recomputes candidates immediately.
+
+This avoids a second object store/history engine and preserves immutable raw ink.
+Candidate IDs reuse vector capacity during pointer sampling; preview outlines use
+cached bounds instead of allocating copies of every path each frame. Lasso keeps
+its existing indexed strict containment. The first content adapter remains Stroke;
+future object types need exact geometry dispatch in the same selection pipeline.
+Modifiers are captured at pointer-down, Alt before Shift; handles take priority
+except Alt bypasses them. Shift-click addition is idempotent. Region previews do
+not change canonical content or add history entries. No persistence schema changes.

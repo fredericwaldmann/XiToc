@@ -297,8 +297,11 @@ Ink remains memory-only until M2. See [UI specification](docs/UI_DESIGN.md) and
 [future creative tool dependencies](docs/CREATIVE_TOOLS.md).
 
 M1.4 selection: click Selection in the top toolbar, click ink, Shift-click to
-toggle multiple strokes, or draw a fully enclosing Lasso. Lasso returns to
-Selection. Drag selected ink to move; corner handles always resize proportionally.
+add strokes or Alt/Option-click to remove them. Selection’s dropdown chooses
+Rectangle (default) or Lasso and retains that mode. Drag empty canvas left-to-right
+for full containment (solid blue), right-to-left for crossing (dashed green),
+or draw a fully enclosing Lasso. Both modes support Shift-add/Alt-remove. Drag
+selected ink to move; corner handles always resize proportionally.
 Escape clears selection and cancels a live lasso/transform without editing ink;
 release after cancellation cannot commit the preview.
 Ctrl/Cmd+A/C/V/D selects all/copies/pastes/duplicates; Delete removes selected ink;
