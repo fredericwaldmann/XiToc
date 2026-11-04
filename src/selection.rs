@@ -12,6 +12,8 @@ pub enum SelectionCommand {
     Cut,
     RotateLeft,
     RotateRight,
+    FlipHorizontal,
+    FlipVertical,
     Paste,
     Duplicate,
     Delete,
@@ -279,6 +281,7 @@ pub fn move_by(bounds: ObjectBounds, mut delta: Point, page: Option<Point>) -> P
         position: std::array::from_fn(|i| bounds.min[i] + delta[i]),
         scale: 1.0,
         rotation: 0.0,
+        reflected: [false; 2],
     }
 }
 pub fn scale_about(
@@ -309,6 +312,7 @@ pub fn scale_about(
         position: anchor,
         scale,
         rotation: 0.0,
+        reflected: [false; 2],
     }
 }
 
@@ -418,6 +422,7 @@ mod tests {
                 position: [origin[0] + 40., origin[1] - 20.],
                 scale: 2.,
                 rotation: 0.0,
+                reflected: [false; 2],
             };
             let point = [origin[0] + 0.125, origin[1] + 3.5];
             assert_eq!(p.inverse(p.apply(point)), point);
@@ -427,6 +432,7 @@ mod tests {
                     position: p.apply(point),
                     scale: 0.5,
                     rotation: 0.0,
+                    reflected: [false; 2],
                 },
                 point,
             );

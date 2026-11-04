@@ -394,6 +394,7 @@ fn transformed_ink_remains_erasable_in_both_modes_with_exact_history() {
                         position: [60., 120.],
                         scale: 2.,
                         rotation,
+                        reflected: [false; 2],
                     }
                 ));
                 c.prune_cache();
@@ -1191,7 +1192,8 @@ fn rectangle_matches_rotated_geometry_and_vertical_containment() {
             origin: [0., 0.],
             position: [50., 50.],
             rotation: std::f64::consts::FRAC_PI_4,
-            scale: 1.
+            scale: 1.,
+            reflected: [false; 2],
         }
     ));
     let original = c.drawing.strokes()[0].clone();

@@ -473,6 +473,7 @@ impl Canvas {
         if !matches!(self.tool, Tool::Select | Tool::Lasso) && self.selection.surface == surface {
             self.selection_view = Some((surface, transform, bounds.intersect(ui.clip_rect())));
         }
+        self.selection_controls(ui, bounds, surface, transform);
         if matches!(self.tool, Tool::Select | Tool::Lasso) {
             self.selection_surface(ui, bounds, surface, transform);
             self.paint(ui, bounds, surface, transform);

@@ -15,6 +15,12 @@ pub struct Placement {
     /// Counterclockwise radians in logical coordinates; absent in older snapshots.
     #[serde(default)]
     pub rotation: f64,
+    /// Local axis reflections before rotation; positive scale keeps nib widths valid.
+    #[serde(default, skip_serializing_if = "unreflected")]
+    pub reflected: [bool; 2],
+}
+fn unreflected(value: &[bool; 2]) -> bool {
+    *value == [false; 2]
 }
 impl Default for Placement {
     fn default() -> Self {
@@ -23,6 +29,7 @@ impl Default for Placement {
             position: [0.0; 2],
             scale: 1.0,
             rotation: 0.0,
+            reflected: [false; 2],
         }
     }
 }
@@ -37,13 +44,18 @@ impl Placement {
             && (1e-4..=1e4).contains(&self.scale)
     }
     pub fn is_identity(self) -> bool {
-        self.scale == 1.0 && self.rotation == 0.0 && self.origin == self.position
+        self.scale == 1.0
+            && self.rotation == 0.0
+            && self.reflected == [false; 2]
+            && self.origin == self.position
     }
     pub fn apply(self, point: Point) -> Point {
         if self.is_identity() {
             return point;
         }
-        let offset = std::array::from_fn(|i| (point[i] - self.origin[i]) * self.scale);
+        let offset = std::array::from_fn(|i| {
+            (point[i] - self.origin[i]) * self.scale * if self.reflected[i] { -1.0 } else { 1.0 }
+        });
         let rotated = rotate(offset, self.rotation);
         std::array::from_fn(|i| self.position[i] + rotated[i])
     }
@@ -53,7 +65,9 @@ impl Placement {
         }
         let offset = std::array::from_fn(|i| point[i] - self.position[i]);
         let rotated = rotate(offset, -self.rotation);
-        std::array::from_fn(|i| self.origin[i] + rotated[i] / self.scale)
+        std::array::from_fn(|i| {
+            self.origin[i] + rotated[i] / self.scale * if self.reflected[i] { -1.0 } else { 1.0 }
+        })
     }
     /// Re-anchor composition at a raw point to retain precision far from origin.
     pub fn then(self, next: Self, reference: Point) -> Self {
@@ -61,7 +75,14 @@ impl Placement {
             origin: reference,
             position: next.apply(self.apply(reference)),
             scale: self.scale * next.scale,
-            rotation: self.rotation + next.rotation,
+            // An odd reflection reverses the handedness of the previous rotation.
+            rotation: next.rotation
+                + if next.reflected[0] ^ next.reflected[1] {
+                    -self.rotation
+                } else {
+                    self.rotation
+                },
+            reflected: std::array::from_fn(|i| self.reflected[i] ^ next.reflected[i]),
         }
     }
 }
@@ -235,6 +256,7 @@ mod tests {
                 position: [40., 50.],
                 scale: 2.,
                 rotation: 0.0,
+                reflected: [false; 2],
             }
         ));
         let moved = drawing.strokes()[0].clone();
@@ -300,6 +322,7 @@ mod group_tests {
             position: [50., 150.],
             scale: 2.,
             rotation: 0.0,
+            reflected: [false; 2],
         };
         assert!(drawing.transform_objects(&ids, transform));
         assert!(std::sync::Arc::ptr_eq(&original[1], &drawing.strokes()[1]));
@@ -328,6 +351,7 @@ mod group_tests {
                 position: [20., 110.],
                 scale: 1.,
                 rotation: 0.0,
+                reflected: [false; 2],
             }
         ));
         assert!(!drawing.can_redo());
@@ -468,6 +492,7 @@ mod architecture_tests {
             position: [100., 200.],
             scale: 2.,
             rotation: std::f64::consts::FRAC_PI_2,
+            reflected: [false; 2],
         };
         assert!(drawing.transform_objects(&HashSet::from([id]), turn));
         let object = drawing.object(id).unwrap();
@@ -490,6 +515,7 @@ mod architecture_tests {
             position: [-30., 70.],
             scale: 0.5,
             rotation: -0.3,
+            reflected: [false; 2],
         };
         let composed = turn.then(next, [20., 30.]);
         for point in [[20., 30.], [40., 30.], [-7., 99.]] {
@@ -535,5 +561,82 @@ mod architecture_tests {
             .remove("rotation");
         assert_eq!(serde_json::from_value::<Stroke>(json).unwrap(), stroke);
         assert!(serde_json::from_str::<ObjectType>("\"FutureShape\"").is_err());
+    }
+}
+
+#[cfg(test)]
+mod reflection_tests {
+    use super::*;
+    fn near(a: Point, b: Point) {
+        for i in 0..2 {
+            assert!((a[i] - b[i]).abs() < 0.001, "{a:?} != {b:?}");
+        }
+    }
+    #[test]
+    fn reflection_composition_inverse_and_anchors_for_all_parities() {
+        for far in [0., 1e12] {
+            for reflection in [[false, false], [true, false], [false, true], [true, true]] {
+                for next_reflection in [[false, false], [true, false], [false, true], [true, true]]
+                {
+                    let a = Placement {
+                        origin: [far, far],
+                        position: [far + 20., far - 40.],
+                        rotation: 0.31,
+                        scale: 1.7,
+                        reflected: reflection,
+                    };
+                    let b = Placement {
+                        origin: [far - 20., far + 40.],
+                        position: [far + 50., far - 50.],
+                        rotation: -0.8,
+                        scale: 0.6,
+                        reflected: next_reflection,
+                    };
+                    let reference = [far + 1., far + 2.];
+                    let composed = a.then(b, reference);
+                    assert!(composed.valid());
+                    for point in [reference, [far + 7., far - 3.], [far - 100., far + 20.]] {
+                        near(a.inverse(a.apply(point)), point);
+                        near(composed.apply(point), b.apply(a.apply(point)));
+                        near(composed.inverse(composed.apply(point)), point);
+                    }
+                }
+            }
+        }
+        let doc = crate::document::DocumentData::blank(crate::document::DocumentKind::Whiteboard);
+        let mut stroke = Stroke::new(doc.id(), Surface::Canvas, [1, 2, 3, 255], 2.);
+        stroke.push([20., 30.]);
+        stroke.push([40., 50.]);
+        stroke.placement = Placement {
+            origin: [30., 40.],
+            position: [30., 40.],
+            reflected: [true, false],
+            ..Default::default()
+        };
+        near(stroke.anchor([0., 0.]).unwrap(), [41., 29.]);
+        assert!(!stroke.placement.is_identity());
+    }
+    #[test]
+    fn old_snapshots_default_to_unreflected_and_reflections_round_trip() {
+        let mut json = serde_json::to_value(Placement::default()).unwrap();
+        json.as_object_mut().unwrap().remove("reflected");
+        assert_eq!(
+            serde_json::from_value::<Placement>(json).unwrap(),
+            Placement::default()
+        );
+        for reflected in [[true, false], [false, true], [true, true]] {
+            let p = Placement {
+                reflected,
+                ..Default::default()
+            };
+            let encoded = serde_json::to_string(&p).unwrap();
+            assert_eq!(serde_json::from_str::<Placement>(&encoded).unwrap(), p);
+        }
+        assert!(
+            serde_json::from_str::<Placement>(
+                r#"{"origin":[0,0],"position":[0,0],"scale":1,"rotation":0,"reflected":[true]}"#
+            )
+            .is_err()
+        );
     }
 }

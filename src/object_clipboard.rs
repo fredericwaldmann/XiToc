@@ -108,6 +108,7 @@ impl ObjectBundle {
             position,
             scale,
             rotation: 0.0,
+            reflected: [false; 2],
         };
         self.insert_placed(drawing, surface, delta)
     }

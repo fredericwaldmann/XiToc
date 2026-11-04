@@ -377,3 +377,23 @@ future object types need exact geometry dispatch in the same selection pipeline.
 Modifiers are captured at pointer-down, Alt before Shift; handles take priority
 except Alt bypasses them. Shift-click addition is idempotent. Region previews do
 not change canonical content or add history entries. No persistence schema changes.
+
+
+## 2026-11-04 — Positive-scale placement reflections (#33)
+
+Extend Placement with two default-false axis reflection flags applied before
+rotation. Compose flags with XOR, reversing previous rotation handedness when the
+next transform has an odd reflection. Inversion reverses rotation before applying
+the same axis signs. Horizontal and vertical world flips are exact sign changes,
+so they need no negative widths, raw-point rewrites, π rotation approximation or
+separate object/history engine. Existing batch transform validation/journal,
+geometry caches and selection refresh remain authoritative.
+
+Two flags retain direct axis semantics and avoid accumulated angle changes for
+repeated flips. This representation includes redundant equivalent rotations, but
+remains finite, invertible and compatible with existing positive uniform scale.
+Legacy semantic snapshots omit/default flags; older decoders reject reflected
+clipboard content explicitly. No persisted PDF payload changes are introduced.
+Future text mirrors glyphs; groups transform descendants once; connector anchors
+retain local coordinates/stable target IDs and resolve through Placement. Future
+relation-aware journal/routing adapters must implement these policies explicitly.

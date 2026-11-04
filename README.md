@@ -322,8 +322,13 @@ new object tools and PDF ink persistence remain future milestones. See
 
 M1.4 manipulation: drag selected ink to move; corner handles resize handwriting
 proportionally (including off-axis drags/Shift) with uniform thickness scaling.
-Drag the round handle above the group to rotate, or use Edit/context rotation
-steps. Ctrl/Cmd+X cuts only after a validated internal copy; Ctrl/Cmd+C/V/D copy,
+Drag the round handle above the group to rotate, or use Edit/context Transform
+rotation steps. Ctrl/Cmd+X cuts only after a validated internal copy; Ctrl/Cmd+C/V/D copy,
 paste and duplicate. Arrows move 1 document point, Shift-arrows 10. Each completed
 drag is one undo operation; Escape cancels and clears selection. Page ownership
 stays fixed; rotation stops at conservative page bounds. No PDF ink saving.
+
+Right-click ink → **Transform → Flip Horizontally / Flip Vertically** mirrors the
+selection around its collective center. Right-click preserves a selected group
+or selects an unselected target. Each flip is one undo step; raw handwriting,
+styles and IDs remain unchanged. Ink still remains memory-only until M2.

@@ -109,3 +109,12 @@ selection and system clipboard behavior still require manual verification.
 around the same two strokes; `lasso.png` shows completed strict lasso selection
 with the mode still active and existing transform handles. Automated BiDi pointer
 input drove these captures. See TEST_PLAN for verification limits.
+
+
+## Object flipping (#33)
+
+`object-flipping/` records Firefox release WASM at 1100×760. `before.png` is the
+selected asymmetric pair; `transform.png` shows the nested menu and preserved group;
+`horizontal.png` reflects both positions/shapes, `undo.png` restores them, and
+`vertical.png` shows vertical reflection after horizontal/redo. BiDi mouse/keyboard
+input drove the app. TEST_PLAN records exact scope and platform limitations.

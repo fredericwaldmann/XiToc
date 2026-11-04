@@ -97,6 +97,23 @@ impl Canvas {
                 self.selection.clear();
                 self.prune_cache();
             }
+            FlipHorizontal | FlipVertical => {
+                self.finish();
+                if let Some(bounds) = self.selection.bounds {
+                    let center = bounds.center();
+                    let delta = Placement {
+                        origin: center,
+                        position: center,
+                        reflected: [command == FlipHorizontal, command == FlipVertical],
+                        ..Default::default()
+                    };
+                    if self.drawing.transform_objects(&self.selection.ids, delta) {
+                        self.prune_cache();
+                    } else {
+                        self.notice = Some("Flip would leave this page or exceed supported coordinates. Move the selection inward first.".into());
+                    }
+                }
+            }
             RotateLeft | RotateRight => {
                 self.finish();
                 if let (Some(bounds), Some(geometry)) =
@@ -707,7 +724,6 @@ impl Canvas {
             }
             self.selection_view = Some((surface, transform, bounds.intersect(ui.clip_rect())));
         }
-        self.selection_controls(ui, bounds, surface, transform);
         if self.processed.contains(&surface) {
             return;
         }
@@ -991,7 +1007,7 @@ impl Canvas {
             }
         }
     }
-    fn selection_controls(
+    pub(super) fn selection_controls(
         &mut self,
         ui: &egui::Ui,
         bounds: Rect,
@@ -1074,15 +1090,20 @@ impl Canvas {
         if response.secondary_clicked()
             && let Some(pos) = response.interact_pointer_pos()
         {
-            self.selection.scope(surface);
             let point = transform.to_document([pos.x as f64, pos.y as f64]);
-            if let Some(id) = self.pick(surface, point, 4.0 / transform.scale)
-                && !self.selection.ids.contains(&id)
+            if self.drawing.contains(surface, point)
+                && let Some(id) = self.pick(surface, point, 4.0 / transform.scale)
             {
-                self.selection
-                    .change([id], Membership::Replace, &self.drawing);
+                self.finish();
+                self.selection.scope(surface);
+                self.select(self.selection_mode);
+                if !self.selection.ids.contains(&id) {
+                    self.selection
+                        .change([id], Membership::Replace, &self.drawing);
+                }
             }
         }
+
         response.context_menu(|ui| {
             let state = crate::ui::selection_controls::MenuState::for_canvas(self);
             if let Some(command) = crate::ui::selection_controls::menu(ui, state) {
@@ -1100,3 +1121,7 @@ mod tests;
 #[cfg(test)]
 #[path = "manipulation_tests.rs"]
 mod manipulation_tests;
+
+#[cfg(test)]
+#[path = "flip_tests.rs"]
+mod flip_tests;

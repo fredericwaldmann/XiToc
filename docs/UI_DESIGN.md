@@ -248,3 +248,25 @@ On web, canvas Ctrl/Cmd+A and Ctrl/Cmd+D belong to XiToc, not browser page
 selection/bookmark commands. Native HTML drag initiation on the canvas is blocked
 so it cannot swallow a manipulation release. Text fields keep native shortcuts,
 and Copy/Cut/Paste events are not suppressed by this guard.
+
+
+### M1.4 horizontal and vertical flipping (#33)
+
+Right-clicking ink opens the existing context menu and activates the remembered
+Selection mode if another drawing tool was active. A selected target preserves
+its group; an unselected target becomes the sole selection. Right-clicking empty
+canvas retains membership and never edits content by itself. Popup/text focus
+and read-only documents retain their existing protections. eframe 0.37 prevents
+the browser's default context menu on its canvas; other HTML is unaffected.
+
+Both Edit and canvas context menus now share a Transform submenu containing
+Rotate left 15°, Rotate right 15°, Flip Horizontally and Flip Vertically. Transform
+is disabled without an editable selection. No new toolbar controls or handles.
+Horizontal flip reflects about the vertical axis through the selection box center;
+vertical flip reflects about its horizontal axis. A group mirrors its relative
+object positions around one shared center. Axes are document-aligned regardless
+of current rotation, zoom or pan. The whole operation is one undo step and keeps
+selection IDs. Bounds/handles refresh immediately. Page ownership stays fixed;
+if a centerline would leave the page, reject the operation and explain why.
+Stroke color, positive width/scale, smoothing and pressure are preserved. Text,
+when implemented, will mirror geometrically including its glyph appearance.

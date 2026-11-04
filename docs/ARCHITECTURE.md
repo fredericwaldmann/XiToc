@@ -478,3 +478,30 @@ move/release stream. Canvas-only handlers preserve the eframe text agent's nativ
 shortcuts, clipboard events and incoming external-file drops. Logical document
 axes are screen-oriented (positive Y downward); positive handle rotation appears
 clockwise, with units remaining PDF points independently of the view.
+
+
+## M1.4 — Reflection transforms (#33)
+
+Placement supports two local-axis reflection flags (serde default false), keeping
+positive uniform scale and width. Its mapping is
+`world = position + R(rotation) * scale * D(reflected) * (local - origin)`.
+An odd reflection in the next placement reverses the previous rotation's sign;
+axis flags compose with XOR. Inverse applies inverse rotation, then reflection
+and reciprocal scale. Re-anchoring composition at a raw point retains far-origin
+precision. These operations feed the existing path, bounds, anchor, hit-testing,
+clipboard and partial-erasure pipeline; original stroke geometry/style is immutable.
+
+Flip commands reflect in document coordinates around the complete selection's
+bounds center, transforming all selected objects in one existing journal entry.
+Page validation remains atomic and checks centerlines on their source page;
+clipped stroke edges remain clipped. A flip that would move a centerline outside
+the page is rejected without history mutation, with a visible explanation.
+Only affected placements/caches change; the shared spatial index rebuilds lazily
+on its revision key, as for movement/rotation. No new rendering engine is needed.
+
+Future text uses geometric mirroring, including glyphs, rather than silently
+keeping text readable. Future groups must transform descendants exactly once;
+connectors keep stable target IDs/local anchors resolved through reflected
+Placement, with relation-aware routing/free-endpoint updates in the same command.
+These are extension policies, not implemented content types. M2 must serialize
+reflection and matching conventional PDF transforms; blank schema 1 is unchanged.

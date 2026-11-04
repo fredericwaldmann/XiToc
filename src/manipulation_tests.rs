@@ -28,7 +28,7 @@ fn near(a: Point, b: Point) {
         assert!((a[i] - b[i]).abs() < 1e-3, "{a:?} != {b:?}");
     }
 }
-fn pressured(canvas: &mut Canvas, surface: Surface) -> Uuid {
+pub(super) fn pressured(canvas: &mut Canvas, surface: Surface) -> Uuid {
     let mut ink = Stroke::new(canvas.drawing.owner(), surface, [40, 70, 100, 89], 4.);
     ink.pen_type = crate::pen::PenType::Pressure;
     ink.pressure_style.enabled = true;
