@@ -42,7 +42,7 @@ egui/eframe 0.37.0, and eframe's Glow rendering and persistence features.
 | [object.rs](../src/object.rs) | `CanvasObject`, `ObjectId`, `ObjectType`, `ObjectSnapshot`, `ObjectBounds`, `Placement`, `hit_stroke_path` |
 | [canvas.rs](../src/canvas.rs) | `Canvas`, `Tool`, `Gesture`, `Erasing`, `Cached`, `PartialPreview`, `RotationPreview`; ordered input, previews, cached mesh rendering |
 | [canvas_selection.rs](../src/canvas_selection.rs) | Private `canvas::selection_ui` submodule via `#[path]`; `SelectionGesture` and additional `impl Canvas` methods for selection/clipboard/previews |
-| [selection.rs](../src/selection.rs) | UI-independent `Selection`, `SelectionCommand`, `Membership`, `LassoRegion`, `move_by`, `scale_about` |
+| [selection.rs](../src/selection.rs) | UI-independent `Selection`, `SelectionCommand`, `Membership`, `LassoRegion`, `rectangle_matches`, `move_by`, `scale_about` |
 | [object_clipboard.rs](../src/object_clipboard.rs) | `ObjectBundle`; capture, bounded validation/encode/decode, paste/duplicate with fresh IDs |
 | [smoothing.rs](../src/smoothing.rs) | Incremental `Preview::update`, `path`; local adaptive quadratic geometry/pressure |
 | [partial_erase.rs](../src/partial_erase.rs) | `Cuts`, `PartialCut`, `clip_segment`, `clip_tapered`, `path_pressures`, `fragments` |
@@ -334,11 +334,28 @@ implementing a connector or dependency graph.
 `selection.rs` stores transient IDs, scoped surface and derived bounds; it is not
 saved content. `Canvas::pick` in `canvas_selection.rs` queries the hierarchy and
 checks cached pressure envelopes, taking the highest vector index. Selection
-click tolerance is 4 logical screen points converted by zoom; Shift toggles and
+click tolerance is 4 logical screen points converted by zoom; Shift adds and
 Alt subtracts. Lasso uses a closed even-odd polygon and requires full rounded
 pressure-envelope containment; boundary touch/crossings are excluded. Concave and
 self-crossing cases use segment/edge tests, not only bounds. The gesture caps at
 4096 vertices; overly complex/degenerate/cancelled gestures do not alter content.
+
+The top toolbar has one Selection button and a Rectangle/Lasso mode dropdown.
+`Canvas::selection_mode` is per-tab transient state, default Rectangle; returning
+to selection recalls it. Existing internal `Tool::Select`/`Tool::Lasso` values
+serve as mode dispatch, sharing click/move/resize/rotate handling. `Rectangle`
+gestures reuse `EraserIndex::query_rect` and cached transformed paths/pressure.
+`rectangle_matches` tests complete envelope containment for nonnegative horizontal
+displacement, or tapered segment intersection with rectangle edges for negative
+displacement. Endpoint direction changes recompute the live candidate highlight;
+vertical direction is irrelevant. The candidate vector reuses capacity. Only
+pointer samples run exact tests; release commits membership without geometry
+mutation/history. Future content adapters must supply their own exact region
+geometry through this shared object-ID/selection pipeline, as for lasso.
+Modifiers are captured at pointer-down (Alt subtraction before Shift addition).
+Handles take priority, with Alt bypassing them; unmodified ink drag moves the
+selected group or selects/moves a new target in either mode. Empty clicks clear
+on release; lasso stays active after release. See UI_DESIGN for feedback tokens.
 
 Move/proportional corner-resize gestures preview cached geometry without changing
 committed objects on every pointer move. Release commits one `transform_objects`
@@ -393,7 +410,7 @@ selection are not persisted.
 | [ui/chrome.rs](../src/ui/chrome.rs) | Menu/status chrome, theme/Explorer controls, welcome state |
 | [ui/explorer.rs](../src/ui/explorer.rs) | Recursive real `Folder` tree projected into virtual Pages/Whiteboards, selected creation folder, file/error actions |
 | [ui/tabs.rs](../src/ui/tabs.rs) | Horizontally scrolling typed tabs, activation/close, dirty marker, tooltip and visibility state |
-| [ui/toolbar.rs](../src/ui/toolbar.rs) | Fixed top toolbar directly below tabs: Selection/Lasso/Hand, presets, preset editor, eraser, history, view/export overflow |
+| [ui/toolbar.rs](../src/ui/toolbar.rs) | Fixed top toolbar directly below tabs: Selection with Rectangle/Lasso dropdown, Hand, presets, preset editor, eraser, history, view/export overflow |
 | [ui/drawing_controls.rs](../src/ui/drawing_controls.rs) | Shared preset/style and eraser-radius widgets used by Settings and toolbar |
 | [ui/settings.rs](../src/ui/settings.rs) | Scrollable modal General/Appearance/Drawing/Input Devices sections |
 | [ui/selection_controls.rs](../src/ui/selection_controls.rs) | Shared menu state/actions and constrained contextual Duplicate/Delete/Shrink/Grow controls |

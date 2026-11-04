@@ -155,7 +155,7 @@ fn lasso_closes_selects_and_adds_subtracts_under_zoom() {
             assert_eq!(c.selection.ids, HashSet::from([a]));
             lasso(
                 &mut c,
-                &[[20., 90.], [100., 90.], [100., 130.], [20., 130.]],
+                &[[0., 85.], [110., 85.], [110., 135.], [0., 135.]],
                 egui::Modifiers::SHIFT,
             );
             assert_eq!(c.selection.ids, HashSet::from([a, b]));
@@ -166,7 +166,7 @@ fn lasso_closes_selects_and_adds_subtracts_under_zoom() {
             );
             assert_eq!(c.selection.ids, HashSet::from([b]));
             lasso(&mut c, &[[150., 40.], [151., 41.]], egui::Modifiers::NONE);
-            assert_eq!(c.selection.ids, HashSet::from([b]));
+            assert!(c.selection.ids.is_empty());
             assert_eq!(c.drawing.strokes().len(), 2);
         }
     }
@@ -985,4 +985,237 @@ fn selection_tool_handoff_preserves_pen_and_both_erasers() {
             assert_eq!(c.drawing.strokes()[0].id, id);
         }
     }
+}
+
+#[test]
+fn directional_rectangle_all_diagonals_modifiers_and_zoom() {
+    for kind in [DocumentKind::Page, DocumentKind::Whiteboard] {
+        for scale in [0.25, 1., 4.] {
+            for downward in [false, true] {
+                for crossing in [false, true] {
+                    let (mut c, s) = setup(kind);
+                    let ctx = egui::Context::default();
+                    let t = Transform {
+                        origin: [12., 8.],
+                        center: [5., 5.],
+                        scale,
+                    };
+                    let inside = stroke(&mut c, s, [60., 70.], [80., 70.]);
+                    let partial = stroke(&mut c, s, [90., 80.], [130., 80.]);
+                    let outside = stroke(&mut c, s, [170., 140.], [190., 140.]);
+                    c.select(Tool::Select);
+                    let start = [
+                        if crossing { 110. } else { 20. },
+                        if downward { 30. } else { 120. },
+                    ];
+                    let end = [
+                        if crossing { 20. } else { 110. },
+                        if downward { 120. } else { 30. },
+                    ];
+                    let drag = |c: &mut Canvas, modifiers| {
+                        // Isolate region input from the contextual action area left
+                        // at a previous selection position by the egui test harness.
+                        let ctx = egui::Context::default();
+                        frame(
+                            &ctx,
+                            c,
+                            s,
+                            t,
+                            vec![
+                                moved(t, start),
+                                pointer(screen(t, start), true, modifiers),
+                                moved(t, end),
+                            ],
+                            0.,
+                            true,
+                        );
+                        assert!(
+                            matches!(
+                                c.selection_gesture,
+                                Some(SelectionGesture::Rectangle { moved: true, .. })
+                            ),
+                            "kind={kind:?} scale={scale} down={downward} crossing={crossing} mods={modifiers:?}"
+                        );
+                        frame(
+                            &ctx,
+                            c,
+                            s,
+                            t,
+                            vec![pointer(screen(t, end), false, modifiers)],
+                            0.1,
+                            true,
+                        );
+                    };
+                    drag(&mut c, egui::Modifiers::NONE);
+                    let expected = if crossing {
+                        HashSet::from([inside, partial])
+                    } else {
+                        HashSet::from([inside])
+                    };
+                    assert_eq!(c.selection.ids, expected);
+                    click(&ctx, &mut c, s, t, [180., 140.], egui::Modifiers::NONE);
+                    drag(&mut c, egui::Modifiers::SHIFT);
+                    assert!(c.selection.ids.contains(&outside));
+                    assert!(expected.iter().all(|id| c.selection.ids.contains(id)));
+                    drag(&mut c, egui::Modifiers::ALT);
+                    assert_eq!(c.selection.ids, HashSet::from([outside]));
+                    assert_eq!(c.drawing.strokes().len(), 3);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn both_modes_click_add_is_idempotent_and_selected_drag_undoes() {
+    for tool in [Tool::Select, Tool::Lasso] {
+        let (mut c, s) = setup(DocumentKind::Whiteboard);
+        let ctx = egui::Context::default();
+        let a = stroke(&mut c, s, [50., 100.], [90., 100.]);
+        let b = stroke(&mut c, s, [150., 150.], [190., 150.]);
+        c.select(tool);
+        click(&ctx, &mut c, s, t(), [70., 100.], egui::Modifiers::NONE);
+        click(&ctx, &mut c, s, t(), [170., 150.], egui::Modifiers::SHIFT);
+        click(&ctx, &mut c, s, t(), [170., 150.], egui::Modifiers::SHIFT);
+        assert_eq!(c.selection.ids, HashSet::from([a, b]));
+        let original = c.drawing.strokes().to_vec();
+        frame(
+            &ctx,
+            &mut c,
+            s,
+            t(),
+            vec![
+                pointer([70., 100.], true, egui::Modifiers::NONE),
+                moved(t(), [80., 120.]),
+                pointer([80., 120.], false, egui::Modifiers::NONE),
+            ],
+            1.,
+            true,
+        );
+        assert_eq!(c.selection.ids, HashSet::from([a, b]));
+        let moved = c.drawing.strokes().to_vec();
+        assert_ne!(original, moved);
+        c.undo();
+        assert_eq!(c.drawing.strokes(), original);
+        c.redo();
+        assert_eq!(c.drawing.strokes(), moved);
+        assert!(c.tool == tool);
+    }
+}
+
+#[test]
+fn rectangle_direction_changes_and_escape_cancel_preview() {
+    let (mut c, s) = setup(DocumentKind::Whiteboard);
+    let ctx = egui::Context::default();
+    let id = stroke(&mut c, s, [80., 70.], [130., 70.]);
+    c.select(Tool::Select);
+    frame(
+        &ctx,
+        &mut c,
+        s,
+        t(),
+        vec![
+            pointer([110., 30.], true, egui::Modifiers::NONE),
+            moved(t(), [140., 100.]),
+            moved(t(), [20., 100.]),
+        ],
+        0.,
+        true,
+    );
+    match &c.selection_gesture {
+        Some(SelectionGesture::Rectangle { matches, .. }) => assert_eq!(matches, &vec![id]),
+        _ => panic!("rectangle preview"),
+    }
+    frame(
+        &ctx,
+        &mut c,
+        s,
+        t(),
+        vec![
+            Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+            pointer([20., 100.], false, egui::Modifiers::NONE),
+        ],
+        0.1,
+        true,
+    );
+    assert!(c.selection.ids.is_empty());
+    assert!(c.selection_gesture.is_none());
+}
+
+#[test]
+#[ignore = "manual release-mode rectangle benchmark"]
+fn indexed_rectangle_large_selection_performance() {
+    let (mut c, s) = setup(DocumentKind::Whiteboard);
+    for row in 0..40 {
+        for col in 0..50 {
+            let x = 10. + f64::from(col) * 10.;
+            let y = 10. + f64::from(row) * 10.;
+            stroke(&mut c, s, [x, y], [x + 4., y + 2.]);
+        }
+    }
+    c.select(Tool::Select);
+    c.selection_gesture = Some(SelectionGesture::Rectangle {
+        surface: s,
+        start: [0., 0.],
+        end: [0., 0.],
+        mode: crate::selection::Membership::Replace,
+        moved: false,
+        matches: Vec::new(),
+    });
+    c.selection_sample(s, [520., 420.], 1., false); // warm caches and index
+    let started = std::time::Instant::now();
+    for i in 0..100 {
+        c.selection_sample(s, [520. + f64::from(i % 2), 420.], 1., false);
+    }
+    eprintln!(
+        "2,000 strokes / 100 rectangle previews: {:?}",
+        started.elapsed()
+    );
+    c.commit_selection();
+    assert_eq!(c.selection.ids.len(), 2000);
+}
+
+#[test]
+fn rectangle_matches_rotated_geometry_and_vertical_containment() {
+    let (mut c, s) = setup(DocumentKind::Whiteboard);
+    let id = stroke(&mut c, s, [0., 0.], [40., 0.]);
+    assert!(c.drawing.transform_objects(
+        &HashSet::from([id]),
+        Placement {
+            origin: [0., 0.],
+            position: [50., 50.],
+            rotation: std::f64::consts::FRAC_PI_4,
+            scale: 1.
+        }
+    ));
+    let original = c.drawing.strokes()[0].clone();
+    c.selection_gesture = Some(SelectionGesture::Rectangle {
+        surface: s,
+        start: [40., 40.],
+        end: [40., 40.],
+        mode: crate::selection::Membership::Replace,
+        moved: false,
+        matches: Vec::new(),
+    });
+    c.selection_sample(s, [90., 90.], 1., false);
+    c.commit_selection();
+    assert_eq!(c.selection.ids, HashSet::from([id]));
+    c.selection_gesture = Some(SelectionGesture::Rectangle {
+        surface: s,
+        start: [60., 40.],
+        end: [60., 40.],
+        mode: crate::selection::Membership::Replace,
+        moved: false,
+        matches: Vec::new(),
+    });
+    c.selection_sample(s, [60., 90.], 1., false);
+    c.commit_selection();
+    assert!(c.selection.ids.is_empty());
+    assert_eq!(*c.drawing.strokes()[0], *original);
 }

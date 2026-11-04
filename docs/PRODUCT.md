@@ -146,10 +146,11 @@ introduced. Explorer, tabs, menu bar and Settings dialog remain.
 
 ## M1.4 universal selection and lasso
 
-The top toolbar now enables Selection and adjacent Lasso. Click topmost ink;
-Shift toggles, Alt subtracts, and Ctrl/Cmd+A selects all in the active page/canvas.
-Lasso requires the whole rounded pressure envelope to be enclosed and returns
-to Selection after closing. Selected ink moves by dragging and resizes with
+The top toolbar provides one Selection button with Rectangle/Lasso dropdown.
+Click topmost ink; Shift adds, Alt subtracts, and Ctrl/Cmd+A selects the scope.
+Rectangle is default: left-to-right contains the whole envelope, right-to-left
+crosses it. Lasso requires the whole rounded pressure envelope to be enclosed.
+The chosen mode remains active after closing. Selected ink moves by dragging and resizes with
 proportional corner handles. Duplicate/copy/paste/delete, undo/redo, Edit/context
 menus and nearby Duplicate/Delete/Smaller/Larger controls share the same commands.
 Transforms preserve raw samples and captured pen properties. Page ownership and

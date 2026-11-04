@@ -261,6 +261,7 @@ const MESH_SEGMENTS: usize = 128;
 pub struct Canvas {
     pub drawing: Drawing,
     pub tool: Tool,
+    pub selection_mode: Tool,
     pub pen_type: crate::pen::PenType,
     pub color: [u8; 4],
     pub width: f64,
@@ -297,6 +298,7 @@ impl Canvas {
         Self {
             drawing: Drawing::new(data),
             tool: Tool::Pen,
+            selection_mode: Tool::Select,
             pen_type: crate::pen::PenType::Pressure,
             color: [37, 99, 200, 255],
             width: 2.5,
@@ -396,6 +398,9 @@ impl Canvas {
     pub fn select(&mut self, tool: Tool) {
         self.finish();
         self.tool = tool;
+        if matches!(tool, Tool::Select | Tool::Lasso) {
+            self.selection_mode = tool;
+        }
         if !matches!(tool, Tool::Select | Tool::Lasso) {
             self.selection.clear();
         }

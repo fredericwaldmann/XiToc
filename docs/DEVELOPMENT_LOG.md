@@ -297,3 +297,25 @@ swallowing move/release. Verified rotation commit/undo/redo, duplicate, Cut/Past
 cross-document Page paste/Shift rotation/nudges, dark/narrow layout and fresh-load
 DOM guard assertions. Physical pen and interactive native manipulation remain
 unverified; see TEST_PLAN for exact observed scope.
+
+## M1.4 — Unified Selection tool (#34, 2026-11-04)
+
+Started from main `ac33eaa`; reviewed issue #34's complete body and empty comments.
+One top Selection button/dropdown now recalls Rectangle (default) or Lasso mode.
+Both modes share topmost clicks, idempotent Shift-add, Alt-remove and selected-group
+movement/handles. Rectangle endpoint direction chooses full envelope containment
+(solid blue) or crossing (dashed green), with indexed live candidate feedback.
+Lasso retains strict geometric containment and stays active after release.
+
+Verification: fmt, Clippy with denied warnings, 117 passing tests (seven ignored
+manual benchmarks), native release build/startup, WASM check and Trunk release.
+Controller coverage includes all diagonal directions, both document kinds,
+zoom/pan, modifiers, direction changes, cancellation, rotated geometry and history.
+Toolbar event tests verify dropdown choices and mode recall. Existing manipulation,
+clipboard, eraser and focus regressions pass. Release benchmark: 2,000 strokes,
+100 warmed rectangle samples in 27.56 ms on this host, excluding renderer costs.
+Runtime/browser observations and remaining platform checks are in TEST_PLAN.
+
+Firefox release-app smoke confirmed the one-button dropdown, drawing, live blue
+containment/green crossing feedback and retained lasso mode with handles. Captures
+are under `docs/screenshots/unified-selection/`; TEST_PLAN records actual scope.

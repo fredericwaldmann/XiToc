@@ -29,9 +29,17 @@ pub fn show(
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             if doc.external { ui.weak("Read-only PDF"); return; }
-            for (tool,icon,label) in [(Tool::Select,Icon::Select,"Selection · Shift-click to toggle"),(Tool::Lasso,Icon::Lasso,"Lasso · enclose complete strokes; Shift adds, Alt subtracts")] {
-                if icons::button(ui,icon,label,editor.canvas.tool==tool).clicked(){editor.canvas.select(tool);}
-            }
+            let selection = icons::button(ui, if editor.canvas.selection_mode == Tool::Lasso { Icon::Lasso } else { Icon::Select }, "Selection · Rectangle / Lasso · Shift adds, Alt removes", matches!(editor.canvas.tool, Tool::Select | Tool::Lasso));
+            if selection.clicked() { editor.canvas.select(editor.canvas.selection_mode); }
+            ui.menu_button("▾", |ui| {
+                for (tool,label) in [(Tool::Select,"Rectangle Selection"),(Tool::Lasso,"Lasso Selection")] {
+                    if ui.selectable_label(editor.canvas.selection_mode == tool,label).clicked() {
+                        editor.canvas.selection_mode = tool;
+                        editor.canvas.select(tool);
+                        ui.close();
+                    }
+                }
+            });
             if icons::button(ui, Icon::Hand, "Hand · Space-drag to pan", editor.canvas.tool == Tool::Pan).clicked() { editor.canvas.select(Tool::Pan); }
             let reserved = if width >= 1000.0 { 480.0 } else if width >= 800.0 { 380.0 } else if width >= 500.0 { 268.0 } else { 210.0 };
             let reserved=reserved+if width>=400.0{30.0}else{0.0};
@@ -194,6 +202,76 @@ fn menu(ui: &mut egui::Ui, label: &str, content: impl FnOnce(&mut egui::Ui)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unified_selection_dropdown_and_mode_recall() {
+        use crate::ui::settings::tests::pointer;
+        let data = crate::document::DocumentData::blank(DocumentKind::Whiteboard);
+        let doc = Document {
+            data: data.clone(),
+            location: crate::document::Location::new("test.pdf".into()),
+            external: false,
+        };
+        let mut editor = Editor::new(&data);
+        let mut prefs = crate::settings::DrawingPreferences::default();
+        let ctx = egui::Context::default();
+        fn find(shape: &egui::Shape, label: &str) -> Option<egui::Pos2> {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text() == label => {
+                    Some(t.pos + t.galley.size() * 0.5)
+                }
+                egui::Shape::Vec(v) => v.iter().find_map(|s| find(s, label)),
+                _ => None,
+            }
+        }
+        let mut render = |events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000., 600.),
+                    )),
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::Panel::top("tools").exact_size(40.).show(ui, |ui| {
+                        show(ui, Some((&doc, &mut editor)), &mut None, &mut prefs)
+                    });
+                },
+            );
+            output.textures_delta.clear();
+            output.shapes
+        };
+        render(vec![]);
+        let shapes = render(vec![]);
+        let arrow = shapes
+            .iter()
+            .find_map(|s| find(&s.shape, "▾"))
+            .expect("Selection dropdown arrow");
+        assert!(arrow.y < 40.);
+        render(pointer(arrow, true));
+        render(pointer(arrow, false));
+        let shapes = render(vec![]);
+        assert!(
+            shapes
+                .iter()
+                .any(|s| find(&s.shape, "Rectangle Selection").is_some())
+        );
+        let lasso = shapes
+            .iter()
+            .find_map(|s| find(&s.shape, "Lasso Selection"))
+            .expect("Lasso mode");
+        render(pointer(lasso, true));
+        render(pointer(lasso, false));
+        drop(render);
+        assert!(editor.canvas.tool == Tool::Lasso);
+        assert!(editor.canvas.selection_mode == Tool::Lasso);
+        editor.canvas.select(Tool::Pen);
+        editor.canvas.select(editor.canvas.selection_mode);
+        assert!(editor.canvas.tool == Tool::Lasso);
+    }
+
     #[test]
     fn new_preset_button_opens_editor_and_does_not_dismiss_itself() {
         use crate::ui::settings::tests::pointer;
