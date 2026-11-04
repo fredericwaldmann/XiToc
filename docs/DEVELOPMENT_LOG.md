@@ -319,3 +319,28 @@ Runtime/browser observations and remaining platform checks are in TEST_PLAN.
 Firefox release-app smoke confirmed the one-button dropdown, drawing, live blue
 containment/green crossing feedback and retained lasso mode with handles. Captures
 are under `docs/screenshots/unified-selection/`; TEST_PLAN records actual scope.
+
+
+## M1.4 — Horizontal/vertical object flipping (#33, 2026-11-04)
+
+Started from latest main `3963d64` (including unified Selection). Read issue #33's
+complete description/acceptance criteria and empty comments. Added positive-scale
+local-axis reflection flags to shared Placement, with handedness-aware composition
+and inversion. Flip commands use the same validated batch transform/history path,
+reflecting around collective selection bounds in document coordinates. Raw points,
+pressure, smoothing, styles, IDs and order remain unchanged. Existing rotation
+steps and both flips share Edit/context → Transform. Right-click works from all
+drawing tools, preserving selected groups or selecting an unselected target.
+Empty context clicks retain membership without editing content.
+
+Verification: formatting, Clippy with denied warnings, 124 passing tests (seven
+ignored manual benchmarks), native release build/startup, WASM check and Trunk
+release build. Tests cover both layouts/axes, groups/singletons, rotated/resized
+pressure ink, double flips, exact undo/redo, cache preservation, zoom independence,
+page-failure atomicity, far coordinates, clipboard/partial-erasure regression,
+all reflection composition parities, legacy snapshots and actual submenu routing.
+Firefox release-app pointer smoke verified the nested Transform menu, selected
+pair horizontal/vertical reflection, Undo/Redo and the existing eframe canvas
+browser-context-menu prevention. Captures are in `screenshots/object-flipping/`.
+No interactive Windows/macOS/physical-stylus or device-latency claims are made.
+Ink PDF persistence remains M2; future text/groups/connectors are policy only.

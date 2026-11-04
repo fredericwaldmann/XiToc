@@ -782,3 +782,51 @@ Screenshots: [dropdown](screenshots/unified-selection/dropdown.png),
 [lasso](screenshots/unified-selection/lasso.png). Desktop/browser modifier paths
 are covered by the shared ordered-event tests; this smoke did not interactively
 exercise every modifier, both themes or Windows/macOS window-manager bindings.
+
+
+## Object flipping (#33, 2026-11-04)
+
+Performed checks: `cargo fmt --all -- --check`, Clippy with `-D warnings`,
+124 passing tests (seven ignored manual benchmarks), native release build,
+WASM check and Trunk release build. The Linux native release launch stayed alive
+without errors until its deliberate eight-second timeout.
+
+New coverage in `flip_tests.rs`, `object.rs` and `ui/selection_controls.rs`:
+horizontal/vertical single/group flips on both layouts at 0.25×/1×/4× view scale;
+rotated/scaled smoothed pressure ink; unchanged IDs/raw samples/styles/widths,
+bounds and unselected Arc/cache reuse; exact one-step undo/redo and double-flip
+geometry; far-origin placement composition/inversion over every reflection parity;
+legacy/defaulted semantic snapshots; clipboard and subsequent move/resize/rotate,
+partial erasing; atomic Page rejection; right-click group/unselected/empty behavior
+from Rectangle/Lasso/Pen/Eraser/Hand and actual Transform submenu command routing.
+Existing drawing, selection, rotation/resize, clipboard and focus tests pass.
+
+Actual Firefox packaged-WASM smoke created a Whiteboard, drew asymmetric strokes,
+selected both, right-clicked one without losing the group, opened Transform and
+clicked Horizontal flip. Undo restored the original drawing; Redo restored its
+reflection; Vertical flip then reflected the group vertically. A DOM assertion
+confirmed eframe prevents default `contextmenu` on the canvas (the handler is
+canvas-scoped). Drawing-region pixel crops match exactly for before versus Undo
+and horizontal flip versus Redo. The five flip/menu tests also pass in release mode.
+Review screenshots: [before](screenshots/object-flipping/before.png),
+[Transform](screenshots/object-flipping/transform.png),
+[horizontal](screenshots/object-flipping/horizontal.png),
+[undo](screenshots/object-flipping/undo.png),
+[vertical after horizontal](screenshots/object-flipping/vertical.png).
+
+Manual review:
+1. Create Page/Whiteboard notes, draw asymmetric strokes and select one or several.
+2. Right-click a selected stroke (group stays), an unselected stroke (only it is
+   selected), then empty canvas (no content edits). Transform is disabled when
+   nothing editable is selected. Repeat from Pen/Eraser/Hand.
+3. Choose Transform → Flip Horizontally / Flip Vertically. Check mirroring around
+   the collective box center and unchanged pressure/color/width/smoothing.
+4. Rotate and resize ink first; repeat flips under zoom/pan. Flip twice on one
+   axis to restore geometry. Undo/redo each flip and verify selection/identity.
+5. Move/resize/rotate, copy/paste/duplicate/delete and erase after flipping.
+   Try Page edges: a flip that moves a centerline outside paper must fail intact.
+   Check light/dark and narrow windows; the top tools/tabs/Explorer stay in place.
+
+Interactive native gesture behavior, Windows/macOS, physical stylus and exhaustive
+browser theme/device-latency checks still require their devices. The native
+startup check is not an interactive native manipulation certification.

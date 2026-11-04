@@ -188,11 +188,12 @@ Subtracting centers in f64 before egui f32 conversion preserves local precision
 far from Whiteboard origin. This view transform is separate from object placement:
 
 ```text
-world = position + R(rotation) * scale * (local - origin)
+world = position + R(rotation) * scale * D(reflected) * (local - origin)
 ```
 
 `Placement` retains raw stroke coordinates and uses a positive uniform scale
-(1e-4–1e4) plus finite radians. `then` composes around a raw reference point;
+(1e-4–1e4), finite radians and two local-axis reflection flags.
+`D(reflected)` is diagonal: each reflected axis contributes −1, otherwise +1. `then` composes around a raw reference point;
 `inverse` maps partial-erase survivors back to local coordinates. Ink width scales
 with placement. `ObjectBounds::placed` encloses all four transformed corners.
 
@@ -371,6 +372,32 @@ unwraps full turns. Conservative centerline bounds keep Page rotations on the
 source page, retaining the last valid preview; Whiteboards are unrestricted.
 Edit/context menus also offer left/right 15-degree rotation for keyboard access.
 
+Horizontal/vertical flips use the same `Drawing::transform_objects` batch command.
+Their common pivot is the selection's document-space bounding-box center. A world
+reflection composes onto each object's placement, mirrors group positions and
+reverses previous rotation handedness for an odd reflection. It never negates
+width/scale or rewrites raw points. Inversion, bounds, hit tests, anchors,
+clipboard and local-space partial fragments all use the extended Placement.
+Old semantic snapshots default missing reflection flags to false; unreflected
+clipboard snapshots omit the optional field. Older apps reject reflected snapshots
+as an unknown field rather than silently dropping the reflection. PDF schema 1
+is unchanged; ink remains memory-only.
+
+The shared Edit/context menu groups existing rotation steps and new flips under
+Transform, disabled without selected editable objects. Canvas context registration
+also runs for Pen/Eraser/Hand: right-clicking ink activates the remembered selection
+mode, preserves selected groups or replaces membership for an unselected target.
+Right-clicking empty canvas preserves membership/content. eframe 0.37's canvas-only
+`contextmenu` handler prevents the browser default. No duplicate transform engine
+or new drawing toolbar is introduced. Flip failures leave history/content intact
+and report page/coordinate limits; only affected cached objects are invalidated.
+
+Future text follows geometric mirroring, including glyph appearance (no implicit
+readable-text counter-transform). Future groups must apply the world delta once
+to each descendant; connector endpoints retain object IDs/local anchors and derive
+world positions via Placement. Routing/free endpoints and relation-aware group
+journals need future adapters; no such object types are currently implemented.
+
 Handwriting always resizes proportionally, including off-axis drags and Shift;
 nominal width scales uniformly with the centerline, preserving pressure response.
 The longest ink extent cannot shrink below 1 logical point (already smaller ink
@@ -444,9 +471,9 @@ is included by the private selection adapter via `#[path]`; it is not a second
 editor implementation. Tests assert cache Arc reuse, index pruning, exact history,
 legacy decoding, clip geometry, ownership, layout/focus and discard behavior.
 
-The current source has 117 Rust tests: 111 normally run and six ignored
+The current source has 131 Rust tests: 124 normally run and seven ignored
 release benchmarks (whole erase, partial document, partial geometry, smoothing,
-indexed lasso, and multi-stroke rotation preview). Historical recorded results are in TEST_PLAN, not proof of hardware
+indexed lasso, rectangle selection, and multi-stroke rotation preview). Historical recorded results are in TEST_PLAN, not proof of hardware
 latency or a fresh run of every platform. [scripts/test_release.py](../scripts/test_release.py)
 adds Python unittest fixtures for archive completeness, corruption/path safety,
 CPU headers, executable bits, manifest/tag matching and Cargo metadata discovery.
@@ -457,6 +484,9 @@ Page versus Whiteboard boundaries and drawing-tool handoff.
 adapter, covers rotation, snapping, full turns/far coordinates, cache reuse,
 page/nudge policy, constrained off-axis handwriting resize, Cut/Paste failure and
 cross-document history/focus regressions, plus a release preview benchmark.
+[flip_tests.rs](../src/flip_tests.rs) adds reflection/history/property/clipboard/eraser
+and right-click regressions; `object.rs` covers reflected composition/inversion and
+legacy snapshots, and `ui/selection_controls.rs` verifies submenu routing.
 
 | Workflow | Trigger and checks |
 | --- | --- |

@@ -172,3 +172,13 @@ variants and duplicate IDs, validate transforms/resources/ownership, and write
 matching rotated visible graphics and edit snapshots in the same PDF. Canonical
 sequence is z-order; IDs and normalized anchors prepare future attached objects.
 This task changes neither schema 1 nor the PDF reader/writer or saving lifecycle.
+
+
+### Reflection preparation (#33)
+
+In-memory Placement has optional `reflected: [bool, bool]` local-axis flags,
+defaulting to false for old semantic snapshots. Positive width/scale and immutable
+raw ink/style remain. Reflected clipboard snapshots round-trip this field; they
+are transient interchange, not a note format. M2 must version and store reflection
+and emit matching mirrored PDF graphics, including future text's mirrored glyph
+policy. The current blank-only PDF schema/codec has not changed.
