@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.95"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 uuid = { version = "1", features = ["v4", "serde", "js"] }
 pdf-writer = "0.15"

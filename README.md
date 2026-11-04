@@ -118,8 +118,8 @@ labels to see full paths; the bottom **…** button opens the complete status me
 
 Whiteboards offer zoom, Reset view and an optional dot-grid toggle; camera/grid
 changes are session-only. Narrow toolbars put history/zoom controls in the View menu.
-Selection/Lasso, Hand, pen presets, both erasers and Undo/Redo work in the top bar. Pen settings edits the shared preset library; eraser settings adjusts the
-per-tab radius. Text/shapes remain planned; no document conversion is offered.
+Selection/Lasso, Hand, Shapes, pen presets, both erasers and Undo/Redo work in the top bar. Pen settings edits the shared preset library; eraser settings adjusts the
+per-tab radius. Text remains planned; no document conversion is offered.
 
 See [the design system](docs/UI_DESIGN.md) for palette, spacing, typography,
 component boundaries and interaction conventions. UI changes must follow it.
@@ -332,3 +332,12 @@ Right-click ink → **Transform → Flip Horizontally / Flip Vertically** mirror
 selection around its collective center. Right-click preserves a selected group
 or selects an unselected target. Each flip is one undo step; raw handwriting,
 styles and IDs remain unchanged. Ink still remains memory-only until M2.
+
+
+Shapes in the top toolbar opens an eight-form picker: rectangle, rounded rectangle,
+circle, ellipse, triangle, diamond, straight line and arrow. Drag to create; Shift
+constrains proportions/angles and Escape cancels. The new shape becomes selected.
+Use local corner handles to resize boxes or endpoint handles to edit lines/arrows;
+move/rotate/flip/copy/paste/delete and undo/redo share the ink object pipeline.
+Formatting controls, text inside shapes, magnetic connectors and PDF persistence
+remain future work. Shapes and handwriting are currently memory-only.

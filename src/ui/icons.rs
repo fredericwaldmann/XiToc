@@ -6,6 +6,7 @@ use egui::{Color32, Pos2, Rect, Stroke, StrokeKind, Vec2};
 #[derive(Clone, Copy)]
 pub enum Icon {
     Select,
+    Shapes,
     Lasso,
     Duplicate,
     Delete,
@@ -41,6 +42,7 @@ pub fn paint(painter: &egui::Painter, center: Pos2, icon: Icon, color: Color32) 
     let point = |x: f32, y: f32| center + egui::vec2(x, y);
     let line = |a, b| painter.line_segment([a, b], stroke);
     match icon {
+        Icon::Shapes => shape(painter, center, crate::shape::ShapeKind::Rectangle, color),
         Icon::Duplicate => {
             painter.rect_stroke(
                 rect.translate(egui::vec2(-2.0, -2.0)).shrink(2.0),
@@ -249,4 +251,52 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, label: &str, selected: bool) -> egu
         style::palette(ui).text,
     );
     response.on_hover_text(label)
+}
+
+/// Compact original vector glyphs, with the same vocabulary as semantic shapes.
+pub fn shape(painter: &egui::Painter, center: Pos2, kind: crate::shape::ShapeKind, color: Color32) {
+    use crate::shape::ShapeKind::*;
+    let stroke = Stroke::new(1.25, color);
+    let p = |x: f32, y: f32| center + Vec2::new(x, y);
+    match kind {
+        Circle => {
+            painter.circle_stroke(center, 6., stroke);
+        }
+        Ellipse => {
+            painter.add(egui::epaint::EllipseShape::stroke(
+                center,
+                Vec2::new(7., 5.),
+                stroke,
+            ));
+        }
+        Rectangle | RoundedRectangle => {
+            painter.rect_stroke(
+                Rect::from_center_size(center, Vec2::new(14., 12.)),
+                if kind == RoundedRectangle { 4. } else { 0. },
+                stroke,
+                StrokeKind::Inside,
+            );
+        }
+        Triangle => {
+            painter.add(egui::Shape::closed_line(
+                vec![p(0., -7.), p(7., 6.), p(-7., 6.)],
+                stroke,
+            ));
+        }
+        Diamond => {
+            painter.add(egui::Shape::closed_line(
+                vec![p(0., -7.), p(7., 0.), p(0., 7.), p(-7., 0.)],
+                stroke,
+            ));
+        }
+        Line | Arrow => {
+            painter.line_segment([p(-7., 5.), p(7., -5.)], stroke);
+            if kind == Arrow {
+                painter.add(egui::Shape::line(
+                    vec![p(1., -5.), p(7., -5.), p(5., 1.)],
+                    stroke,
+                ));
+            }
+        }
+    }
 }

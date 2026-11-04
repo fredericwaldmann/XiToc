@@ -397,3 +397,33 @@ clipboard content explicitly. No persisted PDF payload changes are introduced.
 Future text mirrors glyphs; groups transform descendants once; connector anchors
 retain local coordinates/stable target IDs and resolve through Placement. Future
 relation-aware journal/routing adapters must implement these policies explicitly.
+
+
+## 2026-11-04 — First-class shapes in the common store/journal (#24 creation slice)
+
+Extend ObjectSnapshot with Shape and use the tagged snapshots as Drawing's one
+canonical ordered sequence. Variants retain immutable Arc content. Existing ink
+code consumes a derived Arc-only stroke view, not an independent canonical store.
+A derived live-ID set validates uniqueness efficiently; append command/view paths
+remain incremental. This adapts ADR-011's second-type boundary without rewriting
+smoothing/erasing or adding per-type histories/order lists.
+
+Shape geometry stays typed: positive Box size/kind/radius or directed Segment
+endpoints/optional head. Shared Placement handles movement, proportional group
+resize, rotation/reflection. Single box/endpoint edits replace geometry in the same
+journal, preserving identity/style/ownership. Future style fields are captured now,
+with no formatting/text UI. Z-order is derived from the single ordered store.
+
+Tradeoffs: preserving the specialized ink view uses an extra vector of Arc
+references; non-append commits refresh that view and IDs. Shape contour/mesh
+adapters are independent of stored geometry and have bounded curve tessellation.
+Selection is sub-point contour geometry (0.025 pt), rather than analytic conic
+intersection; rendering targets physical-pixel tolerance and caches idle meshes.
+Group/ink resizing remains uniform; a singleton non-circle box can change local
+axes independently without inventing anisotropic handwriting transforms.
+
+#24's actual description also requires styling and embedded/shared text, beyond
+this user-authorized basic-creation slice. Reference it without closing it. Future
+styling can use ShapeStyle plus replace_shape; connector IDs/perimeter routing,
+text/font resources, grouping and PDF persistence still need explicit adapters.
+Current lines/arrows are freestanding. Existing reflection/text policy remains.

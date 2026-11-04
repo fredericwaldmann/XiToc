@@ -40,9 +40,26 @@ pub fn show(
                     }
                 }
             });
-            if icons::button(ui, Icon::Hand, "Hand · Space-drag to pan", editor.canvas.tool == Tool::Pan).clicked() { editor.canvas.select(Tool::Pan); }
+            if width>=400.0 && icons::button(ui, Icon::Hand, "Hand · Space-drag to pan", editor.canvas.tool == Tool::Pan).clicked() { editor.canvas.select(Tool::Pan); }
+            let shapes=icons::button(ui,Icon::Shapes,"Shapes · choose a vector shape, then drag",editor.canvas.tool==Tool::Shape);
+            if shapes.clicked(){editor.canvas.select(Tool::Shape);}
+            egui::Popup::from_toggle_button_response(&shapes).show(|ui| {
+                ui.strong("Shapes");
+                for row in crate::shape::ShapeKind::ALL.chunks(4) {
+                    ui.horizontal(|ui| {
+                        for &kind in row {
+                            let selected=editor.canvas.shape_kind==kind;
+                            let response=ui.add(egui::Button::new("").min_size(egui::vec2(style::SHAPE_PICKER_ICON,style::SHAPE_PICKER_ICON)).selected(selected));
+                            icons::shape(ui.painter(),response.rect.center(),kind,style::palette(ui).text);
+                            response.widget_info(||egui::WidgetInfo::selected(egui::Role::Button,ui.is_enabled(),selected,kind.label()));
+                            if response.on_hover_text(kind.label()).clicked(){editor.canvas.shape_kind=kind;editor.canvas.select(Tool::Shape);ui.close();}
+                        }
+                    });
+                }
+                ui.weak("Drag to create · Shift constrains · Escape cancels");
+            });
             let reserved = if width >= 1000.0 { 480.0 } else if width >= 800.0 { 380.0 } else if width >= 500.0 { 268.0 } else { 210.0 };
-            let reserved=reserved+if width>=400.0{30.0}else{0.0};
+            let reserved=reserved+30.0+if width>=400.0{30.0}else{0.0};
             let strip_width = (width - reserved).max(24.0);
             ui.allocate_ui(egui::vec2(strip_width, style::CONTROL), |ui| {
                 egui::ScrollArea::horizontal().id_salt("pen-presets").min_scrolled_width(24.0).auto_shrink([false, false])
@@ -101,7 +118,7 @@ pub fn show(
                 });
             if width >= 500.0 { history(ui, &mut editor.canvas); }
             if width >= 800.0 { view(ui, doc, editor); }
-            else { menu(ui, "View", |ui| { history(ui, &mut editor.canvas); view(ui, doc, editor); export(ui, action, editor.canvas.dirty()); }); }
+            else { menu(ui, "View", |ui| { if width<400.0 && icons::button(ui,Icon::Hand,"Hand · Space-drag to pan",editor.canvas.tool==Tool::Pan).clicked(){editor.canvas.select(Tool::Pan);} history(ui, &mut editor.canvas); view(ui, doc, editor); export(ui, action, editor.canvas.dirty()); }); }
             #[cfg(target_arch = "wasm32")]
             if width >= 1000.0 { export(ui, action, editor.canvas.dirty()); }
         });

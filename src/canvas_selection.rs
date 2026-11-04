@@ -8,6 +8,15 @@ use crate::{
 };
 
 pub(super) enum SelectionGesture {
+    ShapeEdit {
+        surface: Surface,
+        source: Arc<crate::shape::Shape>,
+        preview: crate::shape::Shape,
+        index: usize,
+        corner: bool,
+        start: Point,
+        moved: bool,
+    },
     Rectangle {
         surface: Surface,
         start: Point,
@@ -62,10 +71,9 @@ impl Canvas {
                 self.select(self.selection_mode);
                 let ids = self
                     .drawing
-                    .strokes()
-                    .iter()
-                    .filter(|s| s.surface == self.selection.surface)
-                    .map(|s| s.id)
+                    .objects()
+                    .filter(|s| s.surface() == self.selection.surface)
+                    .map(|s| s.object_id())
                     .collect::<Vec<_>>();
                 self.selection
                     .change(ids, Membership::Replace, &self.drawing);
@@ -221,31 +229,12 @@ impl Canvas {
         if self.selection.ids.is_empty() {
             return None;
         }
-        let selected = self
-            .drawing
-            .strokes()
-            .iter()
-            .filter(|s| self.selection.ids.contains(&s.id));
-        let mut count = 0;
-        let mut points = 0;
-        for s in selected {
-            count += 1;
-            points += s.points.len();
-            if count > crate::object_clipboard::MAX_OBJECTS
-                || points > crate::object_clipboard::MAX_POINTS
-            {
-                self.notice = Some(
-                    "Selection exceeds clipboard limit (512 objects / 200,000 points).".into(),
-                );
-                return None;
-            }
-        }
-        match ObjectBundle::capture(
+        match ObjectBundle::capture_objects(
             self.drawing
-                .strokes()
+                .items()
                 .iter()
-                .filter(|s| self.selection.ids.contains(&s.id))
-                .map(|s| (**s).clone()),
+                .filter(|o| self.selection.ids.contains(&o.id()))
+                .cloned(),
         ) {
             Ok(bundle) => Some(bundle),
             Err(e) => {
@@ -337,6 +326,7 @@ impl Canvas {
         if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             // Cancel first so a later pointer release cannot commit a preview.
             self.selection_gesture = None;
+            self.cancel_shape_draft();
             self.selection.clear();
         }
         if matches!(self.tool, Tool::Select | Tool::Lasso)
@@ -397,28 +387,34 @@ impl Canvas {
         }
     }
     fn pick(&mut self, surface: Surface, point: Point, tolerance: f64) -> Option<Uuid> {
-        self.eraser_index
-            .sync(self.drawing.revision(), self.drawing.strokes());
+        self.object_index
+            .sync_objects(self.drawing.revision(), self.drawing.items());
         let mut top = None;
-        self.eraser_index
+        self.object_index
             .query(surface, point, point, tolerance, |index| {
                 if top.is_some_and(|(old, _)| old > index) {
                     return;
                 }
-                let stroke = &self.drawing.strokes()[index];
-                let cache = self
-                    .cache
-                    .entry(stroke.id)
-                    .or_insert_with(|| Cached::new(stroke));
-                if pressure_hit(
-                    &cache.path,
-                    &cache.pressures,
-                    stroke,
-                    point,
-                    point,
-                    tolerance,
-                ) {
-                    top = Some((index, stroke.id));
+                let object = &self.drawing.items()[index];
+                let hit = match object {
+                    ObjectSnapshot::Stroke(stroke) => {
+                        let cache = self
+                            .cache
+                            .entry(stroke.id)
+                            .or_insert_with(|| Cached::new(stroke));
+                        pressure_hit(
+                            &cache.path,
+                            &cache.pressures,
+                            stroke,
+                            point,
+                            point,
+                            tolerance,
+                        )
+                    }
+                    ObjectSnapshot::Shape(shape) => shape.hit_test(point, tolerance),
+                };
+                if hit {
+                    top = Some((index, object.id()));
                 }
             });
         top.map(|(_, id)| id)
@@ -492,14 +488,13 @@ impl Canvas {
                 bounds
             };
             let mut limits = (0.0001_f64, 10000.0_f64);
-            for s in self
+            for object in self
                 .drawing
-                .strokes()
-                .iter()
-                .filter(|s| self.selection.ids.contains(&s.id))
+                .objects()
+                .filter(|o| self.selection.ids.contains(&o.object_id()))
             {
-                limits.0 = limits.0.max(1e-4 / s.placement.scale);
-                limits.1 = limits.1.min(1e4 / s.placement.scale);
+                limits.0 = limits.0.max(1e-4 / object.placement().scale);
+                limits.1 = limits.1.min(1e4 / object.placement().scale);
             }
             limits.0 = limits.0.max(minimum_factor);
             self.selection_gesture = Some(SelectionGesture::Transform {
@@ -516,6 +511,33 @@ impl Canvas {
     }
     fn selection_sample(&mut self, surface: Surface, point: Point, scale: f64, shift: bool) {
         match &mut self.selection_gesture {
+            Some(SelectionGesture::ShapeEdit {
+                surface: s,
+                source,
+                preview,
+                index,
+                corner,
+                start,
+                moved,
+            }) if *s == surface => {
+                if !*moved && (point[0] - start[0]).hypot(point[1] - start[1]) * scale < 3.0 {
+                    return;
+                }
+                *moved = true;
+                let shape = if *corner {
+                    source.with_corner(*index, point, shift)
+                } else {
+                    source.with_endpoint(*index, point, shift)
+                };
+                if let Some(shape) = shape
+                    && self
+                        .drawing
+                        .valid_object(&ObjectSnapshot::from(shape.clone()))
+                {
+                    *preview = shape;
+                }
+            }
+
             Some(SelectionGesture::Rectangle {
                 surface: s,
                 start,
@@ -529,24 +551,32 @@ impl Canvas {
                 if *moved {
                     matches.clear();
                     let bounds = ObjectBounds::from_points([*start, point]).unwrap();
-                    self.eraser_index
-                        .sync(self.drawing.revision(), self.drawing.strokes());
-                    self.eraser_index
+                    self.object_index
+                        .sync_objects(self.drawing.revision(), self.drawing.items());
+                    self.object_index
                         .query_rect(surface, bounds.min, bounds.max, |index| {
-                            let stroke = &self.drawing.strokes()[index];
-                            let cached = self
-                                .cache
-                                .entry(stroke.id)
-                                .or_insert_with(|| Cached::new(stroke));
-                            if selection::rectangle_matches(
-                                bounds,
-                                point[0] < start[0],
-                                &cached.path,
-                                &cached.pressures,
-                                stroke.visible_width(),
-                                stroke.pressure_style,
-                            ) {
-                                matches.push(stroke.id);
+                            let object = &self.drawing.items()[index];
+                            let hit = match object {
+                                ObjectSnapshot::Stroke(stroke) => {
+                                    let cached = self
+                                        .cache
+                                        .entry(stroke.id)
+                                        .or_insert_with(|| Cached::new(stroke));
+                                    selection::rectangle_matches(
+                                        bounds,
+                                        point[0] < start[0],
+                                        &cached.path,
+                                        &cached.pressures,
+                                        stroke.visible_width(),
+                                        stroke.pressure_style,
+                                    )
+                                }
+                                ObjectSnapshot::Shape(shape) => {
+                                    shape.rectangle_matches(bounds, point[0] < start[0])
+                                }
+                            };
+                            if hit {
+                                matches.push(object.id());
                             }
                         });
                 }
@@ -639,6 +669,14 @@ impl Canvas {
     }
     fn commit_selection(&mut self) {
         match self.selection_gesture.take() {
+            Some(SelectionGesture::ShapeEdit {
+                preview,
+                moved: true,
+                ..
+            }) => {
+                self.drawing.replace_shape(preview);
+                self.prune_cache();
+            }
             Some(SelectionGesture::Rectangle {
                 mode: Membership::Replace,
                 moved: false,
@@ -683,23 +721,29 @@ impl Canvas {
                     return;
                 };
                 let bounds = region.bounds;
-                self.eraser_index
-                    .sync(self.drawing.revision(), self.drawing.strokes());
+                self.object_index
+                    .sync_objects(self.drawing.revision(), self.drawing.items());
                 let mut selected = Vec::new();
-                self.eraser_index
+                self.object_index
                     .query_rect(surface, bounds.min, bounds.max, |index| {
-                        let stroke = &self.drawing.strokes()[index];
-                        let cached = self
-                            .cache
-                            .entry(stroke.id)
-                            .or_insert_with(|| Cached::new(stroke));
-                        if region.encloses(
-                            &cached.path,
-                            &cached.pressures,
-                            stroke.visible_width(),
-                            stroke.pressure_style,
-                        ) {
-                            selected.push(stroke.id);
+                        let object = &self.drawing.items()[index];
+                        let hit = match object {
+                            ObjectSnapshot::Stroke(stroke) => {
+                                let cached = self
+                                    .cache
+                                    .entry(stroke.id)
+                                    .or_insert_with(|| Cached::new(stroke));
+                                region.encloses(
+                                    &cached.path,
+                                    &cached.pressures,
+                                    stroke.visible_width(),
+                                    stroke.pressure_style,
+                                )
+                            }
+                            ObjectSnapshot::Shape(shape) => shape.lasso_matches(&region),
+                        };
+                        if hit {
+                            selected.push(object.id());
                         }
                     });
                 self.selection.change(selected, mode, &self.drawing);
@@ -763,6 +807,21 @@ impl Canvas {
                     self.selection.scope(surface);
                     self.selection_view =
                         Some((surface, transform, bounds.intersect(ui.clip_rect())));
+                    if !modifiers.alt
+                        && let Some((shape, index, corner)) =
+                            self.shape_handle(point, transform.scale)
+                    {
+                        self.selection_gesture = Some(SelectionGesture::ShapeEdit {
+                            surface,
+                            source: shape.clone(),
+                            preview: (*shape).clone(),
+                            index,
+                            corner,
+                            start: point,
+                            moved: false,
+                        });
+                        continue;
+                    }
                     if rotation {
                         self.start_rotation(surface, point);
                         continue;
@@ -836,6 +895,7 @@ impl Canvas {
                     let active = match &self.selection_gesture {
                         Some(
                             SelectionGesture::Lasso { surface: s, .. }
+                            | SelectionGesture::ShapeEdit { surface: s, .. }
                             | SelectionGesture::Rectangle { surface: s, .. }
                             | SelectionGesture::Transform { surface: s, .. }
                             | SelectionGesture::Rotate { surface: s, .. },
@@ -897,6 +957,15 @@ impl Canvas {
                         Line::new(1.5, color),
                         egui::StrokeKind::Outside,
                     );
+                } else if let Some(object) = self.drawing.object(*id)
+                    && let Some(b) = object.world_bounds()
+                {
+                    painter.rect_stroke(
+                        Rect::from_min_max(screen(b.min), screen(b.max)),
+                        1.0,
+                        Line::new(1.5, color),
+                        egui::StrokeKind::Outside,
+                    );
                 }
             }
             painter.rect_filled(rect, 0.0, color.gamma_multiply(0.10));
@@ -941,7 +1010,11 @@ impl Canvas {
                 egui::StrokeKind::Outside,
             );
         }
-        if let Some(group) = self.selection.bounds {
+        if let Some(group) = self
+            .shape_edit_preview()
+            .and_then(|s| s.world_bounds())
+            .or(self.selection.bounds)
+        {
             let group = Self::display_bounds(group, transform.scale);
             let corners = group.corners().map(|point| screen(delta.apply(point)));
             painter.add(egui::Shape::closed_line(
@@ -949,7 +1022,7 @@ impl Canvas {
                 Line::new(1.0, p.accent),
             ));
             if matches!(self.tool, Tool::Select | Tool::Lasso) {
-                for corner in corners {
+                for corner in corners.into_iter().filter(|_| !self.single_shape_handles()) {
                     painter.rect(
                         Rect::from_center_size(corner, egui::Vec2::splat(style::SELECTION_HANDLE)),
                         1.0,
@@ -973,6 +1046,7 @@ impl Canvas {
                 }
             }
         }
+        self.paint_shape_handles(&painter, transform, surface, p.accent);
         if let Some(pos) = ui.input(|i| i.pointer.hover_pos()).filter(|p| {
             bounds
                 .expand(style::ROTATION_OFFSET + style::SELECTION_HIT)
@@ -987,6 +1061,8 @@ impl Canvas {
                 Some(SelectionGesture::Rotate { .. })
             ) {
                 egui::CursorIcon::Grabbing
+            } else if self.shape_handle(point, transform.scale).is_some() {
+                egui::CursorIcon::Grab
             } else if let Some(index) = self.handle(point, transform.scale) {
                 if index % 2 == 0 {
                     egui::CursorIcon::ResizeNwSe
@@ -1125,3 +1201,7 @@ mod manipulation_tests;
 #[cfg(test)]
 #[path = "flip_tests.rs"]
 mod flip_tests;
+
+#[cfg(test)]
+#[path = "shape_tests.rs"]
+mod shape_tests;

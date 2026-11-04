@@ -97,17 +97,19 @@ fn rotate([x, y]: Point, angle: f64) -> Point {
 
 /// Only implemented content kinds belong here; unknown serde tags fail explicitly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[allow(dead_code)] // Domain dispatch tag, currently only handwriting is implemented.
+#[allow(dead_code)] // Semantic dispatch tag; only implemented content variants belong here.
 pub enum ObjectType {
     Stroke,
+    Shape,
 }
 
 /// Tagged semantic object snapshot shared with bounded clipboard interchange.
 /// M2 must wrap this in a versioned document envelope before PDF persistence.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", deny_unknown_fields)]
 pub enum ObjectSnapshot {
-    Stroke(Stroke),
+    Stroke(std::sync::Arc<Stroke>),
+    Shape(std::sync::Arc<crate::shape::Shape>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -162,13 +164,13 @@ impl ObjectBounds {
     }
 }
 
-/// Future semantic content types implement this same protocol. Stroke storage is
-/// the first adapter; no dummy Shape/Text/Formula/Connector/Image variants exist.
+/// Stroke and Shape share this protocol; future content extends the same store.
+/// No dummy Text/Formula/Connector/Image variants exist.
 #[allow(dead_code)] // Shared domain API; some operations await future object tools.
 pub trait CanvasObject {
     fn object_id(&self) -> ObjectId;
     fn object_type(&self) -> ObjectType;
-    /// Exact stroke envelope test in document coordinates, tolerance in PDF points.
+    /// Geometry hit test in document coordinates, tolerance in PDF points.
     fn hit_test(&self, point: Point, tolerance: f64) -> bool;
     /// Resolve a normalized local-bounds anchor after placement. Future connectors
     /// store the target ID and normalized anchor, never a stale world position.
@@ -188,6 +190,9 @@ pub trait CanvasObject {
     fn surface(&self) -> Surface;
     fn placement(&self) -> Placement;
     fn local_bounds(&self) -> Option<ObjectBounds>;
+    fn geometry_bounds(&self) -> Option<ObjectBounds> {
+        self.world_bounds()
+    }
     fn world_bounds(&self) -> Option<ObjectBounds> {
         self.local_bounds().map(|b| b.placed(self.placement()))
     }
@@ -221,6 +226,9 @@ impl CanvasObject for Stroke {
     }
     fn placement(&self) -> Placement {
         self.placement
+    }
+    fn geometry_bounds(&self) -> Option<ObjectBounds> {
+        ObjectBounds::from_points(self.points.iter().map(|p| self.placement.apply(p.position)))
     }
     fn local_bounds(&self) -> Option<ObjectBounds> {
         ObjectBounds::from_points(self.points.iter().map(|p| p.position))
@@ -638,5 +646,62 @@ mod reflection_tests {
             )
             .is_err()
         );
+    }
+}
+
+impl From<Stroke> for ObjectSnapshot {
+    fn from(value: Stroke) -> Self {
+        Self::Stroke(std::sync::Arc::new(value))
+    }
+}
+impl From<crate::shape::Shape> for ObjectSnapshot {
+    fn from(value: crate::shape::Shape) -> Self {
+        Self::Shape(std::sync::Arc::new(value))
+    }
+}
+impl ObjectSnapshot {
+    pub fn as_object(&self) -> &dyn CanvasObject {
+        match self {
+            Self::Stroke(s) => s.as_ref(),
+            Self::Shape(s) => s.as_ref(),
+        }
+    }
+    pub fn id(&self) -> ObjectId {
+        match self {
+            Self::Stroke(s) => s.id,
+            Self::Shape(s) => s.id,
+        }
+    }
+    pub fn transformed(&self, delta: Placement) -> Self {
+        match self {
+            Self::Stroke(s) => {
+                let mut t = (**s).clone();
+                t.placement = s.placement.then(delta, s.points[0].position);
+                t.into()
+            }
+            Self::Shape(s) => {
+                let mut t = (**s).clone();
+                t.placement = s.placement.then(delta, [0.; 2]);
+                t.into()
+            }
+        }
+    }
+    pub fn relocated(&self, owner: Uuid, surface: crate::drawing::Surface) -> Self {
+        match self {
+            Self::Stroke(s) => {
+                let mut t = (**s).clone();
+                t.id = Uuid::new_v4();
+                t.document_id = owner;
+                t.surface = surface;
+                t.into()
+            }
+            Self::Shape(s) => {
+                let mut t = (**s).clone();
+                t.id = Uuid::new_v4();
+                t.document_id = owner;
+                t.surface = surface;
+                t.into()
+            }
+        }
     }
 }

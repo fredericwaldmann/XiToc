@@ -118,3 +118,12 @@ selected asymmetric pair; `transform.png` shows the nested menu and preserved gr
 `horizontal.png` reflects both positions/shapes, `undo.png` restores them, and
 `vertical.png` shows vertical reflection after horizontal/redo. BiDi mouse/keyboard
 input drove the app. TEST_PLAN records exact scope and platform limitations.
+
+
+## Basic shapes (#24 creation slice)
+
+`basic-shapes/` captures the release WASM app in Firefox using real BiDi pointer
+and keyboard input: four-column picker, all eight forms, arrow endpoint edit,
+rectangle corner edit, group duplication, dark appearance, narrow 480×360 picker
+and Page Note geometry. Captured styles are the semantic defaults; no formatting
+UI or text is implemented. See TEST_PLAN for performed checks and device limits.

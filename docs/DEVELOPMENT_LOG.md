@@ -344,3 +344,35 @@ pair horizontal/vertical reflection, Undo/Redo and the existing eframe canvas
 browser-context-menu prevention. Captures are in `screenshots/object-flipping/`.
 No interactive Windows/macOS/physical-stylus or device-latency claims are made.
 Ink PDF persistence remains M2; future text/groups/connectors are policy only.
+
+
+## M1.5 — Basic shapes, lines and arrows (creation slice of #24, 2026-11-04)
+
+Started from main `8da20d6`, including unified Selection and reflection transforms.
+There is no issue titled “Basic Shape Creation”; reviewed the corresponding #24
+“[M1.5] Shapes and Styling” complete body/criteria and empty comments. That issue
+also requires full styling and shared embedded text, excluded by this task, so
+this creation slice references #24 without closing it.
+
+Implemented all eight requested forms as typed Shape snapshots in the same ordered
+store and Replace/Erase journal as Stroke. Arc-only ink/live-ID views preserve
+existing renderer/eraser adapters without parallel canonical content. Creation,
+selection, mixed clipboard/order/history, local box/endpoint edits and shared
+move/proportional-group resize/rotate/reflection now dispatch both content types.
+The top picker uses original vector glyphs; Hand moves to View below 400 editor
+points. Shape styling data/defaults are captured, with no formatting/text UI.
+Freestanding arrows have no connector relationships. PDF persistence is unchanged.
+
+Verification: formatting, Clippy with warnings denied, 132 active tests pass,
+seven ignored release benchmarks all explicitly pass, native release build/startup,
+WASM check and Trunk release. New tests cover every shape/quadrant/layout/zoom,
+constraints/cancel, exact mixed history/order/clipboard, region geometry, local
+handles after rotation/reflection, and idle mesh reuse. Review also caught and
+fixed cached-preview cleanup after cancellation/degenerate release. Benchmarks
+and actual Firefox pointer observations are recorded in TEST_PLAN.
+
+Firefox packaged-WASM smoke verified all eight forms on a Whiteboard, endpoint
+and rectangle corner editing, Select All/Duplicate/Undo, dark appearance,
+480×360 top picker with Explorer visible and Page Note rectangle/arrow creation.
+Captures: `docs/screenshots/basic-shapes/`. Interactive native gestures,
+Windows/macOS hardware/stylus and universal device-latency claims remain unverified.

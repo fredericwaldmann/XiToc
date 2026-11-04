@@ -1,6 +1,6 @@
-//! In-memory editable ink and reversible commands. No UI, IO or PDF dependencies.
+//! In-memory editable objects and reversible commands. No UI, IO or PDF dependencies.
 use crate::document::{DocumentData, Layout};
-use crate::object::CanvasObject;
+use crate::object::{CanvasObject, ObjectSnapshot};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -186,17 +186,13 @@ impl Transform {
 // New object commands can extend this enum with their inverse state.
 #[derive(Debug)]
 enum Command {
-    Insert {
-        index: usize,
-        stroke: Arc<Stroke>,
-    },
-    Erase(Vec<(usize, Arc<Stroke>)>),
+    Erase(Vec<(usize, ObjectSnapshot)>),
     Replace {
-        before: Vec<(usize, Arc<Stroke>)>,
-        after: Vec<(usize, Arc<Stroke>)>,
+        before: Vec<(usize, ObjectSnapshot)>,
+        after: Vec<(usize, ObjectSnapshot)>,
     },
 }
-fn remove_at(strokes: &mut Vec<Arc<Stroke>>, removed: &[(usize, Arc<Stroke>)]) {
+fn remove_at(strokes: &mut Vec<ObjectSnapshot>, removed: &[(usize, ObjectSnapshot)]) {
     if removed.is_empty() {
         return;
     }
@@ -211,8 +207,17 @@ fn remove_at(strokes: &mut Vec<Arc<Stroke>>, removed: &[(usize, Arc<Stroke>)]) {
         keep
     });
 }
-fn insert_at(strokes: &mut Vec<Arc<Stroke>>, removed: &[(usize, Arc<Stroke>)]) {
+fn insert_at(strokes: &mut Vec<ObjectSnapshot>, removed: &[(usize, ObjectSnapshot)]) {
     if removed.is_empty() {
+        return;
+    }
+    // Creation/batch append is O(new objects), preserving the ink fast path.
+    if removed
+        .iter()
+        .enumerate()
+        .all(|(i, (index, _))| *index == strokes.len() + i)
+    {
+        strokes.extend(removed.iter().map(|(_, object)| object.clone()));
         return;
     }
     // Merge backwards in linear time instead of shifting the tail
@@ -231,9 +236,8 @@ fn insert_at(strokes: &mut Vec<Arc<Stroke>>, removed: &[(usize, Arc<Stroke>)]) {
     }
 }
 impl Command {
-    fn apply(&self, strokes: &mut Vec<Arc<Stroke>>) {
+    fn apply(&self, strokes: &mut Vec<ObjectSnapshot>) {
         match self {
-            Self::Insert { index, stroke } => strokes.insert(*index, stroke.clone()),
             Self::Erase(removed) => remove_at(strokes, removed),
             Self::Replace { before, after } => {
                 remove_at(strokes, before);
@@ -241,11 +245,8 @@ impl Command {
             }
         }
     }
-    fn revert(&self, strokes: &mut Vec<Arc<Stroke>>) {
+    fn revert(&self, strokes: &mut Vec<ObjectSnapshot>) {
         match self {
-            Self::Insert { index, .. } => {
-                strokes.remove(*index);
-            }
             Self::Erase(removed) => insert_at(strokes, removed),
             Self::Replace { before, after } => {
                 remove_at(strokes, after);
@@ -258,6 +259,9 @@ impl Command {
 pub struct Drawing {
     owner: Uuid,
     layout: Layout,
+    items: Vec<ObjectSnapshot>,
+    live_ids: std::collections::HashSet<Uuid>,
+    // Derived ink-only view: Arc references, never a second canonical store.
     strokes: Vec<Arc<Stroke>>,
     history: Vec<Command>,
     cursor: usize,
@@ -268,6 +272,8 @@ impl Drawing {
         Self {
             owner: data.id(),
             layout: data.layout().clone(),
+            items: Vec::new(),
+            live_ids: Default::default(),
             strokes: Vec::new(),
             history: Vec::new(),
             cursor: 0,
@@ -284,42 +290,55 @@ impl Drawing {
     pub fn strokes(&self) -> &[Arc<Stroke>] {
         &self.strokes
     }
-    /// Ordered object view, back to front. The stroke vector remains the single
-    /// canonical store until another content type is implemented.
-    #[allow(dead_code)] // Shared infrastructure; rendering retains its cached stroke adapter.
+    pub fn items(&self) -> &[ObjectSnapshot] {
+        &self.items
+    }
     pub fn objects(&self) -> impl DoubleEndedIterator<Item = &dyn CanvasObject> {
-        self.strokes.iter().map(|s| s.as_ref() as &dyn CanvasObject)
+        self.items.iter().map(ObjectSnapshot::as_object)
     }
-    #[allow(dead_code)] // Stable-ID relationships are exercised by domain tests, pending connectors.
     pub fn object(&self, id: crate::object::ObjectId) -> Option<&dyn CanvasObject> {
-        self.objects().find(|object| object.object_id() == id)
+        self.objects().find(|o| o.object_id() == id)
     }
-    /// Move one object to an absolute back-to-front slot in one undo transaction.
-    /// Only the affected interval is retained; no parallel z-index is stored.
-    #[allow(dead_code)] // Infrastructure for future Arrange commands; no new UI.
-    pub fn set_z_order(&mut self, id: crate::object::ObjectId, target: usize) -> bool {
-        let Some(source) = self.strokes.iter().position(|s| s.id == id) else {
+    fn refresh_ink_view(&mut self) {
+        self.live_ids = self.items.iter().map(ObjectSnapshot::id).collect();
+        self.strokes = self
+            .items
+            .iter()
+            .filter_map(|o| {
+                if let ObjectSnapshot::Stroke(s) = o {
+                    Some(s.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+    }
+    #[allow(dead_code)]
+    pub fn set_z_order(&mut self, id: Uuid, target: usize) -> bool {
+        let Some(source) = self.items.iter().position(|o| o.id() == id) else {
             return false;
         };
-        if target >= self.strokes.len() || source == target {
+        if target >= self.items.len() || source == target {
             return false;
         }
         let lo = source.min(target);
         let hi = source.max(target);
-        let before: Vec<_> = (lo..=hi).map(|i| (i, self.strokes[i].clone())).collect();
+        let before: Vec<_> = (lo..=hi).map(|i| (i, self.items[i].clone())).collect();
         let mut ordered: Vec<_> = before.iter().map(|(_, s)| s.clone()).collect();
         let moved = ordered.remove(source - lo);
         ordered.insert(target - lo, moved);
-        let after = ordered
-            .into_iter()
-            .enumerate()
-            .map(|(i, s)| (lo + i, s))
-            .collect();
-        self.execute(Command::Replace { before, after });
+        self.execute(Command::Replace {
+            before,
+            after: ordered
+                .into_iter()
+                .enumerate()
+                .map(|(i, s)| (lo + i, s))
+                .collect(),
+        });
         true
     }
     pub fn dirty(&self) -> bool {
-        !self.strokes.is_empty()
+        !self.items.is_empty()
     }
     pub fn can_undo(&self) -> bool {
         self.cursor > 0
@@ -366,32 +385,48 @@ impl Drawing {
                         .is_none_or(|p| p.is_finite() && (0.0..=1.0).contains(&p))
             })
     }
+    pub fn valid_object(&self, object: &ObjectSnapshot) -> bool {
+        match object {
+            ObjectSnapshot::Stroke(s) => self.valid_stroke(s),
+            ObjectSnapshot::Shape(s) => {
+                s.valid()
+                    && s.document_id == self.owner
+                    && s.geometry_bounds()
+                        .corners()
+                        .iter()
+                        .all(|p| self.contains(s.surface, *p))
+            }
+        }
+    }
     pub fn add(&mut self, stroke: Stroke) -> bool {
-        if !self.valid_stroke(&stroke) || self.strokes.iter().any(|s| s.id == stroke.id) {
+        self.add_snapshot(stroke.into())
+    }
+    pub fn add_shape(&mut self, shape: crate::shape::Shape) -> bool {
+        self.add_snapshot(shape.into())
+    }
+    fn add_snapshot(&mut self, object: ObjectSnapshot) -> bool {
+        if !self.valid_object(&object) || self.live_ids.contains(&object.id()) {
             return false;
         }
-        self.execute(Command::Insert {
-            index: self.strokes.len(),
-            stroke: Arc::new(stroke),
+        let index = self.items.len();
+        self.execute(Command::Replace {
+            before: Vec::new(),
+            after: vec![(index, object)],
         });
         true
     }
     pub fn erase(&mut self, ids: &std::collections::HashSet<Uuid>) {
-        if ids.is_empty() {
-            return;
-        }
         let removed: Vec<_> = self
-            .strokes
+            .items
             .iter()
             .enumerate()
-            .filter(|(_, stroke)| ids.contains(&stroke.id))
-            .map(|(index, stroke)| (index, stroke.clone()))
+            .filter(|(_, o)| ids.contains(&o.id()))
+            .map(|(i, o)| (i, o.clone()))
             .collect();
         if !removed.is_empty() {
             self.execute(Command::Erase(removed));
         }
     }
-    /// Replaces affected strokes in one journal entry, retaining stacking order.
     pub fn replace_partial(
         &mut self,
         mut replacements: std::collections::HashMap<Uuid, Vec<Stroke>>,
@@ -399,13 +434,16 @@ impl Drawing {
         if replacements.is_empty() {
             return false;
         }
-        let mut ids: std::collections::HashSet<_> = self.strokes.iter().map(|s| s.id).collect();
+        let mut ids = self.live_ids.clone();
         if replacements.keys().any(|id| !ids.contains(id)) {
             return false;
         }
-        for source in &self.strokes {
-            if let Some(pieces) = replacements.get(&source.id)
-                && pieces.iter().any(|s| {
+        for object in &self.items {
+            if let Some(pieces) = replacements.get(&object.id()) {
+                let ObjectSnapshot::Stroke(source) = object else {
+                    return false;
+                };
+                if pieces.iter().any(|s| {
                     !self.valid_stroke(s)
                         || s.surface != source.surface
                         || s.pen_type != source.pen_type
@@ -415,49 +453,48 @@ impl Drawing {
                         || s.pressure_style != source.pressure_style
                         || s.smoothing != Smoothing::PolylineV1
                         || !ids.insert(s.id)
-                })
-            {
-                return false;
+                }) {
+                    return false;
+                }
             }
         }
         let mut before = Vec::new();
         let mut after = Vec::new();
         let mut output = 0;
-        for (index, stroke) in self.strokes.iter().enumerate() {
-            if let Some(pieces) = replacements.remove(&stroke.id) {
-                before.push((index, stroke.clone()));
+        for (index, object) in self.items.iter().enumerate() {
+            if let Some(pieces) = replacements.remove(&object.id()) {
+                before.push((index, object.clone()));
                 for piece in pieces {
-                    after.push((output, Arc::new(piece)));
+                    after.push((output, piece.into()));
                     output += 1;
                 }
             } else {
                 output += 1;
             }
         }
-        if !before.is_empty() {
-            self.execute(Command::Replace { before, after });
-            true
-        } else {
-            false
-        }
+        self.execute(Command::Replace { before, after });
+        true
     }
-    /// Insert a batch in one transaction; vector sequence is canonical z-order.
+    #[cfg(test)]
     pub fn insert_objects(&mut self, objects: Vec<Stroke>) -> bool {
-        let mut ids: std::collections::HashSet<_> = self.strokes.iter().map(|s| s.id).collect();
+        self.insert_snapshots(objects.into_iter().map(Into::into).collect())
+    }
+    pub fn insert_snapshots(&mut self, objects: Vec<ObjectSnapshot>) -> bool {
+        let mut ids = self.live_ids.clone();
         if objects.is_empty()
             || objects
                 .iter()
-                .any(|s| !self.valid_stroke(s) || !ids.insert(s.id))
+                .any(|o| !self.valid_object(o) || !ids.insert(o.id()))
         {
             return false;
         }
-        let start = self.strokes.len();
+        let start = self.items.len();
         self.execute(Command::Replace {
             before: Vec::new(),
             after: objects
                 .into_iter()
                 .enumerate()
-                .map(|(i, s)| (start + i, Arc::new(s)))
+                .map(|(i, o)| (start + i, o))
                 .collect(),
         });
         true
@@ -473,18 +510,17 @@ impl Drawing {
         let mut before = Vec::new();
         let mut after = Vec::new();
         for (index, source) in self
-            .strokes
+            .items
             .iter()
             .enumerate()
-            .filter(|(_, s)| ids.contains(&s.id))
+            .filter(|(_, s)| ids.contains(&s.id()))
         {
-            let mut target = (**source).clone();
-            target.placement = source.placement.then(delta, source.points[0].position);
-            if !self.valid_stroke(&target) {
+            let target = source.transformed(delta);
+            if !self.valid_object(&target) {
                 return false;
             }
             before.push((index, source.clone()));
-            after.push((index, Arc::new(target)));
+            after.push((index, target));
         }
         if before.len() != ids.len() {
             return false;
@@ -492,9 +528,45 @@ impl Drawing {
         self.execute(Command::Replace { before, after });
         true
     }
+    pub fn replace_shape(&mut self, shape: crate::shape::Shape) -> bool {
+        let Some(index) = self.items.iter().position(|o| o.id() == shape.id) else {
+            return false;
+        };
+        let ObjectSnapshot::Shape(old) = &self.items[index] else {
+            return false;
+        };
+        if old.surface != shape.surface || old.document_id != shape.document_id || **old == shape {
+            return false;
+        }
+        let target = ObjectSnapshot::from(shape);
+        if !self.valid_object(&target) {
+            return false;
+        }
+        self.execute(Command::Replace {
+            before: vec![(index, self.items[index].clone())],
+            after: vec![(index, target)],
+        });
+        true
+    }
     fn execute(&mut self, command: Command) {
         self.history.truncate(self.cursor);
-        command.apply(&mut self.strokes);
+        let append = matches!(&command,Command::Replace {before,after} if before.is_empty()&&after.iter().enumerate().all(|(i,(index,_))|*index==self.items.len()+i));
+        command.apply(&mut self.items);
+        if append {
+            let Command::Replace { after, .. } = &command else {
+                unreachable!()
+            };
+            self.live_ids.extend(after.iter().map(|(_, o)| o.id()));
+            self.strokes.extend(after.iter().filter_map(|(_, o)| {
+                if let ObjectSnapshot::Stroke(s) = o {
+                    Some(s.clone())
+                } else {
+                    None
+                }
+            }));
+        } else {
+            self.refresh_ink_view();
+        }
         self.history.push(command);
         self.cursor += 1;
         self.revision += 1;
@@ -506,28 +578,29 @@ impl Drawing {
         self.cursor -= 1;
         self.revision += 1;
         let command = &self.history[self.cursor];
-        command.revert(&mut self.strokes);
-        match command {
-            Command::Insert { .. } => Vec::new(),
+        command.revert(&mut self.items);
+        let ids = match command {
             Command::Erase(objects)
             | Command::Replace {
                 before: objects, ..
-            } => objects.iter().map(|(_, s)| s.id).collect(),
-        }
+            } => objects.iter().map(|(_, s)| s.id()).collect(),
+        };
+        self.refresh_ink_view();
+        ids
     }
     pub fn redo(&mut self) -> Vec<Uuid> {
         if !self.can_redo() {
             return Vec::new();
         }
         let command = &self.history[self.cursor];
-        command.apply(&mut self.strokes);
+        command.apply(&mut self.items);
         let ids = match command {
-            Command::Insert { stroke, .. } => vec![stroke.id],
             Command::Erase(_) => Vec::new(),
-            Command::Replace { after, .. } => after.iter().map(|(_, s)| s.id).collect(),
+            Command::Replace { after, .. } => after.iter().map(|(_, s)| s.id()).collect(),
         };
         self.cursor += 1;
         self.revision += 1;
+        self.refresh_ink_view();
         ids
     }
 }

@@ -830,3 +830,69 @@ Manual review:
 Interactive native gesture behavior, Windows/macOS, physical stylus and exhaustive
 browser theme/device-latency checks still require their devices. The native
 startup check is not an interactive native manipulation certification.
+
+
+## Basic shapes (creation slice of #24, 2026-11-04)
+
+The actual repository issue is #24 “[M1.5] Shapes and Styling”, with no comments;
+no separate “Basic Shape Creation” issue exists. Its styling/embedded-text criteria
+remain open. This slice implements the user-requested eight-form geometry and
+shared editor integration, not those excluded features.
+
+Performed checks: formatting, Clippy `-D warnings`, 132 active tests passing
+(seven manual benchmarks ignored in the ordinary suite), native release build,
+WASM check, Trunk release and a timed Linux launch with no startup errors before
+its deliberate eight-second timeout. All seven ignored release benchmarks pass
+when explicitly run. Under concurrent build/benchmark load: 2,000-object rectangle
+100 previews 95.46 ms; 2,000-stroke rotation unchanged preview 2.67 ms / changed
+6.32 ms; 10,000-stroke warm sparse eraser 200 samples 10.25 µs. These CPU records
+are host-dependent observations, not frame/device guarantees or controlled
+before/after comparisons. Incremental common-store appends preserve the ink fast
+path; shape meshes reuse Arcs on idle frames.
+
+Automated shape fixtures (`shape.rs`, `shape_tests.rs`) cover all eight forms in
+all four drag quadrants, both layouts and 0.25×/1×/4× view scales; live uncommitted
+previews, creation/select/undo/redo; Shift proportions and line angles; click/zero
+size/Escape/focus/view/tool cancellation and preview-cache cleanup; semantic JSON
+validation/normalization; fill/no-fill, rounded/ellipse/triangle geometry and
+shaft/head hits; mixed topmost and directional/lasso membership; shared movement,
+resize/rotate/flip, duplicate/clipboard/Cut/Delete and exact mixed order/history;
+local box/endpoint edits after rotation/reflection under zoom and idle mesh reuse.
+Mouse comparisons account for the actual f32 screen coordinates entering egui.
+Existing ink, pressure, eraser, clipboard, reflection and focus regressions pass.
+
+Actual Firefox packaged-WASM pointer smoke:
+- Created all eight forms from the real four-column top picker on a Whiteboard.
+- Edited an arrow endpoint and independently resized a rectangle corner.
+- Selected all, duplicated the group, then Undo restored the original eight.
+- Inspected dark appearance and 480×360 layout with Explorer/tabs and the top
+  picker visible; Hand remains reachable through View/Space-drag at narrow widths.
+- Created a Page Note and inserted a rectangle and freestanding arrow on paper.
+- Captures: [picker](screenshots/basic-shapes/picker.png),
+  [eight forms](screenshots/basic-shapes/eight.png),
+  [endpoint](screenshots/basic-shapes/endpoint.png),
+  [corner resize](screenshots/basic-shapes/resized.png),
+  [duplicate](screenshots/basic-shapes/duplicate.png),
+  [dark](screenshots/basic-shapes/dark.png),
+  [narrow picker](screenshots/basic-shapes/narrow-picker.png),
+  [Page Note](screenshots/basic-shapes/page.png).
+
+Manual review:
+1. Create scratch notes of both kinds. Choose each Shapes glyph and drag in every
+   direction. Hold Shift for square/circle or 45° segments. Escape cancels;
+   clicks/degenerate drags must not create accidental objects.
+2. Click shapes/ink, Shift-add and Alt-remove. Test left-to-right containment,
+   right-to-left crossing and lasso, including no-fill interiors and diagonal
+   lines/arrowheads. Confirm mixed topmost order and Ctrl/Cmd+A.
+3. Move, rotate, flip and resize selected groups. For one box, drag its local
+   corners (Shift preserves aspect); Circle stays circular. For a line/arrow,
+   drag either endpoint (Shift snaps angle), including after rotation/reflection.
+4. Duplicate/copy/paste/Cut/Delete and undo/redo. Check ID/style/order preservation,
+   Page ownership/edges, pan/zoom/DPI and text-focus shortcut isolation.
+5. Inspect both themes, narrow View/Hand and picker keyboard focus. Closing dirty
+   shapes must use the same discard guards as ink. Do not expect PDF ink/shape
+   saving, embedded text, formatting controls or magnetic attachments.
+
+Interactive native manipulation, Windows/macOS/physical stylus, exhaustive
+browser keyboard/high-DPI devices and low-end latency still require those devices.
+Ink erasers intentionally remain ink-only; Delete/Cut removes semantic shapes.

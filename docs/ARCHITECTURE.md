@@ -505,3 +505,50 @@ connectors keep stable target IDs/local anchors resolved through reflected
 Placement, with relation-aware routing/free-endpoint updates in the same command.
 These are extension policies, not implemented content types. M2 must serialize
 reflection and matching conventional PDF transforms; blank schema 1 is unchanged.
+
+
+## M1.5 — Basic semantic shapes (creation slice of #24)
+
+The repository has no separate “Basic Shape Creation” issue. #24 combines shapes,
+styling and embedded text; this slice implements creation/manipulation only and
+does not close that broader issue. No shape formatting/text UI or persistence.
+
+Promote the existing tagged ObjectSnapshot to the canonical ordered store:
+`Vec<ObjectSnapshot>` holds Stroke(Arc<Stroke>) and Shape(Arc<Shape>). Replace/Erase
+journal entries retain affected mixed snapshots at canonical indices. There is
+one identity/order/history authority. Read-only ink and live-ID views are derived
+references/indexes, refreshed at commit/undo/redo; appends update incrementally.
+Ink smoothing/pressure/mesh/eraser algorithms are unchanged. Shared selection uses
+the same spatial-index implementation with exact per-variant narrow phases.
+
+Shape is semantic vector geometry with stable identity, document/surface,
+Placement, ShapeGeometry and ShapeStyle. Boxes retain positive local dimensions,
+kind and corner radius; segments retain directed editable endpoints and optional
+arrowhead dimensions. Position/rotation/reflection use Placement. Border color,
+positive width/pattern and independent optional fill/color/opacity prepare future
+styling controls. Z-order is the canonical vector position, not duplicated data.
+
+Rectangle, rounded rectangle, circle, ellipse, triangle, diamond, straight line
+and freestanding arrow use shared Canvas drag previews and commands. Boxes
+normalize all drag quadrants. Shift constrains proportions or 45° line angles;
+clicks/zero geometry create nothing. Release inserts/selects one object; Escape,
+focus/tool/view changes cancel. Singleton box handles edit intrinsic dimensions
+in local space (Circle/Shift preserve proportions); segment endpoint handles use
+placement inverse and keep the opposite endpoint fixed. Group/ink transforms
+reuse M1.4 proportional placement, rotation and reflection commands atomically.
+
+Rendering caches convex fills/border paths as meshes by content/view/DPI/preview.
+Adaptive contours target 0.15 physical-pixel chord error, capped at 2048 vertices
+per ellipse and 512 samples per rounded corner. Geometry selection uses tighter
+0.025-point contours; curve bounds are analytic and polygon/head bounds use their
+actual transformed vertices. Bounds only prune the exact narrow phase. Filled interiors
+participate in point/crossing tests; line/arrow shafts and heads remain precise
+vector hits. Lasso requires full contour envelopes and excludes lasso boundaries
+intruding into filled interiors. Dash/dot lengths derive from logical border width.
+Ink erasers intentionally ignore semantic shapes; selection deletes/cuts them.
+
+Future styling edits can replace Shape snapshots in the same journal. Future
+connectors must add stable endpoint relationships and a perimeter-anchor/routing
+adapter; current lines/arrows contain no attachment IDs or routing state. Groups,
+text, resources and PDF graphics/embedded-data round trips remain separate work.
+The defaulted positive-scale reflection contract and mirrored-text policy remain.

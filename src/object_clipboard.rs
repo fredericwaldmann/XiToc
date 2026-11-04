@@ -1,7 +1,7 @@
 //! Bounded transient object interchange, never a saved native note format.
 use crate::{
-    drawing::{Drawing, Stroke, Surface},
-    object::{CanvasObject, ObjectBounds, Placement, Point},
+    drawing::{Drawing, Surface},
+    object::{ObjectBounds, Placement, Point},
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -18,24 +18,49 @@ pub struct ObjectBundle {
     pub objects: Vec<ClipboardObject>,
 }
 impl ObjectBundle {
-    pub fn capture(strokes: impl Iterator<Item = Stroke>) -> Result<Self, String> {
+    #[cfg(test)]
+    pub fn capture(strokes: impl Iterator<Item = crate::drawing::Stroke>) -> Result<Self, String> {
         let bundle = Self {
             version: 1,
-            objects: strokes.map(ClipboardObject::Stroke).collect(),
+            objects: strokes.map(Into::into).collect(),
+        };
+        bundle.validate()?;
+        Ok(bundle)
+    }
+    pub fn capture_objects(objects: impl Iterator<Item = ClipboardObject>) -> Result<Self, String> {
+        let bundle = Self {
+            version: 1,
+            objects: objects.collect(),
         };
         bundle.validate()?;
         Ok(bundle)
     }
     fn validate(&self) -> Result<(), String> {
         if self.version != 1 || self.objects.is_empty() || self.objects.len() > MAX_OBJECTS {
-            return Err("Unsupported or oversized object clipboard.".into());
+            return Err("Unsupported object clipboard or exceeded object limit.".into());
         }
         let mut ids = std::collections::HashSet::new();
         let mut count = 0;
-        for ClipboardObject::Stroke(s) in &self.objects {
+        for object in &self.objects {
+            if !ids.insert(object.id()) {
+                return Err("Duplicate object clipboard ID.".into());
+            }
+            let s = match object {
+                ClipboardObject::Stroke(s) => s,
+                ClipboardObject::Shape(s) => {
+                    if !s.valid()
+                        || s.contours(0.05)
+                            .iter()
+                            .flatten()
+                            .any(|p| p.iter().any(|v| !v.is_finite() || v.abs() > 1e15))
+                    {
+                        return Err("Invalid shape clipboard.".into());
+                    }
+                    continue;
+                }
+            };
             count += s.points.len();
-            if !ids.insert(s.id)
-                || s.id.is_nil()
+            if s.id.is_nil()
                 || s.document_id.is_nil()
                 || s.points.is_empty()
                 || count > MAX_POINTS
@@ -85,7 +110,7 @@ impl ObjectBundle {
     pub fn bounds(&self) -> ObjectBounds {
         self.objects
             .iter()
-            .filter_map(|ClipboardObject::Stroke(s)| s.world_bounds())
+            .filter_map(|o| o.as_object().world_bounds())
             .reduce(ObjectBounds::union)
             .expect("validated objects")
     }
@@ -125,17 +150,10 @@ impl ObjectBundle {
         let objects: Vec<_> = self
             .objects
             .iter()
-            .map(|ClipboardObject::Stroke(s)| {
-                let mut target = s.clone();
-                target.id = Uuid::new_v4();
-                target.document_id = drawing.owner();
-                target.surface = surface;
-                target.placement = s.placement.then(delta, s.points[0].position);
-                target
-            })
+            .map(|s| s.transformed(delta).relocated(drawing.owner(), surface))
             .collect();
-        let ids = objects.iter().map(|s| s.id).collect();
-        if drawing.insert_objects(objects) {
+        let ids = objects.iter().map(ClipboardObject::id).collect();
+        if drawing.insert_snapshots(objects) {
             ids
         } else {
             Vec::new()
@@ -147,6 +165,7 @@ impl ObjectBundle {
 mod tests {
     use super::*;
     use crate::document::{DocumentData, DocumentKind};
+    use crate::drawing::Stroke;
     #[test]
     fn clipboard_rejects_unknown_malformed_oversized_and_nonfinite_objects() {
         let doc = DocumentData::blank(DocumentKind::Whiteboard);
