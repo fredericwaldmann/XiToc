@@ -896,3 +896,43 @@ Manual review:
 Interactive native manipulation, Windows/macOS/physical stylus, exhaustive
 browser keyboard/high-DPI devices and low-end latency still require those devices.
 Ink erasers intentionally remain ink-only; Delete/Cut removes semantic shapes.
+
+
+## Shapes dragging regression follow-up (2026-11-05)
+
+Three regressions were reproduced as failing tests before the fix: a rotated
+singleton body hit an invisible legacy group resize corner; off-center endpoint
+and corner grabs snapped to the pointer; changed movement previews replaced base
+shape mesh Arcs. The fix shares the ink graphics-layer movement preview, excludes
+hidden singleton resize targets and applies handle displacement to its original
+position. Semantic document snapshots remain unchanged until release.
+
+`shape_drag_tests.rs` covers all eight forms over 512 body-drag combinations:
+Page/Whiteboard, 50/100/200/400% zoom, pan, rotation and single/multiple selection.
+Pointer sequences include repeated positions, reversals, idle frames, exact layer
+tracking, preserved styles/dimensions/IDs, one-entry undo/redo, mixed ink/shapes,
+clicks, Escape, focus/tool handoff and net-zero movement. Handle-offset regressions
+cover box and endpoint editing at all four zoom levels.
+
+Passed: formatting check, Clippy all-targets with warnings denied, all-targets
+unit tests (138 passed, eight ignored), native release build, WASM cargo check and
+Trunk release build. Explicit release preview benchmarks both passed: existing
+2,000-stroke rotation (initial 27.509 ms, idle 3.103 ms, changed 5.099 ms) and
+1,000-ellipse movement (40 changed frames in 350.200 ms, all base meshes reused).
+These are CPU egui harness timings, not display latency or frame-rate guarantees.
+
+Actual Firefox packaged-WASM pointer smoke created and moved all eight forms,
+repeated/reversed drag positions, cancelled a drag and exercised undo/redo.
+Each shape's repeated-position screenshot crop was pixel-identical. This browser
+smoke used 100% zoom; the full zoom/pan matrix above is automated controller
+coverage. Native release launched without startup errors during an eight-second
+smoke check (timeout intentionally ended it). Interactive native dragging,
+Windows/macOS, hardware stylus and device-specific latency remain unverified.
+
+Manual: create each form, Select its body away from visible handles, then drag
+from an off-center point. Repeat near a rotated shape's bounding-box corners,
+with multiple shapes and ink selected, and at 50/100/200/400% after panning.
+Check no initial jump, stable size/angle, accurate reversals and immediate tracking.
+Drag visible corners/endpoints off-center to check resizing retains the grab
+offset. Click without moving, cancel with Escape, then complete a move and
+Undo/Redo; only the completed move should enter history.

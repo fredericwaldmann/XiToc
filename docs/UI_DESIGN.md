@@ -308,3 +308,11 @@ and corner click jitter below 3 screen points never commits a geometry edit.
 Each completed creation/edit is one undo step. Shape erasing uses selection
 Delete/Cut; ink erasers retain their existing behavior. No embedded text,
 formatting panel, magnetic attachments, connector routing or shape PDF saving.
+
+Shape body drags preserve the initial pointer offset and current multi-selection.
+Only visible local corners/endpoints resize a singleton shape; an invisible
+axis-aligned bounding-box corner is not an edit target. Grabbing a visible handle
+off-center retains that offset rather than snapping the handle to the pointer.
+Movement previews follow the pointer immediately from the original gesture
+snapshot, without changing intrinsic size or angle. Release commits one undo
+step; a click, Escape cancellation or return to the starting position commits none.

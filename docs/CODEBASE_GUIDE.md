@@ -354,7 +354,9 @@ and separate line shafts/arrowhead triangles. Curve bounds are analytic; polygon
 and arrowheads use their actual transformed vertices (circles retain tight bounds
 after rotation). Rendering caches tessellated Arc
 meshes by semantic shape, Placement preview, view and pixel density. Idle frames
-reuse meshes; curves target 0.15 physical-pixel chord tolerance, with bounded
+reuse meshes. Translation/proportional-scale previews share the ink graphics-layer
+transform and retain base shape meshes, including return-to-start frames; rotation
+and intrinsic edits retain the geometry preview path. Curves target 0.15 physical-pixel chord tolerance, with bounded
 segment counts. Region/hit adapters use 0.025-document-point contours. Filled
 interiors participate in picking/crossing; no-fill interiors do not. Lines/arrows
 use shaft/head geometry rather than their bounding rectangle. The existing index
@@ -366,6 +368,10 @@ normalizes boxes; release inserts/selects one semantic object. Clicks/degenerate
 boxes insert nothing. Escape/focus/view/tool changes cancel drafts. Shift constrains
 boxes/circles and segment angles to 45°; Circle stays circular. Selected singleton
 shapes expose local box corners or two endpoints, evaluated through placement.
+Only these visible local handles participate in singleton shape resizing; legacy
+axis-aligned group corners must not intercept body movement. Handle edits preserve
+the initial pointer-to-handle offset and derive targets from the immutable source
+plus the document-space pointer displacement, just like shared body movement.
 Box corner edits change intrinsic dimensions independently; Shift preserves aspect
 ratio. Circle and mixed-group/handwriting resize stay proportional. Endpoint edits
 preserve direction, arrowheads, ID and style; Shift snaps to 45° about the fixed
@@ -513,9 +519,9 @@ is included by the private selection adapter via `#[path]`; it is not a second
 editor implementation. Tests assert cache Arc reuse, index pruning, exact history,
 legacy decoding, clip geometry, ownership, layout/focus and discard behavior.
 
-The current source has 139 Rust tests: 132 normally run and seven ignored
+The current source has 146 Rust tests: 138 normally run and eight ignored
 release benchmarks (whole erase, partial document, partial geometry, smoothing,
-indexed lasso, rectangle selection, and multi-stroke rotation preview). Historical recorded results are in TEST_PLAN, not proof of hardware
+indexed lasso, rectangle selection, multi-stroke rotation preview, and multi-shape movement preview). Historical recorded results are in TEST_PLAN, not proof of hardware
 latency or a fresh run of every platform. [scripts/test_release.py](../scripts/test_release.py)
 adds Python unittest fixtures for archive completeness, corruption/path safety,
 CPU headers, executable bits, manifest/tag matching and Cargo metadata discovery.
@@ -594,3 +600,8 @@ python3 -m unittest discover -s scripts -p 'test_*.py'
 For this documentation audit, validation checks documentation links, recorded
 symbols/test inventory, source/history agreement and the documentation-only diff.
 Historical successful application checks above are not presented as fresh runs.
+
+[shape_drag_tests.rs](../src/shape_drag_tests.rs) exercises pointer sequences across
+all forms, document kinds, zoom/pan, rotation, mixed selection, cancellation and
+history, and asserts mesh reuse and graphics-layer pointer tracking. Its ignored
+release benchmark moves 1,000 ellipses without rebuilding their base meshes.

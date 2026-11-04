@@ -376,3 +376,27 @@ and rectangle corner editing, Select All/Duplicate/Undo, dark appearance,
 480×360 top picker with Explorer visible and Page Note rectangle/arrow creation.
 Captures: `docs/screenshots/basic-shapes/`. Interactive native gestures,
 Windows/macOS hardware/stylus and universal device-latency claims remain unverified.
+
+
+## 2026-11-05 — Shapes drag quality before merge
+
+Continued `feature/basic-shapes` without discarding original feature commits.
+Closed #37 unmerged as requested; the replacement PR will reference it. #24
+remains open because its broader styling/text acceptance criteria are not part
+of this creation milestone.
+
+Reproduced hidden axis-aligned singleton resize hit targets, off-center handle
+snapping and per-update shape tessellation as regression failures. Singleton
+shapes now use only their visible local handles; handle targets preserve the
+original grab offset. Shapes and handwriting share the cached graphics-layer
+movement/scale preview. Existing stable document-space pointer-start displacement
+and immutable source snapshots remain the movement basis; release commits once.
+No document/storage format or toolbar changes.
+
+Verification: 138 active tests pass (eight ignored benchmarks), formatting,
+Clippy, native release build/startup, WASM check and Trunk release pass. Both
+release preview benchmarks pass, including 1,000 ellipses retaining mesh Arcs over
+40 movement frames. Real Firefox WASM gestures covered all eight forms, reversal,
+cancellation and undo/redo; repeated-position captures matched exactly. Native
+interactive visual performance was not tested. See TEST_PLAN for matrix,
+measurements, manual checks and limits.

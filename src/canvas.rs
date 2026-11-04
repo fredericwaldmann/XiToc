@@ -820,14 +820,37 @@ impl Canvas {
                     let preview = endpoint_preview
                         .filter(|s| s.id == shape.id)
                         .unwrap_or(shape);
-                    shapes_ui::paint_shape(
-                        ui,
-                        &painter,
-                        transform,
-                        preview,
-                        delta,
-                        &mut self.shape_cache,
-                    );
+                    if delta.rotation == 0.0
+                        && delta.reflected == [false; 2]
+                        && selection_preview.is_some()
+                        && self.selection.ids.contains(&shape.id)
+                    {
+                        // Use the very same cached-mesh layer path as ink.
+                        let selected = selection_preview_painter(
+                            ui,
+                            &painter,
+                            transform,
+                            delta,
+                            self.drawing.owner(),
+                        );
+                        shapes_ui::paint_shape(
+                            ui,
+                            &selected,
+                            transform,
+                            preview,
+                            crate::object::Placement::default(),
+                            &mut self.shape_cache,
+                        );
+                    } else {
+                        shapes_ui::paint_shape(
+                            ui,
+                            &painter,
+                            transform,
+                            preview,
+                            delta,
+                            &mut self.shape_cache,
+                        );
+                    }
                     continue;
                 }
             };
@@ -877,23 +900,13 @@ impl Canvas {
                         cached.paint_rotation(ui, &painter, transform, stroke, delta);
                         continue;
                     }
-                    let origin = transform.to_screen(delta.origin);
-                    let position = transform.to_screen(delta.position);
-                    let layer_transform = egui::emath::TSTransform {
-                        scaling: delta.scale as f32,
-                        translation: egui::vec2(
-                            (position[0] - origin[0] * delta.scale) as f32,
-                            (position[1] - origin[1] * delta.scale) as f32,
-                        ),
-                    };
-                    ui.ctx().set_transform_layer(
-                        preview_layer_id(self.drawing.owner()),
-                        layer_transform,
+                    let selected_painter = selection_preview_painter(
+                        ui,
+                        &painter,
+                        transform,
+                        delta,
+                        self.drawing.owner(),
                     );
-                    let selected_painter = painter
-                        .clone()
-                        .with_layer_id(preview_layer_id(self.drawing.owner()))
-                        .with_clip_rect(layer_transform.inverse() * painter.clip_rect());
                     cached.paint(ui, &selected_painter, transform, stroke);
                 } else {
                     cached.paint(ui, &painter, transform, stroke);
@@ -930,6 +943,32 @@ impl Canvas {
             cached.paint(ui, &painter, transform, stroke);
         }
     }
+}
+
+/// Shared placement preview for ink and shapes. Only graphics use this layer;
+/// canvas input stays in the original document/view reference frame.
+fn selection_preview_painter(
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    view: Transform,
+    delta: crate::object::Placement,
+    owner: Uuid,
+) -> egui::Painter {
+    let origin = view.to_screen(delta.origin);
+    let position = view.to_screen(delta.position);
+    let transform = egui::emath::TSTransform {
+        scaling: delta.scale as f32,
+        translation: egui::vec2(
+            (position[0] - origin[0] * delta.scale) as f32,
+            (position[1] - origin[1] * delta.scale) as f32,
+        ),
+    };
+    let layer = preview_layer_id(owner);
+    ui.ctx().set_transform_layer(layer, transform);
+    painter
+        .clone()
+        .with_layer_id(layer)
+        .with_clip_rect(transform.inverse() * painter.clip_rect())
 }
 
 fn preview_layer_id(owner: Uuid) -> egui::LayerId {

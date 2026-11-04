@@ -430,7 +430,7 @@ impl Canvas {
         bounds
     }
     fn handle(&self, point: Point, scale: f64) -> Option<usize> {
-        if !matches!(self.tool, Tool::Select | Tool::Lasso) {
+        if !matches!(self.tool, Tool::Select | Tool::Lasso) || self.single_shape_handles() {
             return None;
         }
         Self::display_bounds(self.selection.bounds?, scale)
@@ -524,10 +524,18 @@ impl Canvas {
                     return;
                 }
                 *moved = true;
-                let shape = if *corner {
-                    source.with_corner(*index, point, shift)
+                // Keep the initial grab offset: the hit target is larger than
+                // the visible handle, and must not snap its center to the pointer.
+                let handle = if *corner {
+                    source.box_corners().unwrap()[*index]
                 } else {
-                    source.with_endpoint(*index, point, shift)
+                    source.endpoints().unwrap()[*index]
+                };
+                let target = std::array::from_fn(|i| handle[i] + (point[i] - start[i]));
+                let shape = if *corner {
+                    source.with_corner(*index, target, shift)
+                } else {
+                    source.with_endpoint(*index, target, shift)
                 };
                 if let Some(shape) = shape
                     && self
@@ -1205,3 +1213,7 @@ mod flip_tests;
 #[cfg(test)]
 #[path = "shape_tests.rs"]
 mod shape_tests;
+
+#[cfg(test)]
+#[path = "shape_drag_tests.rs"]
+mod shape_drag_tests;

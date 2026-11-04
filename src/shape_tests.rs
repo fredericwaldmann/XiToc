@@ -410,7 +410,11 @@ fn endpoint_and_box_handle_edits_are_one_transaction_after_rotation_and_flip() {
             if let Some(ends) = shape(&c).endpoints() {
                 near(
                     ends[1],
-                    view.to_document(screen(view, target).map(|v| f64::from(v as f32))),
+                    std::array::from_fn(|i| {
+                        handle[i]
+                            + view.to_document(screen(view, target).map(|v| f64::from(v as f32)))[i]
+                            - view.to_document(screen(view, handle).map(|v| f64::from(v as f32)))[i]
+                    }),
                 );
                 near(ends[0], source.endpoints().unwrap()[0]);
             }
