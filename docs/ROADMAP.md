@@ -218,3 +218,13 @@ duplicate/paste/delete and exact transactional undo. Handwriting remains uniform
 scale; off-axis resizing preserves its aspect ratio/pressure nib and a 1-point
 longest-extent minimum. Future nonuniform boxes require their own geometry policy.
 No future object creation, Arrange UI or PDF persistence is introduced.
+
+
+## M1.5 — Basic shape creation slice (#24)
+
+Implemented semantic rectangle/rounded rectangle/circle/ellipse/triangle/diamond/
+line/arrow, top picker, normalized drag preview, constraints/cancel, shared mixed
+store/selection/transforms/clipboard/history and local box/endpoint editing.
+Captured styling fields prepare future controls. #24 also requires formatting and
+embedded/shared text, so remains open; no separate “Basic Shape Creation” issue
+exists. Connectors, text and PDF persistence are not part of this slice.

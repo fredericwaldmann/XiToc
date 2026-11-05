@@ -12,7 +12,10 @@ use std::{
 use uuid::Uuid;
 #[path = "canvas_selection.rs"]
 mod selection_ui;
+use crate::object::{CanvasObject, ObjectSnapshot};
 use selection_ui::SelectionGesture;
+#[path = "canvas_shapes.rs"]
+mod shapes_ui;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
@@ -21,6 +24,7 @@ pub enum Tool {
     Pan,
     Select,
     Lasso,
+    Shape,
 }
 
 struct Erasing {
@@ -282,6 +286,10 @@ pub struct Canvas {
     gesture_transform: Option<Transform>,
     cache: HashMap<Uuid, Cached>,
     eraser_index: crate::eraser_index::EraserIndex,
+    object_index: crate::eraser_index::EraserIndex,
+    pub shape_kind: crate::shape::ShapeKind,
+    shape_draft: Option<shapes_ui::ShapeDraft>,
+    shape_cache: HashMap<Uuid, shapes_ui::ShapeCache>,
     frame: Option<u64>,
     processed: Vec<Surface>,
 }
@@ -327,12 +335,16 @@ impl Canvas {
             gesture_transform: None,
             cache: HashMap::new(),
             eraser_index: Default::default(),
+            object_index: Default::default(),
+            shape_kind: crate::shape::ShapeKind::Rectangle,
+            shape_draft: None,
+            shape_cache: HashMap::new(),
             frame: None,
             processed: Vec::new(),
         }
     }
     pub fn interacting(&self) -> bool {
-        self.gesture.is_some() || self.selection_gesture.is_some()
+        self.gesture.is_some() || self.selection_gesture.is_some() || self.shape_draft.is_some()
     }
     pub fn dirty(&self) -> bool {
         self.drawing.dirty()
@@ -340,6 +352,7 @@ impl Canvas {
     }
     pub fn finish(&mut self) {
         self.selection_gesture = None;
+        self.cancel_shape_draft();
         self.pending_paste = None;
         match self.gesture.take() {
             Some(Gesture::Pen(stroke)) => {
@@ -415,6 +428,15 @@ impl Canvas {
             .collect();
         self.cache
             .retain(|id, cached| live.get(id).is_some_and(|p| *p == cached.placement));
+        if !self.shape_cache.is_empty() {
+            let ids: HashSet<_> = self
+                .drawing
+                .items()
+                .iter()
+                .map(ObjectSnapshot::id)
+                .collect();
+            self.shape_cache.retain(|id, _| ids.contains(id));
+        }
         self.selection.refresh(&self.drawing);
     }
 
@@ -453,6 +475,12 @@ impl Canvas {
         }
     }
     pub fn end_frame(&mut self, ui: &egui::Ui) {
+        if !ui.input(|i| i.pointer.primary_down()) {
+            self.cancel_shape_draft();
+            // Explicit releases have already committed on the owning surface.
+            // A lost button state without a release safely cancels the preview.
+            self.selection_gesture = None;
+        }
         // A release can occur outside the canvas/window or on a hidden page.
         if !ui.input(|i| i.pointer.button_down(PointerButton::Primary)) && self.gesture.is_some() {
             self.finish();
@@ -474,6 +502,12 @@ impl Canvas {
             self.selection_view = Some((surface, transform, bounds.intersect(ui.clip_rect())));
         }
         self.selection_controls(ui, bounds, surface, transform);
+        if self.tool == Tool::Shape {
+            self.shape_surface(ui, bounds, surface, transform);
+            self.paint(ui, bounds, surface, transform);
+            self.paint_shape_draft(ui, bounds, surface, transform);
+            return;
+        }
         if matches!(self.tool, Tool::Select | Tool::Lasso) {
             self.selection_surface(ui, bounds, surface, transform);
             self.paint(ui, bounds, surface, transform);
@@ -768,16 +802,65 @@ impl Canvas {
             .painter()
             .with_clip_rect(bounds.intersect(ui.clip_rect()));
         let selection_preview = self.selection_preview(surface);
+        let preview_ids = match &self.selection_gesture {
+            Some(SelectionGesture::Transform { session, .. }) => &session.ids,
+            _ => &self.selection.ids,
+        };
+        let endpoint_preview = match &self.selection_gesture {
+            Some(SelectionGesture::ShapeEdit { preview, .. }) => Some(preview),
+            _ => None,
+        };
         let mut erasing = match &mut self.gesture {
             Some(Gesture::Eraser(e)) => Some(e),
             _ => None,
         };
-        for stroke in self
-            .drawing
-            .strokes()
-            .iter()
-            .filter(|s| s.surface == surface)
-        {
+        for object in self.drawing.items() {
+            if object.as_object().surface() != surface {
+                continue;
+            }
+            let stroke = match object {
+                ObjectSnapshot::Stroke(stroke) => stroke,
+                ObjectSnapshot::Shape(shape) => {
+                    let delta = selection_preview
+                        .filter(|_| preview_ids.contains(&shape.id))
+                        .unwrap_or_default();
+                    let preview = endpoint_preview
+                        .filter(|s| s.id == shape.id)
+                        .unwrap_or(shape);
+                    if delta.rotation == 0.0
+                        && delta.reflected == [false; 2]
+                        && selection_preview.is_some()
+                        && preview_ids.contains(&shape.id)
+                    {
+                        // Use the very same cached-mesh layer path as ink.
+                        let selected = selection_preview_painter(
+                            ui,
+                            &painter,
+                            transform,
+                            delta,
+                            self.drawing.owner(),
+                        );
+                        shapes_ui::paint_shape(
+                            ui,
+                            &selected,
+                            transform,
+                            preview,
+                            crate::object::Placement::default(),
+                            &mut self.shape_cache,
+                        );
+                    } else {
+                        shapes_ui::paint_shape(
+                            ui,
+                            &painter,
+                            transform,
+                            preview,
+                            delta,
+                            &mut self.shape_cache,
+                        );
+                    }
+                    continue;
+                }
+            };
             if erasing
                 .as_ref()
                 .is_some_and(|e| e.mode == EraserMode::Stroke && e.ids.contains(&stroke.id))
@@ -789,7 +872,7 @@ impl Canvas {
                 .entry(stroke.id)
                 .or_insert_with(|| Cached::new(stroke));
             let delta = selection_preview
-                .filter(|_| self.selection.ids.contains(&stroke.id))
+                .filter(|_| preview_ids.contains(&stroke.id))
                 .unwrap_or_default();
             let base_bounds = crate::object::ObjectBounds {
                 min: cached.bounds.0,
@@ -817,30 +900,19 @@ impl Canvas {
             {
                 cached.paint_partial(ui, &painter, transform, stroke, partial);
             } else {
-                if let Some(delta) =
-                    selection_preview.filter(|_| self.selection.ids.contains(&stroke.id))
+                if let Some(delta) = selection_preview.filter(|_| preview_ids.contains(&stroke.id))
                 {
                     if delta.rotation != 0.0 {
                         cached.paint_rotation(ui, &painter, transform, stroke, delta);
                         continue;
                     }
-                    let origin = transform.to_screen(delta.origin);
-                    let position = transform.to_screen(delta.position);
-                    let layer_transform = egui::emath::TSTransform {
-                        scaling: delta.scale as f32,
-                        translation: egui::vec2(
-                            (position[0] - origin[0] * delta.scale) as f32,
-                            (position[1] - origin[1] * delta.scale) as f32,
-                        ),
-                    };
-                    ui.ctx().set_transform_layer(
-                        preview_layer_id(self.drawing.owner()),
-                        layer_transform,
+                    let selected_painter = selection_preview_painter(
+                        ui,
+                        &painter,
+                        transform,
+                        delta,
+                        self.drawing.owner(),
                     );
-                    let selected_painter = painter
-                        .clone()
-                        .with_layer_id(preview_layer_id(self.drawing.owner()))
-                        .with_clip_rect(layer_transform.inverse() * painter.clip_rect());
                     cached.paint(ui, &selected_painter, transform, stroke);
                 } else {
                     cached.paint(ui, &painter, transform, stroke);
@@ -877,6 +949,34 @@ impl Canvas {
             cached.paint(ui, &painter, transform, stroke);
         }
     }
+}
+
+/// Shared placement preview for ink and shapes. Only graphics use this layer;
+/// canvas input stays in the original document/view reference frame.
+fn selection_preview_painter(
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    view: Transform,
+    delta: crate::object::Placement,
+    owner: Uuid,
+) -> egui::Painter {
+    let origin = view.to_screen(delta.origin);
+    let position = view.to_screen(delta.position);
+    let transform = egui::emath::TSTransform {
+        scaling: delta.scale as f32,
+        translation: egui::vec2(
+            (position[0] - origin[0] * delta.scale) as f32,
+            (position[1] - origin[1] * delta.scale) as f32,
+        ),
+    };
+    let layer = preview_layer_id(owner);
+    ui.ctx().set_transform_layer(layer, transform);
+    let mut selected = painter.clone().with_layer_id(layer);
+    // This rectangle is in the preview layer's coordinates. Intersecting it
+    // with the original screen-space clip would clip twice and progressively
+    // hide a moving selection (including entirely at large displacements).
+    selected.set_clip_rect(transform.inverse() * painter.clip_rect());
+    selected
 }
 
 fn preview_layer_id(owner: Uuid) -> egui::LayerId {

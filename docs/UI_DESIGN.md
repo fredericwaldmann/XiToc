@@ -58,7 +58,7 @@ Fixed 40-point top panel directly below the document tabs, with 8×6 padding and
 and 1.25-point strokes. Preset buttons are 40×26. No floating palette or shadow.
 Never overlay Explorer, tabs or canvas with the drawing toolbar.
 
-Order: Selection with mode dropdown, Hand, horizontal pen presets,
+Order: Selection with mode dropdown, Hand, Shapes, horizontal pen presets,
 New preset (+), Pen settings, Eraser, Undo/Redo, zoom. No unfinished pen types.
 One click selects a preset and Pen; its preview combines a nib icon with its actual
 color/opacity and a thickness stripe clamped to 1–8 screen points. Hover and
@@ -270,3 +270,61 @@ selection IDs. Bounds/handles refresh immediately. Page ownership stays fixed;
 if a centerline would leave the page, reject the operation and explain why.
 Stroke color, positive width/scale, smoothing and pressure are preserved. Text,
 when implemented, will mirror geometrically including its glyph appearance.
+
+
+## M1.5 basic Shapes picker and vector editing
+
+Shapes is a 26-point top-toolbar icon immediately after Hand, before pen presets.
+It opens a compact four-column/two-row picker with 30-point original vector glyph
+buttons: Rectangle, Rounded rectangle, Circle, Ellipse, Triangle, Diamond, Straight
+line, Arrow. Normal selected-button treatment marks the remembered shape; hover
+and accessibility names expose labels. Tokens: SHAPE_PICKER_ICON=30; existing
+Surface/Text/Accent/Selection colors apply. No bottom controls or tab/Explorer changes.
+At editor widths below 400, Hand moves into View (Space-drag remains available),
+leaving Shapes/Selection/presets/Eraser accessible in the top row.
+
+Choose a form, then drag at least 3 screen points. Preview uses its final vector
+appearance; release creates one selected shape and returns to the remembered
+Selection mode. Clicking without a drag creates nothing. Boxes normalize all
+quadrants. Shift makes boxes square/circular; Circle always stays circular.
+Shift snaps line/arrow direction to 45° increments. Escape, focus loss, camera or
+tool changes cancel without a document/history edit. Page previews retain the last
+valid candidate when the pointer would leave its source page.
+
+Defaults: blue border RGB(37,99,200), 2 document points, solid; closed shapes have
+fill RGB(90,150,220), opacity 35/255 (~14%). Fill None is semantically distinct
+from transparent fill. Rounded corners default to min(12 pt, 20% of shorter side).
+Arrowheads default to length 12 pt/width 10 pt, clamped for short segments. Widths
+scale with Placement; dash/dot spacing is proportional to logical width. These
+are captured semantic defaults, not new formatting controls.
+
+Click/add/subtract, directional rectangles, lasso, clipboard, move/rotate/flip and
+history work for mixed ink/shape selections. Singleton boxes show local corner
+handles, which also follow rotation/reflection; drag to resize axes independently,
+Shift to preserve aspect ratio. Circle and group resizing remain proportional.
+Singleton lines/arrows show their two endpoint handles: drag either to adjust
+length/direction, Shift to constrain angle, with the other endpoint fixed. Endpoint
+and corner click jitter below 3 screen points never commits a geometry edit.
+Each completed creation/edit is one undo step. Shape erasing uses selection
+Delete/Cut; ink erasers retain their existing behavior. No embedded text,
+formatting panel, magnetic attachments, connector routing or shape PDF saving.
+
+Shape body drags preserve the initial pointer offset and current multi-selection.
+Only visible local corners/endpoints resize a singleton shape; an invisible
+axis-aligned bounding-box corner is not an edit target. Grabbing a visible handle
+off-center retains that offset rather than snapping the handle to the pointer.
+Movement previews follow the pointer immediately from the original gesture
+snapshot, without changing intrinsic size or angle. Release commits one undo
+step; a click, Escape cancellation or return to the starting position commits none.
+
+
+A selected group is one persistent drag session, including fully offscreen
+members. Dragging from a visible portion of an oversized shape remains valid.
+Viewport edges clip graphics only: they neither clamp Whiteboard movement nor
+end the session. A held pointer may leave the canvas into another application
+panel and return without dropping the selection. Hover loss alone does not
+cancel; explicit release finishes, while contact cancellation or focus loss
+restores the original geometry without history. View/layout changes cancel safely
+rather than changing the drag reference frame; navigation remains blocked during
+Whiteboard drags. Actual Page Note bounds still constrain movement independently
+of the viewport. No smoothing, animation or auto-pan is added.

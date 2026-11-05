@@ -397,3 +397,55 @@ clipboard content explicitly. No persisted PDF payload changes are introduced.
 Future text mirrors glyphs; groups transform descendants once; connector anchors
 retain local coordinates/stable target IDs and resolve through Placement. Future
 relation-aware journal/routing adapters must implement these policies explicitly.
+
+
+## 2026-11-04 — First-class shapes in the common store/journal (#24 creation slice)
+
+Extend ObjectSnapshot with Shape and use the tagged snapshots as Drawing's one
+canonical ordered sequence. Variants retain immutable Arc content. Existing ink
+code consumes a derived Arc-only stroke view, not an independent canonical store.
+A derived live-ID set validates uniqueness efficiently; append command/view paths
+remain incremental. This adapts ADR-011's second-type boundary without rewriting
+smoothing/erasing or adding per-type histories/order lists.
+
+Shape geometry stays typed: positive Box size/kind/radius or directed Segment
+endpoints/optional head. Shared Placement handles movement, proportional group
+resize, rotation/reflection. Single box/endpoint edits replace geometry in the same
+journal, preserving identity/style/ownership. Future style fields are captured now,
+with no formatting/text UI. Z-order is derived from the single ordered store.
+
+Tradeoffs: preserving the specialized ink view uses an extra vector of Arc
+references; non-append commits refresh that view and IDs. Shape contour/mesh
+adapters are independent of stored geometry and have bounded curve tessellation.
+Selection is sub-point contour geometry (0.025 pt), rather than analytic conic
+intersection; rendering targets physical-pixel tolerance and caches idle meshes.
+Group/ink resizing remains uniform; a singleton non-circle box can change local
+axes independently without inventing anisotropic handwriting transforms.
+
+#24's actual description also requires styling and embedded/shared text, beyond
+this user-authorized basic-creation slice. Reference it without closing it. Future
+styling can use ShapeStyle plus replace_shape; connector IDs/perimeter routing,
+text/font resources, grouping and PDF persistence still need explicit adapters.
+Current lines/arrows are freestanding. Existing reflection/text policy remains.
+
+
+## 2026-11-05 — Drag ownership is independent of visibility
+
+The first Shapes dragging follow-up retained a latent ink preview bug:
+`Painter::with_clip_rect` intersects in the painter's current coordinate frame.
+Passing the inverse-transformed viewport therefore double-clipped moving objects.
+A regression proved that even a 50-point move reduced the global clip; larger
+jumps emptied it. Use `set_clip_rect` to replace it with the correct layer-space
+viewport. Both ink and shapes use this helper.
+
+A second failing sequence proved `PointerGone` discarded a held group session.
+eframe 0.37 sends it on canvas mouseleave while continuing document-wide mouse
+move/up delivery. Keep session ownership until release or genuine cancellation;
+forward explicit browser mouse pointercancel, without adding competing movement
+handlers or mouse capture. Preserve existing pen pointer capture.
+
+Transform sessions explicitly freeze membership, source snapshots, view/revision
+and original geometry. Cached mesh previews remain transient; there is no
+incremental geometry mutation, animation, auto-pan or PDF change. A view/content
+change cancels instead of silently rebasing. This keeps existing Page limits and
+undo semantics while allowing unrestricted Whiteboard viewport crossings.

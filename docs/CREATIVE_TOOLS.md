@@ -17,7 +17,7 @@ large-coordinate geometry and PDF semantic/viewer round-trip coverage.
 | Version the editable object model before M2 PDF persistence | M1 stroke model | Tagged Object enum; stable IDs, ordered objects, immutable page/canvas ownership, local f64 bounds and affine transform. Keep raw samples, smoothing algorithm/strength, explicit partial polylines and pressure response. Define validation, limits, unknown-variant errors and blank-schema migration. |
 | Object selection, lasso and movement (implemented M1.4) | Object model | Topmost envelope hit; Shift adds, Alt subtracts. Lasso requires full strict envelope containment, excluding touch/crossing. Selection/handles are transient; one drag commits one transform, Escape cancels, Space pans. Shared spatial broad phase; no flattening. |
 | Resize/rotate (implemented M1.4); Arrange UI planned | Selection + transforms | Screen-sized handles, opposite-anchor resizing, rotation handle with modifier snapping. One command per gesture; Bring Forward/Send Back change explicit object order. Preserve transforms in model/PDF; do not rebuild raw pen samples during pointer movement. |
-| Shape insertion with lines and arrows | Object model + selection | Shapes popover chooses rectangle/ellipse/line/arrow and style; drag previews, release inserts one semantic object, Escape cancels. Store geometry, fill/stroke, endpoint arrowheads and transform; selection edits later. |
+| Shape insertion with lines and arrows (basic creation implemented) | Object model + selection | Shapes popover chooses rectangle/ellipse/line/arrow and style; drag previews, release inserts one semantic object, Escape cancels. Store geometry, fill/stroke, endpoint arrowheads and transform; selection edits later. |
 | Text boxes and sticky notes | Object model + selection + font strategy | Text tool click inserts and focuses inline editing; sticky note inserts a colored semantic text container. Escape exits editing before tool changes. Store text, layout box, font/style and sticky background. Define portable font embedding/fallback and PDF text metrics before export; no OS-specific text in shared types. |
 | Local images as editable objects | Object model + selection + resize | Explicit local picker/drop, bounded decode and image-size limits; drag/place then resize. Store image bytes/resources inside the PDF, preserve crop/transform. No linked external files, uploads or remote image service. |
 | Attached connectors and arrows | Shapes + selection + stable IDs | Drag from object anchor to target; transient routing preview. Store endpoint object IDs/anchors or free world points and routing/style. Movement updates attachments; deletion policy detaches to last world point. Undo restores IDs and relations atomically. |
@@ -41,3 +41,10 @@ and last valid revision on failure. Native writes must be atomic; browser report
 success only after actual write/export semantics are met. No schema or codec
 changes are part of M1.3. Future object issues depend on matching serializer and
 viewer round trips before persisted features are enabled.
+
+
+Basic shape creation now ships as the creation slice of #24: typed vector Shape
+snapshots share the canonical store/journal and Placement with ink. Full styling
+UI and embedded/shared text in #24 remain future work. Freestanding line/arrow
+endpoints are direct coordinates; #25 must still add target IDs/perimeter anchors,
+attachment lifecycle and routing rather than treating arrows as connectors.

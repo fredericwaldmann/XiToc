@@ -40,7 +40,7 @@ A local-first note-taking editor with a VS Code-like explorer of actual director
 Implemented in memory: editable freehand vectors, pen presets, captured smoothing
 and optional pressure, whole/partial erasers, undo/redo, pan/zoom, selection/lasso,
 move/proportional resize/rotation, clipboard (including Cut), arrow nudges and
-tabs. Arrange remains an internal API without controls. Shape/text/image/formula/connector objects, zoom-to-content,
+tabs. Arrange remains an internal API without controls. Text/image/formula/connector objects, zoom-to-content,
 PDF background rendering, note autosave/recovery and explicit ink save remain
 planned. Application preference persistence does not save handwriting.
 
@@ -155,3 +155,13 @@ proportional corner handles. Duplicate/copy/paste/delete, undo/redo, Edit/contex
 menus and nearby Duplicate/Delete/Smaller/Larger controls share the same commands.
 Transforms preserve raw samples and captured pen properties. Page ownership and
 clipping remain explicit; no shape/text/formula/image creation or PDF saving.
+
+
+## M1.5 basic shape creation
+
+The top Shapes picker creates editable rectangles, rounded rectangles, circles,
+ellipses, triangles, diamonds, lines and freestanding arrows. Drag previews and
+one-command creation, local corner/endpoint editing, mixed selection, shared
+transforms/clipboard/history work on both layouts. Styling fields/defaults exist;
+formatting controls and embedded text remain future work under #24. Shapes, like
+ink, remain memory-only until M2; no magnetic relationships or PDF saving.

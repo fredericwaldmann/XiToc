@@ -182,3 +182,13 @@ raw ink/style remain. Reflected clipboard snapshots round-trip this field; they
 are transient interchange, not a note format. M2 must version and store reflection
 and emit matching mirrored PDF graphics, including future text's mirrored glyph
 policy. The current blank-only PDF schema/codec has not changed.
+
+
+## M1.5 shapes (M2 preparation only)
+
+Shared tagged semantic snapshots include Shape: stable identity/ownership,
+Placement, typed Box/Segment geometry and captured fill/border/head properties.
+Canonical object sequence supplies z-order; display contours/meshes/handles are
+transient. M2 must version/validate these variants and emit matching conventional
+vector paths, curves, arrowheads, dash patterns and opacity inside the same PDF.
+No changes to the blank schema/codec or saved-note lifecycle are introduced here.

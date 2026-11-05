@@ -11,6 +11,7 @@ mod pdf;
 mod pen;
 mod selection;
 mod settings;
+mod shape;
 mod smoothing;
 mod storage;
 mod ui;

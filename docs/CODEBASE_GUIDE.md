@@ -16,12 +16,13 @@ move/proportional resize, clipboard operations and undo/redo are implemented.
 Rotation has a live group handle and 15-degree Shift snapping; explicit z-order
 changes remain domain APIs without Arrange controls. Cut and arrow-key nudges are
 implemented alongside the existing clipboard and manipulation commands.
-Stroke is the only implemented canvas-object content type.
+Stroke and Shape are implemented canvas-object content types. Shapes include
+rectangle, rounded rectangle, circle, ellipse, triangle, diamond, line and arrow.
 
 The PDF codec creates and reopens **blank** native documents. It does not save or
 reload handwriting. Dirty drawing disables browser PDF export; Ctrl/Cmd+S explains
 the M2 limitation. Ordinary PDFs open as read-only with no PDF preview renderer.
-Shapes, connectors, text, sticky notes, formulas, images, multipage creation,
+Connectors, text, sticky notes, formulas, images, multipage creation,
 browser directory handles, ink autosave and crash recovery remain planned.
 
 ## Crate and module map
@@ -43,6 +44,8 @@ egui/eframe 0.37.0, and eframe's Glow rendering and persistence features.
 | [canvas.rs](../src/canvas.rs) | `Canvas`, `Tool`, `Gesture`, `Erasing`, `Cached`, `PartialPreview`, `RotationPreview`; ordered input, previews, cached mesh rendering |
 | [canvas_selection.rs](../src/canvas_selection.rs) | Private `canvas::selection_ui` submodule via `#[path]`; `SelectionGesture` and additional `impl Canvas` methods for selection/clipboard/previews |
 | [selection.rs](../src/selection.rs) | UI-independent `Selection`, `SelectionCommand`, `Membership`, `LassoRegion`, `rectangle_matches`, `move_by`, `scale_about` |
+| [shape.rs](../src/shape.rs) | UI-independent `Shape`, `ShapeGeometry`, `ShapeKind`, `ShapeStyle`, vector contours, hits/regions and local handle edits |
+| [canvas_shapes.rs](../src/canvas_shapes.rs) | Shared-controller shape draft input, endpoint/corner adapters and view-keyed mesh caching |
 | [object_clipboard.rs](../src/object_clipboard.rs) | `ObjectBundle`; capture, bounded validation/encode/decode, paste/duplicate with fresh IDs |
 | [smoothing.rs](../src/smoothing.rs) | Incremental `Preview::update`, `path`; local adaptive quadratic geometry/pressure |
 | [partial_erase.rs](../src/partial_erase.rs) | `Cuts`, `PartialCut`, `clip_segment`, `clip_tapered`, `path_pressures`, `fragments` |
@@ -324,13 +327,58 @@ consume the same document paths/caches through their own gesture handlers.
 
 `CanvasObject` provides identity, document/surface, local/world bounds, placement,
 object type, point hit testing and normalized local-bound anchors. `ObjectId` is a
-UUID alias, `ObjectType`/tagged `ObjectSnapshot` have only Stroke. There is no
-heterogeneous canonical object container yet: `Drawing` stores `Vec<Arc<Stroke>>`,
-which is also the sole back-to-front z-order. `objects()` is a trait-object view;
-`object(id)` currently performs linear lookup. `set_z_order` is an internal
-undoable API without Arrange controls. `anchor([u,v])` maps normalized local
-bounds through placement, preparing future ID-based connector attachments without
-implementing a connector or dependency graph.
+UUID alias. `ObjectType` and tagged `ObjectSnapshot` dispatch Stroke/Shape.
+`Drawing::items()` is the one canonical `Vec<ObjectSnapshot>` in back-to-front
+z-order, each variant holding an Arc to immutable content. The same Replace/Erase
+journal restores mixed order, IDs and data exactly. `Drawing::strokes()` is a
+read-only derived vector of the same stroke Arcs for the existing ink renderer,
+erasers and regression fixtures; it owns no independent order/history. A derived
+live-ID set validates identity efficiently. Append commands and the ink view have
+an incremental fast path; other committed edits refresh derived references.
+`objects()` is a trait-object view, `object(id)` currently performs linear lookup,
+and `set_z_order` changes the canonical sequence in one command. Normalized local
+anchors resolve through Placement, including rotation/reflection, without connector
+relationships/routing.
+
+`Shape` stores stable ID/document/surface, shared Placement, typed Box geometry
+(kind, positive dimensions, corner radius) or Segment geometry (local start/end,
+optional Arrowhead length/width). ShapeStyle captures optional fill RGB, independent
+fill opacity, border RGBA/width and Solid/Dashed/Dotted style. Position and rotation
+live in Placement; z-order lives only in the canonical sequence. No fake strokes,
+raster content, shape-only journal or connector targets are created. Serialization
+uses the shared tagged snapshot/clipboard; validation rejects unknown variants,
+invalid dimensions/styles/placements and page escape. M2 remains blank-only.
+
+Shape contours are derived f64 vectors: adaptive curves, convex fill boundaries,
+and separate line shafts/arrowhead triangles. Curve bounds are analytic; polygons
+and arrowheads use their actual transformed vertices (circles retain tight bounds
+after rotation). Rendering caches tessellated Arc
+meshes by semantic shape, Placement preview, view and pixel density. Idle frames
+reuse meshes. Translation/proportional-scale previews share the ink graphics-layer
+transform and retain base shape meshes, including return-to-start frames; rotation
+and intrinsic edits retain the geometry preview path. Curves target 0.15 physical-pixel chord tolerance, with bounded
+segment counts. Region/hit adapters use 0.025-document-point contours. Filled
+interiors participate in picking/crossing; no-fill interiors do not. Lines/arrows
+use shaft/head geometry rather than their bounding rectangle. The existing index
+implementation supplies both mixed-object broad phase and its specialized ink
+queries; exact variant adapters retain pressure-aware cached ink behavior.
+
+Shape drafts belong to Canvas input, not the document. A >=3-screen-point drag
+normalizes boxes; release inserts/selects one semantic object. Clicks/degenerate
+boxes insert nothing. Escape/focus/view/tool changes cancel drafts. Shift constrains
+boxes/circles and segment angles to 45°; Circle stays circular. Selected singleton
+shapes expose local box corners or two endpoints, evaluated through placement.
+Only these visible local handles participate in singleton shape resizing; legacy
+axis-aligned group corners must not intercept body movement. Handle edits preserve
+the initial pointer-to-handle offset and derive targets from the immutable source
+plus the document-space pointer displacement, just like shared body movement.
+Box corner edits change intrinsic dimensions independently; Shift preserves aspect
+ratio. Circle and mixed-group/handwriting resize stay proportional. Endpoint edits
+preserve direction, arrowheads, ID and style; Shift snaps to 45° about the fixed
+endpoint. Every completed shape edit uses `replace_shape` in the same journal.
+Page candidates keep source ownership and reject invalid geometry; previews retain
+the last valid page candidate. Shapes remain selectable/manipulable after any tool
+handoff. Ink erasers remain ink-only; shapes use selection Delete/Cut.
 
 `selection.rs` stores transient IDs, scoped surface and derived bounds; it is not
 saved content. `Canvas::pick` in `canvas_selection.rs` queries the hierarchy and
@@ -407,7 +455,7 @@ shared gesture/journal contract. Arrows nudge by 1 logical point, Shift-arrows b
 10; text/popover focus, other modifiers and active drags retain input priority.
 
 Copy/cut/duplicate/paste use the same `ObjectBundle` with tagged snapshots and version
-1. Validation caps payloads at 4 MiB, 512 objects and 200,000 raw points; it rejects
+1 with explicit Stroke/Shape tags (older clients reject Shape). Validation caps payloads at 4 MiB, 512 objects and 200,000 raw points; it rejects
 invalid geometry, duplicate IDs and unknown versions/variants. Paste remaps object,
 document and surface identities, preserving style/order and fitting the target
 page when needed. Clipboard data is transient interchange, not a native note file.
@@ -421,7 +469,7 @@ system clipboard durability, so the session fallback is the reliable app copy.
 Native Cut events and Ctrl/Cmd+X are deduplicated within a frame.
 
 `Drawing` owns an unbounded command vector, cursor and monotonically changing
-revision. Private `Command::{Insert, Erase, Replace}` retains affected Arc strokes
+revision. Private `Command::{Erase, Replace}` retains affected object snapshots/Arcs
 and indices. Replacement supports partial erasing, batch insertion and transforms;
 z-order replacement retains its affected interval. Undo/reapply use linear
 compaction/backward insertion to restore exact sequence. New commands truncate
@@ -437,7 +485,7 @@ selection are not persisted.
 | [ui/chrome.rs](../src/ui/chrome.rs) | Menu/status chrome, theme/Explorer controls, welcome state |
 | [ui/explorer.rs](../src/ui/explorer.rs) | Recursive real `Folder` tree projected into virtual Pages/Whiteboards, selected creation folder, file/error actions |
 | [ui/tabs.rs](../src/ui/tabs.rs) | Horizontally scrolling typed tabs, activation/close, dirty marker, tooltip and visibility state |
-| [ui/toolbar.rs](../src/ui/toolbar.rs) | Fixed top toolbar directly below tabs: Selection with Rectangle/Lasso dropdown, Hand, presets, preset editor, eraser, history, view/export overflow |
+| [ui/toolbar.rs](../src/ui/toolbar.rs) | Fixed top toolbar directly below tabs: Selection with Rectangle/Lasso dropdown, Hand, Shapes picker, presets, preset editor, eraser, history, view/export overflow |
 | [ui/drawing_controls.rs](../src/ui/drawing_controls.rs) | Shared preset/style and eraser-radius widgets used by Settings and toolbar |
 | [ui/settings.rs](../src/ui/settings.rs) | Scrollable modal General/Appearance/Drawing/Input Devices sections |
 | [ui/selection_controls.rs](../src/ui/selection_controls.rs) | Shared menu state/actions and constrained contextual Duplicate/Delete/Shrink/Grow controls |
@@ -471,9 +519,9 @@ is included by the private selection adapter via `#[path]`; it is not a second
 editor implementation. Tests assert cache Arc reuse, index pruning, exact history,
 legacy decoding, clip geometry, ownership, layout/focus and discard behavior.
 
-The current source has 131 Rust tests: 124 normally run and seven ignored
+The current source has 151 Rust tests: 143 normally run and eight ignored
 release benchmarks (whole erase, partial document, partial geometry, smoothing,
-indexed lasso, rectangle selection, and multi-stroke rotation preview). Historical recorded results are in TEST_PLAN, not proof of hardware
+indexed lasso, rectangle selection, multi-stroke rotation preview, and multi-shape movement preview). Historical recorded results are in TEST_PLAN, not proof of hardware
 latency or a fresh run of every platform. [scripts/test_release.py](../scripts/test_release.py)
 adds Python unittest fixtures for archive completeness, corruption/path safety,
 CPU headers, executable bits, manifest/tag matching and Cargo metadata discovery.
@@ -487,6 +535,9 @@ cross-document history/focus regressions, plus a release preview benchmark.
 [flip_tests.rs](../src/flip_tests.rs) adds reflection/history/property/clipboard/eraser
 and right-click regressions; `object.rs` covers reflected composition/inversion and
 legacy snapshots, and `ui/selection_controls.rs` verifies submenu routing.
+[shape_tests.rs](../src/shape_tests.rs) covers all forms through real controller input,
+mixed order/selection/history/clipboard, shape handles, cancellation and idle mesh
+reuse; `shape.rs` adds pure geometry/semantic validation fixtures.
 
 | Workflow | Trigger and checks |
 | --- | --- |
@@ -549,3 +600,36 @@ python3 -m unittest discover -s scripts -p 'test_*.py'
 For this documentation audit, validation checks documentation links, recorded
 symbols/test inventory, source/history agreement and the documentation-only diff.
 Historical successful application checks above are not presented as fresh runs.
+
+[shape_drag_tests.rs](../src/shape_drag_tests.rs) exercises pointer sequences across
+all forms, document kinds, zoom/pan, rotation, mixed selection, cancellation and
+history, and asserts mesh reuse and graphics-layer pointer tracking. Its ignored
+release benchmark moves 1,000 ellipses without rebuilding their base meshes.
+
+
+### Persistent selection drag and preview clipping
+
+`SelectionGesture::Transform` owns a `DragSession`: frozen IDs, Arc-backed source
+snapshots, view transform and document revision, alongside the original pointer,
+surface, bounds and current common Placement. Input never re-hit-tests a running
+session or restarts it on another press. Every update uses current document-space
+pointer minus original pointer, including coalesced/large jumps. Rendering and
+commit use the session's frozen IDs. A changed view/revision cancels safely;
+Whiteboard navigation is blocked during gestures. Canonical geometry changes only
+on one validated release transaction; source comparisons are linear at commit,
+not repeated for each pointer update.
+
+The cached ink/shape preview painter uses `set_clip_rect(inverse * viewport)`.
+`with_clip_rect` would intersect this layer-space rectangle with the original
+screen-space clip, making selections progressively disappear as they move.
+Culling is purely visual; offscreen members remain in the session. The renderer
+submits newly visible source meshes against the inverse viewport and egui applies
+the common graphics transform exactly once.
+
+`PointerGone` is hover loss, not a release. eframe 0.37 web already receives held
+mouse movement and pointer-up on document; no competing mouse capture/move handler
+is added. Explicit TouchCancel, WindowFocused(false), focus loss, Escape or a lost
+button state without release cancel previews; explicit release samples its final
+position and commits even when outside the canvas. The browser bridge forwards
+non-pen `pointercancel` through its existing cancellation queue because eframe
+has no mouse pointercancel listener. Pen capture/pressure behavior is unchanged.

@@ -15,7 +15,7 @@ impl MenuState {
             selected: !canvas.selection.ids.is_empty(),
             can_undo: canvas.drawing.can_undo(),
             can_redo: canvas.drawing.can_redo(),
-            has_objects: !canvas.drawing.strokes().is_empty(),
+            has_objects: !canvas.drawing.items().is_empty(),
         }
     }
 }

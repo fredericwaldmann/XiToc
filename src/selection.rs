@@ -1,7 +1,7 @@
 //! Transient object selection and pure lasso geometry. No egui or platform IO.
 use crate::{
     drawing::{Drawing, PressureStyle, Surface},
-    object::{CanvasObject, ObjectBounds, ObjectId, Placement, Point},
+    object::{ObjectBounds, ObjectId, Placement, Point},
 };
 use std::collections::HashSet;
 
@@ -96,22 +96,17 @@ impl Selection {
             return;
         }
         let mut live = HashSet::with_capacity(self.ids.len());
-        for stroke in drawing
-            .strokes()
-            .iter()
-            .filter(|s| s.surface() == self.surface && self.ids.contains(&s.object_id()))
+        for object in drawing
+            .objects()
+            .filter(|o| o.surface() == self.surface && self.ids.contains(&o.object_id()))
         {
-            live.insert(stroke.id);
-            if let Some(b) = stroke.world_bounds() {
-                self.objects.push((stroke.id, b));
+            let id = object.object_id();
+            live.insert(id);
+            if let Some(b) = object.world_bounds() {
+                self.objects.push((id, b));
                 self.bounds = Some(self.bounds.map_or(b, |old| old.union(b)));
             }
-            if let Some(b) = ObjectBounds::from_points(
-                stroke
-                    .points
-                    .iter()
-                    .map(|p| stroke.placement.apply(p.position)),
-            ) {
+            if let Some(b) = object.geometry_bounds() {
                 self.geometry = Some(self.geometry.map_or(b, |old| old.union(b)));
             }
         }
@@ -132,7 +127,7 @@ pub fn rectangle_matches(
     if path.is_empty() {
         return false;
     }
-    let radius = |i| width * 0.5 * pressure.factor(pressures[i]);
+    let radius = |i| width * 0.5 * pressure.factor(pressures.get(i).copied().flatten());
     if !crossing {
         return path.iter().enumerate().all(|(i, p)| {
             (0..2).all(|axis| {
@@ -209,6 +204,9 @@ impl LassoRegion {
             bounds,
         })
     }
+    pub fn boundary(&self) -> &[Point] {
+        &self.polygon
+    }
     /// Full rounded pressure envelope containment. Boundary contact is excluded.
     /// Segment/edge checks reject paths leaving/re-entering a concave polygon.
     pub fn encloses(
@@ -221,7 +219,7 @@ impl LassoRegion {
         if path.is_empty() || !self.bounds.contains(path[0]) || !inside(path[0], &self.polygon) {
             return false;
         }
-        let radius = |i| width * 0.5 * pressure.factor(pressures[i]);
+        let radius = |i| width * 0.5 * pressure.factor(pressures.get(i).copied().flatten());
         for i in 0..path.len().saturating_sub(1).max(1) {
             let next = (i + 1).min(path.len() - 1);
             let a = path[i];

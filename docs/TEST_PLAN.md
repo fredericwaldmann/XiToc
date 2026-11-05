@@ -830,3 +830,166 @@ Manual review:
 Interactive native gesture behavior, Windows/macOS, physical stylus and exhaustive
 browser theme/device-latency checks still require their devices. The native
 startup check is not an interactive native manipulation certification.
+
+
+## Basic shapes (creation slice of #24, 2026-11-04)
+
+The actual repository issue is #24 “[M1.5] Shapes and Styling”, with no comments;
+no separate “Basic Shape Creation” issue exists. Its styling/embedded-text criteria
+remain open. This slice implements the user-requested eight-form geometry and
+shared editor integration, not those excluded features.
+
+Performed checks: formatting, Clippy `-D warnings`, 132 active tests passing
+(seven manual benchmarks ignored in the ordinary suite), native release build,
+WASM check, Trunk release and a timed Linux launch with no startup errors before
+its deliberate eight-second timeout. All seven ignored release benchmarks pass
+when explicitly run. Under concurrent build/benchmark load: 2,000-object rectangle
+100 previews 95.46 ms; 2,000-stroke rotation unchanged preview 2.67 ms / changed
+6.32 ms; 10,000-stroke warm sparse eraser 200 samples 10.25 µs. These CPU records
+are host-dependent observations, not frame/device guarantees or controlled
+before/after comparisons. Incremental common-store appends preserve the ink fast
+path; shape meshes reuse Arcs on idle frames.
+
+Automated shape fixtures (`shape.rs`, `shape_tests.rs`) cover all eight forms in
+all four drag quadrants, both layouts and 0.25×/1×/4× view scales; live uncommitted
+previews, creation/select/undo/redo; Shift proportions and line angles; click/zero
+size/Escape/focus/view/tool cancellation and preview-cache cleanup; semantic JSON
+validation/normalization; fill/no-fill, rounded/ellipse/triangle geometry and
+shaft/head hits; mixed topmost and directional/lasso membership; shared movement,
+resize/rotate/flip, duplicate/clipboard/Cut/Delete and exact mixed order/history;
+local box/endpoint edits after rotation/reflection under zoom and idle mesh reuse.
+Mouse comparisons account for the actual f32 screen coordinates entering egui.
+Existing ink, pressure, eraser, clipboard, reflection and focus regressions pass.
+
+Actual Firefox packaged-WASM pointer smoke:
+- Created all eight forms from the real four-column top picker on a Whiteboard.
+- Edited an arrow endpoint and independently resized a rectangle corner.
+- Selected all, duplicated the group, then Undo restored the original eight.
+- Inspected dark appearance and 480×360 layout with Explorer/tabs and the top
+  picker visible; Hand remains reachable through View/Space-drag at narrow widths.
+- Created a Page Note and inserted a rectangle and freestanding arrow on paper.
+- Captures: [picker](screenshots/basic-shapes/picker.png),
+  [eight forms](screenshots/basic-shapes/eight.png),
+  [endpoint](screenshots/basic-shapes/endpoint.png),
+  [corner resize](screenshots/basic-shapes/resized.png),
+  [duplicate](screenshots/basic-shapes/duplicate.png),
+  [dark](screenshots/basic-shapes/dark.png),
+  [narrow picker](screenshots/basic-shapes/narrow-picker.png),
+  [Page Note](screenshots/basic-shapes/page.png).
+
+Manual review:
+1. Create scratch notes of both kinds. Choose each Shapes glyph and drag in every
+   direction. Hold Shift for square/circle or 45° segments. Escape cancels;
+   clicks/degenerate drags must not create accidental objects.
+2. Click shapes/ink, Shift-add and Alt-remove. Test left-to-right containment,
+   right-to-left crossing and lasso, including no-fill interiors and diagonal
+   lines/arrowheads. Confirm mixed topmost order and Ctrl/Cmd+A.
+3. Move, rotate, flip and resize selected groups. For one box, drag its local
+   corners (Shift preserves aspect); Circle stays circular. For a line/arrow,
+   drag either endpoint (Shift snaps angle), including after rotation/reflection.
+4. Duplicate/copy/paste/Cut/Delete and undo/redo. Check ID/style/order preservation,
+   Page ownership/edges, pan/zoom/DPI and text-focus shortcut isolation.
+5. Inspect both themes, narrow View/Hand and picker keyboard focus. Closing dirty
+   shapes must use the same discard guards as ink. Do not expect PDF ink/shape
+   saving, embedded text, formatting controls or magnetic attachments.
+
+Interactive native manipulation, Windows/macOS/physical stylus, exhaustive
+browser keyboard/high-DPI devices and low-end latency still require those devices.
+Ink erasers intentionally remain ink-only; Delete/Cut removes semantic shapes.
+
+
+## Shapes dragging regression follow-up (2026-11-05)
+
+Three regressions were reproduced as failing tests before the fix: a rotated
+singleton body hit an invisible legacy group resize corner; off-center endpoint
+and corner grabs snapped to the pointer; changed movement previews replaced base
+shape mesh Arcs. The fix shares the ink graphics-layer movement preview, excludes
+hidden singleton resize targets and applies handle displacement to its original
+position. Semantic document snapshots remain unchanged until release.
+
+`shape_drag_tests.rs` covers all eight forms over 512 body-drag combinations:
+Page/Whiteboard, 50/100/200/400% zoom, pan, rotation and single/multiple selection.
+Pointer sequences include repeated positions, reversals, idle frames, exact layer
+tracking, preserved styles/dimensions/IDs, one-entry undo/redo, mixed ink/shapes,
+clicks, Escape, focus/tool handoff and net-zero movement. Handle-offset regressions
+cover box and endpoint editing at all four zoom levels.
+
+Passed: formatting check, Clippy all-targets with warnings denied, all-targets
+unit tests (138 passed, eight ignored), native release build, WASM cargo check and
+Trunk release build. Explicit release preview benchmarks both passed: existing
+2,000-stroke rotation (initial 27.509 ms, idle 3.103 ms, changed 5.099 ms) and
+1,000-ellipse movement (40 changed frames in 350.200 ms, all base meshes reused).
+These are CPU egui harness timings, not display latency or frame-rate guarantees.
+
+Actual Firefox packaged-WASM pointer smoke created and moved all eight forms,
+repeated/reversed drag positions, cancelled a drag and exercised undo/redo.
+Each shape's repeated-position screenshot crop was pixel-identical. This browser
+smoke used 100% zoom; the full zoom/pan matrix above is automated controller
+coverage. Native release launched without startup errors during an eight-second
+smoke check (timeout intentionally ended it). Interactive native dragging,
+Windows/macOS, hardware stylus and device-specific latency remain unverified.
+
+Manual: create each form, Select its body away from visible handles, then drag
+from an off-center point. Repeat near a rotated shape's bounding-box corners,
+with multiple shapes and ink selected, and at 50/100/200/400% after panning.
+Check no initial jump, stable size/angle, accurate reversals and immediate tracking.
+Drag visible corners/endpoints off-center to check resizing retains the grab
+offset. Click without moving, cancel with Escape, then complete a move and
+Undo/Redo; only the completed move should enter history.
+
+
+## Persistent group dragging / viewport regression (2026-11-05)
+
+Supersedes the first Shapes drag follow-up's incomplete viewport coverage. Before
+production edits, two new tests failed: the preview's global clip shrank after a
+50-point translation, and PointerGone discarded a held two-object drag. These
+were visual clipping/reference-frame and lifecycle defects, not accumulated
+movement-delta errors. The corrected shared painter replaces its clip with the
+inverse viewport; the session retains frozen IDs/sources/view/revision and ignores
+hover loss while preserving explicit release/cancellation semantics.
+
+Five new tests cover global clip invariance, hover-loss continuation, actual mesh
+submission for a mostly offscreen oversized shape, group cancellation/view changes,
+and fast/coalesced pointer sequences over 50/100/200/400/800% zoom with and without
+pan. The fast test includes seven selected objects (including an initially
+invisible member), viewport-sized/oversized geometry, 50,000-point jumps taking
+all members offscreen, stationary frames, return, and hover loss coalesced with
+release. It verifies exact shared displacement, frozen snapshots, unchanged
+rotation/scale/IDs/membership, one transaction and exact undo/redo. Existing
+single/mixed/rotated shape, area selection, ink, eraser and history tests remain.
+
+Passed: cargo fmt, Clippy all-targets with warnings denied, all-target tests
+(143 passed, eight ignored), native release build, WASM cargo check and Trunk
+release. Both explicit release preview benchmarks pass: 1,000 ellipses / 40
+changed frames 343.947 ms total with all mesh Arcs reused; 2,000-stroke rotation
+initial/idle/changed frames 28.422/3.138/7.708 ms. CPU harness timings are not GPU
+latency or universal frame-rate promises.
+
+Actual packaged-WASM Firefox gestures selected five shapes, moved slowly then
+jumped hundreds of pixels per event, left the editor into the sidebar/top panel,
+returned, released and undid/redid. A six-object selection including a 720×470
+logical-point rectangle was tested at exactly 400% zoom (the enlarged rectangle
+exceeds the viewport in both axes, with most area offscreen). Repeat-position
+canvas crops matched pixel-for-pixel at 100% and 400%; undo matched the original
+canvas, redo matched all five object-body crops, and explicit mouse pointercancel
+restored the pre-drag canvas exactly. The browser cancellation test bypassed its
+asset cache to load the updated inline bridge. See screenshots/shape-dragging.
+
+Native release started without errors. Attempts to capture/control its desktop
+window failed: the application uses the available Wayland desktop, while X root
+capture returned X get_image error 8 and X window lookup found no XiToc window.
+Native interactive dragging, physical input latency and Windows/macOS remain
+unverified. Use the following manual protocol on a real desktop and browser:
+
+1. Create five forms and select all; drag one selected body slowly, then make
+   fast large jumps and reversals. Confirm fixed relative spacing and no scaling.
+2. Pan, repeat at 50/100/200/400%, and create a rectangle larger than the viewport.
+   At 400%, start from its visible portion, move until only a small part remains,
+   release, then drag again from that visible part. Keep invisible objects selected.
+3. While held, move the pointer into the sidebar/top panel and back; confirm the
+   session continues. Release outside the editor and Undo/Redo the whole move.
+4. Cancel a new move with Escape, genuine focus loss or browser pointercancel;
+   check no geometry/history change. Click without moving: no history entry.
+5. On Page Notes repeat after scrolling/zooming. Actual page edges constrain
+   geometry; the visible scroll viewport must only clip graphics. Navigation or
+   layout changes during a gesture safely cancel rather than rebase it.

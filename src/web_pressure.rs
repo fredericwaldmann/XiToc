@@ -1,4 +1,5 @@
-//! Browser pen-only bridge. Mouse/touch remain owned by eframe.
+//! Browser pen bridge and explicit contact cancellation. Mouse/touch motion
+//! and release remain owned by eframe.
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(inline_js = r#"
@@ -27,6 +28,15 @@ export function installPenBridge(wake) {
     for (const name of ['pointerdown','pointermove','pointerup','pointercancel']) {
         document.addEventListener(name, handle, {capture:true, passive:false});
     }
+    // eframe owns mouse/touch motion and release on document, but has no
+    // mouse pointercancel listener. Forward explicit cancellation without
+    // synthesizing movement/release or competing for pointer ownership.
+    document.addEventListener('pointercancel', (event) => {
+        if (event.pointerType !== 'pen' && event.isPrimary) {
+            queue.push([3,0,0,0]);
+            wake();
+        }
+    }, {capture:true});
     window.addEventListener('blur', () => {
         if (active !== null) { queue.push([3,0,0,0]); active = null; wake(); }
     });

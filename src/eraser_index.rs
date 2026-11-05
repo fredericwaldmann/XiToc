@@ -1,5 +1,5 @@
 //! Conservative document-space bounds hierarchy. Queries allocate no storage;
-//! exact tests still use the cached rendered smoothed path.
+//! narrow phases retain exact cached ink or semantic shape geometry.
 use crate::drawing::{Stroke, Surface};
 use std::sync::Arc;
 
@@ -105,6 +105,30 @@ impl EraserIndex {
                     index,
                     surface: stroke.surface,
                 }
+            }));
+        if !self.entries.is_empty() {
+            Self::build(&mut self.nodes, &mut self.entries, 0);
+        }
+        self.revision = Some(revision);
+    }
+    pub fn sync_objects(&mut self, revision: u64, objects: &[crate::object::ObjectSnapshot]) {
+        if self.revision == Some(revision) {
+            return;
+        }
+        self.entries.clear();
+        self.nodes.clear();
+        self.entries
+            .extend(objects.iter().enumerate().filter_map(|(index, o)| {
+                let object = o.as_object();
+                let b = object.world_bounds()?;
+                Some(Entry {
+                    bounds: Bounds {
+                        min: b.min.map(f64::next_down),
+                        max: b.max.map(f64::next_up),
+                    },
+                    index,
+                    surface: object.surface(),
+                })
             }));
         if !self.entries.is_empty() {
             Self::build(&mut self.nodes, &mut self.entries, 0);
