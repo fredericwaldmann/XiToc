@@ -477,6 +477,9 @@ impl Canvas {
     pub fn end_frame(&mut self, ui: &egui::Ui) {
         if !ui.input(|i| i.pointer.primary_down()) {
             self.cancel_shape_draft();
+            // Explicit releases have already committed on the owning surface.
+            // A lost button state without a release safely cancels the preview.
+            self.selection_gesture = None;
         }
         // A release can occur outside the canvas/window or on a hidden page.
         if !ui.input(|i| i.pointer.button_down(PointerButton::Primary)) && self.gesture.is_some() {
@@ -799,6 +802,10 @@ impl Canvas {
             .painter()
             .with_clip_rect(bounds.intersect(ui.clip_rect()));
         let selection_preview = self.selection_preview(surface);
+        let preview_ids = match &self.selection_gesture {
+            Some(SelectionGesture::Transform { session, .. }) => &session.ids,
+            _ => &self.selection.ids,
+        };
         let endpoint_preview = match &self.selection_gesture {
             Some(SelectionGesture::ShapeEdit { preview, .. }) => Some(preview),
             _ => None,
@@ -815,7 +822,7 @@ impl Canvas {
                 ObjectSnapshot::Stroke(stroke) => stroke,
                 ObjectSnapshot::Shape(shape) => {
                     let delta = selection_preview
-                        .filter(|_| self.selection.ids.contains(&shape.id))
+                        .filter(|_| preview_ids.contains(&shape.id))
                         .unwrap_or_default();
                     let preview = endpoint_preview
                         .filter(|s| s.id == shape.id)
@@ -823,7 +830,7 @@ impl Canvas {
                     if delta.rotation == 0.0
                         && delta.reflected == [false; 2]
                         && selection_preview.is_some()
-                        && self.selection.ids.contains(&shape.id)
+                        && preview_ids.contains(&shape.id)
                     {
                         // Use the very same cached-mesh layer path as ink.
                         let selected = selection_preview_painter(
@@ -865,7 +872,7 @@ impl Canvas {
                 .entry(stroke.id)
                 .or_insert_with(|| Cached::new(stroke));
             let delta = selection_preview
-                .filter(|_| self.selection.ids.contains(&stroke.id))
+                .filter(|_| preview_ids.contains(&stroke.id))
                 .unwrap_or_default();
             let base_bounds = crate::object::ObjectBounds {
                 min: cached.bounds.0,
@@ -893,8 +900,7 @@ impl Canvas {
             {
                 cached.paint_partial(ui, &painter, transform, stroke, partial);
             } else {
-                if let Some(delta) =
-                    selection_preview.filter(|_| self.selection.ids.contains(&stroke.id))
+                if let Some(delta) = selection_preview.filter(|_| preview_ids.contains(&stroke.id))
                 {
                     if delta.rotation != 0.0 {
                         cached.paint_rotation(ui, &painter, transform, stroke, delta);
@@ -965,10 +971,12 @@ fn selection_preview_painter(
     };
     let layer = preview_layer_id(owner);
     ui.ctx().set_transform_layer(layer, transform);
-    painter
-        .clone()
-        .with_layer_id(layer)
-        .with_clip_rect(transform.inverse() * painter.clip_rect())
+    let mut selected = painter.clone().with_layer_id(layer);
+    // This rectangle is in the preview layer's coordinates. Intersecting it
+    // with the original screen-space clip would clip twice and progressively
+    // hide a moving selection (including entirely at large displacements).
+    selected.set_clip_rect(transform.inverse() * painter.clip_rect());
+    selected
 }
 
 fn preview_layer_id(owner: Uuid) -> egui::LayerId {

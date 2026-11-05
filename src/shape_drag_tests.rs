@@ -516,3 +516,345 @@ fn shape_drag_preview_performance() {
             .all(|(id, m)| Arc::ptr_eq(m, &c.shape_cache[id].meshes[0]))
     );
 }
+
+#[test]
+fn translated_preview_clip_remains_the_viewport_for_large_jumps() {
+    let ctx = egui::Context::default();
+    let viewport = Rect::from_min_max(egui::pos2(100., 80.), egui::pos2(800., 600.));
+    for displacement in [[50., 20.], [700., 420.], [-900., -600.]] {
+        let delta = Placement {
+            position: displacement,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.painter().with_clip_rect(viewport);
+            let selected = selection_preview_painter(ui, &painter, t(), delta, Uuid::nil());
+            let layer = ui
+                .ctx()
+                .layer_transform_to_global(selected.layer_id())
+                .unwrap();
+            assert_eq!(
+                layer * selected.clip_rect(),
+                painter.clip_rect(),
+                "visual clipping must not shrink as a selection moves"
+            );
+        });
+        output.textures_delta.clear();
+    }
+}
+
+#[test]
+fn hover_loss_during_held_drag_does_not_cancel_selection_session() {
+    let (mut c, s) = setup(DocumentKind::Whiteboard);
+    let ctx = egui::Context::default();
+    let ids = [
+        add(&mut c, s, ShapeKind::Rectangle, [100., 100.], [300., 300.]),
+        add(&mut c, s, ShapeKind::Arrow, [400., 150.], [1100., 250.]),
+    ];
+    c.select(Tool::Select);
+    c.selection.change(ids, Membership::Replace, &c.drawing);
+    frame(&ctx, &mut c, s, t(), vec![], 0., true);
+    frame(
+        &ctx,
+        &mut c,
+        s,
+        t(),
+        vec![pointer([150., 150.], true, egui::Modifiers::NONE)],
+        0.1,
+        true,
+    );
+    frame(
+        &ctx,
+        &mut c,
+        s,
+        t(),
+        vec![moved(t(), [450., 300.]), Event::PointerGone],
+        0.2,
+        true,
+    );
+    assert!(
+        c.selection_gesture.is_some(),
+        "hover loss is not pointer cancellation while held"
+    );
+    frame(
+        &ctx,
+        &mut c,
+        s,
+        t(),
+        vec![moved(t(), [1200., 700.])],
+        0.3,
+        true,
+    );
+    let delta = c.selection_preview(s).unwrap();
+    near(delta.apply([150., 150.]), [1200., 700.]);
+    assert_eq!(c.selection.ids, HashSet::from(ids));
+    frame(
+        &ctx,
+        &mut c,
+        s,
+        t(),
+        vec![pointer([1200., 700.], false, egui::Modifiers::NONE)],
+        0.4,
+        true,
+    );
+    assert!(c.selection_gesture.is_none());
+    for id in ids {
+        assert!(c.drawing.object(id).is_some());
+    }
+}
+
+#[test]
+fn fast_group_drag_keeps_frozen_sources_through_offscreen_frames_and_one_history_entry() {
+    for zoom in [0.5, 1., 2., 4., 8.] {
+        for pan in [false, true] {
+            let (mut c, s) = setup(DocumentKind::Whiteboard);
+            let ctx = egui::Context::default();
+            let mut ids = HashSet::new();
+            ids.insert(add(
+                &mut c,
+                s,
+                ShapeKind::Rectangle,
+                [-1000., -1000.],
+                [1600., 1200.],
+            ));
+            for (i, kind) in [
+                ShapeKind::Ellipse,
+                ShapeKind::Diamond,
+                ShapeKind::Triangle,
+                ShapeKind::Line,
+                ShapeKind::Arrow,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let x = 300. + i as f64 * 80.;
+                ids.insert(add(&mut c, s, kind, [x, 300.], [x + 60., 360.]));
+            }
+            // Completely offscreen members belong to the same session.
+            ids.insert(add(
+                &mut c,
+                s,
+                ShapeKind::Arrow,
+                [5000., 5000.],
+                [5100., 5100.],
+            ));
+            c.select(Tool::Select);
+            c.selection
+                .change(ids.clone(), Membership::Replace, &c.drawing);
+            let view = Transform {
+                origin: [200., 200.],
+                center: if pan { [210., 205.] } else { [200., 200.] },
+                scale: zoom,
+            };
+            let start = view.to_screen([200., 200.]);
+            let original = c.drawing.items().to_vec();
+            let revision = c.drawing.revision();
+            frame(&ctx, &mut c, s, view, vec![], 0., true);
+            frame(
+                &ctx,
+                &mut c,
+                s,
+                view,
+                vec![pointer(start, true, egui::Modifiers::NONE)],
+                0.1,
+                true,
+            );
+            for (i, target) in [
+                [250., 220.],
+                [450., 300.],
+                [1200., 700.],
+                [-50000., -50000.],
+                [800., 500.],
+                [250., 220.],
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                frame(
+                    &ctx,
+                    &mut c,
+                    s,
+                    view,
+                    vec![
+                        Event::PointerMoved(egui::pos2(151., 121.)),
+                        Event::PointerMoved(egui::pos2(target[0] as f32, target[1] as f32)),
+                        Event::PointerGone,
+                    ],
+                    0.2 + i as f64 * 0.2,
+                    true,
+                );
+                let delta = c.selection_preview(s).unwrap();
+                near(delta.apply([200., 200.]), view.to_document(target));
+                assert_eq!(c.selection.ids, ids);
+                assert_eq!(c.drawing.items(), original);
+                assert_eq!(c.drawing.revision(), revision);
+                let Some(SelectionGesture::Transform { session, .. }) = &c.selection_gesture else {
+                    panic!("lost session")
+                };
+                assert_eq!(session.ids, ids);
+                assert_eq!(session.sources, original);
+                assert_eq!(session.view, view);
+                frame(&ctx, &mut c, s, view, vec![], 0.3 + i as f64 * 0.2, true);
+                assert_eq!(c.selection_preview(s), Some(delta));
+            }
+            // Coalesced hover-loss/release must commit, regardless of final button state.
+            frame(
+                &ctx,
+                &mut c,
+                s,
+                view,
+                vec![
+                    Event::PointerGone,
+                    pointer([800., 500.], false, egui::Modifiers::NONE),
+                ],
+                2.,
+                true,
+            );
+            assert!(c.selection_gesture.is_none());
+            assert_eq!(c.selection.ids, ids);
+            assert_eq!(c.drawing.revision(), revision + 1);
+            let after = c.drawing.items().to_vec();
+            let movement: Point =
+                std::array::from_fn(|i| view.to_document([800., 500.])[i] - [200., 200.][i]);
+            for (before, after) in original.iter().zip(&after) {
+                let a = before.as_object();
+                let b = after.as_object();
+                near(
+                    b.placement().position,
+                    std::array::from_fn(|i| a.placement().position[i] + movement[i]),
+                );
+                assert_eq!(a.placement().rotation, b.placement().rotation);
+                assert_eq!(a.placement().scale, b.placement().scale);
+                assert_eq!(before.id(), after.id());
+            }
+            c.undo();
+            assert_eq!(c.drawing.items(), original);
+            c.redo();
+            assert_eq!(c.drawing.items(), after);
+        }
+    }
+}
+
+#[test]
+fn mostly_offscreen_shape_still_emits_visible_preview_mesh_after_crossing_viewport() {
+    let (mut c, s) = setup(DocumentKind::Whiteboard);
+    let ctx = egui::Context::default();
+    let id = add(
+        &mut c,
+        s,
+        ShapeKind::Rectangle,
+        [-1600., -1200.],
+        [200., 200.],
+    );
+    c.select(Tool::Select);
+    c.selection.change([id], Membership::Replace, &c.drawing);
+    frame(&ctx, &mut c, s, t(), vec![], 0., true);
+    frame(
+        &ctx,
+        &mut c,
+        s,
+        t(),
+        vec![pointer([100., 100.], true, egui::Modifiers::NONE)],
+        0.1,
+        true,
+    );
+    let viewport = Rect::from_min_size(Pos2::ZERO, egui::vec2(800., 600.));
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(viewport),
+            events: vec![Event::PointerMoved(egui::pos2(900., 650.))],
+            focused: true,
+            ..Default::default()
+        },
+        |ui| {
+            c.begin_frame(ui);
+            c.surface(ui, viewport, s, t());
+            c.end_frame(ui);
+        },
+    );
+    assert!(c.selection_gesture.is_some());
+    assert!(
+        output
+            .shapes
+            .iter()
+            .any(|clipped| matches!(&clipped.shape,egui::Shape::Mesh(mesh)
+        if mesh.calc_bounds().width()>1700. && clipped.clip_rect.intersects(viewport))),
+        "the visible portion of the large selected shape must actually be submitted for rendering"
+    );
+    output.textures_delta.clear();
+}
+
+#[test]
+fn group_drag_cancels_safely_on_explicit_cancellation_or_view_change() {
+    for reason in 0..4 {
+        let (mut c, s) = setup(DocumentKind::Whiteboard);
+        let ctx = egui::Context::default();
+        let ids = [
+            add(&mut c, s, ShapeKind::Rectangle, [100., 100.], [300., 300.]),
+            add(
+                &mut c,
+                s,
+                ShapeKind::Ellipse,
+                [1000., 1000.],
+                [1200., 1200.],
+            ),
+        ];
+        c.select(Tool::Select);
+        c.selection.change(ids, Membership::Replace, &c.drawing);
+        let original = c.drawing.items().to_vec();
+        let revision = c.drawing.revision();
+        frame(&ctx, &mut c, s, t(), vec![], 0., true);
+        frame(
+            &ctx,
+            &mut c,
+            s,
+            t(),
+            vec![
+                pointer([150., 150.], true, egui::Modifiers::NONE),
+                moved(t(), [1200., 700.]),
+            ],
+            0.1,
+            true,
+        );
+        assert!(c.selection_preview(s).is_some());
+        let events = match reason {
+            0 => vec![Event::Touch {
+                device_id: egui::TouchDeviceId(0),
+                id: egui::TouchId(0),
+                phase: egui::TouchPhase::Cancel,
+                pos: egui::pos2(1200., 700.),
+                force: None,
+            }],
+            1 => vec![Event::WindowFocused(false)],
+            2 => vec![Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            _ => vec![],
+        };
+        let view = if reason == 3 {
+            Transform { scale: 4., ..t() }
+        } else {
+            t()
+        };
+        frame(&ctx, &mut c, s, view, events, 0.2, true);
+        assert!(c.selection_gesture.is_none());
+        frame(
+            &ctx,
+            &mut c,
+            s,
+            view,
+            vec![pointer([1200., 700.], false, egui::Modifiers::NONE)],
+            0.3,
+            true,
+        );
+        assert_eq!(c.drawing.items(), original);
+        assert_eq!(c.drawing.revision(), revision);
+        if reason != 2 {
+            assert_eq!(c.selection.ids, HashSet::from(ids));
+        }
+    }
+}

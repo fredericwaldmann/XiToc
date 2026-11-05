@@ -519,7 +519,7 @@ is included by the private selection adapter via `#[path]`; it is not a second
 editor implementation. Tests assert cache Arc reuse, index pruning, exact history,
 legacy decoding, clip geometry, ownership, layout/focus and discard behavior.
 
-The current source has 146 Rust tests: 138 normally run and eight ignored
+The current source has 151 Rust tests: 143 normally run and eight ignored
 release benchmarks (whole erase, partial document, partial geometry, smoothing,
 indexed lasso, rectangle selection, multi-stroke rotation preview, and multi-shape movement preview). Historical recorded results are in TEST_PLAN, not proof of hardware
 latency or a fresh run of every platform. [scripts/test_release.py](../scripts/test_release.py)
@@ -605,3 +605,31 @@ Historical successful application checks above are not presented as fresh runs.
 all forms, document kinds, zoom/pan, rotation, mixed selection, cancellation and
 history, and asserts mesh reuse and graphics-layer pointer tracking. Its ignored
 release benchmark moves 1,000 ellipses without rebuilding their base meshes.
+
+
+### Persistent selection drag and preview clipping
+
+`SelectionGesture::Transform` owns a `DragSession`: frozen IDs, Arc-backed source
+snapshots, view transform and document revision, alongside the original pointer,
+surface, bounds and current common Placement. Input never re-hit-tests a running
+session or restarts it on another press. Every update uses current document-space
+pointer minus original pointer, including coalesced/large jumps. Rendering and
+commit use the session's frozen IDs. A changed view/revision cancels safely;
+Whiteboard navigation is blocked during gestures. Canonical geometry changes only
+on one validated release transaction; source comparisons are linear at commit,
+not repeated for each pointer update.
+
+The cached ink/shape preview painter uses `set_clip_rect(inverse * viewport)`.
+`with_clip_rect` would intersect this layer-space rectangle with the original
+screen-space clip, making selections progressively disappear as they move.
+Culling is purely visual; offscreen members remain in the session. The renderer
+submits newly visible source meshes against the inverse viewport and egui applies
+the common graphics transform exactly once.
+
+`PointerGone` is hover loss, not a release. eframe 0.37 web already receives held
+mouse movement and pointer-up on document; no competing mouse capture/move handler
+is added. Explicit TouchCancel, WindowFocused(false), focus loss, Escape or a lost
+button state without release cancel previews; explicit release samples its final
+position and commits even when outside the canvas. The browser bridge forwards
+non-pen `pointercancel` through its existing cancellation queue because eframe
+has no mouse pointercancel listener. Pen capture/pressure behavior is unchanged.

@@ -936,3 +936,60 @@ Check no initial jump, stable size/angle, accurate reversals and immediate track
 Drag visible corners/endpoints off-center to check resizing retains the grab
 offset. Click without moving, cancel with Escape, then complete a move and
 Undo/Redo; only the completed move should enter history.
+
+
+## Persistent group dragging / viewport regression (2026-11-05)
+
+Supersedes the first Shapes drag follow-up's incomplete viewport coverage. Before
+production edits, two new tests failed: the preview's global clip shrank after a
+50-point translation, and PointerGone discarded a held two-object drag. These
+were visual clipping/reference-frame and lifecycle defects, not accumulated
+movement-delta errors. The corrected shared painter replaces its clip with the
+inverse viewport; the session retains frozen IDs/sources/view/revision and ignores
+hover loss while preserving explicit release/cancellation semantics.
+
+Five new tests cover global clip invariance, hover-loss continuation, actual mesh
+submission for a mostly offscreen oversized shape, group cancellation/view changes,
+and fast/coalesced pointer sequences over 50/100/200/400/800% zoom with and without
+pan. The fast test includes seven selected objects (including an initially
+invisible member), viewport-sized/oversized geometry, 50,000-point jumps taking
+all members offscreen, stationary frames, return, and hover loss coalesced with
+release. It verifies exact shared displacement, frozen snapshots, unchanged
+rotation/scale/IDs/membership, one transaction and exact undo/redo. Existing
+single/mixed/rotated shape, area selection, ink, eraser and history tests remain.
+
+Passed: cargo fmt, Clippy all-targets with warnings denied, all-target tests
+(143 passed, eight ignored), native release build, WASM cargo check and Trunk
+release. Both explicit release preview benchmarks pass: 1,000 ellipses / 40
+changed frames 343.947 ms total with all mesh Arcs reused; 2,000-stroke rotation
+initial/idle/changed frames 28.422/3.138/7.708 ms. CPU harness timings are not GPU
+latency or universal frame-rate promises.
+
+Actual packaged-WASM Firefox gestures selected five shapes, moved slowly then
+jumped hundreds of pixels per event, left the editor into the sidebar/top panel,
+returned, released and undid/redid. A six-object selection including a 720×470
+logical-point rectangle was tested at exactly 400% zoom (the enlarged rectangle
+exceeds the viewport in both axes, with most area offscreen). Repeat-position
+canvas crops matched pixel-for-pixel at 100% and 400%; undo matched the original
+canvas, redo matched all five object-body crops, and explicit mouse pointercancel
+restored the pre-drag canvas exactly. The browser cancellation test bypassed its
+asset cache to load the updated inline bridge. See screenshots/shape-dragging.
+
+Native release started without errors. Attempts to capture/control its desktop
+window failed: the application uses the available Wayland desktop, while X root
+capture returned X get_image error 8 and X window lookup found no XiToc window.
+Native interactive dragging, physical input latency and Windows/macOS remain
+unverified. Use the following manual protocol on a real desktop and browser:
+
+1. Create five forms and select all; drag one selected body slowly, then make
+   fast large jumps and reversals. Confirm fixed relative spacing and no scaling.
+2. Pan, repeat at 50/100/200/400%, and create a rectangle larger than the viewport.
+   At 400%, start from its visible portion, move until only a small part remains,
+   release, then drag again from that visible part. Keep invisible objects selected.
+3. While held, move the pointer into the sidebar/top panel and back; confirm the
+   session continues. Release outside the editor and Undo/Redo the whole move.
+4. Cancel a new move with Escape, genuine focus loss or browser pointercancel;
+   check no geometry/history change. Click without moving: no history entry.
+5. On Page Notes repeat after scrolling/zooming. Actual page edges constrain
+   geometry; the visible scroll viewport must only clip graphics. Navigation or
+   layout changes during a gesture safely cancel rather than rebase it.

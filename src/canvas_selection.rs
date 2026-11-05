@@ -7,6 +7,15 @@ use crate::{
     selection::{self, Membership, SelectionCommand},
 };
 
+/// Immutable gesture ownership, independent of visible membership and clipping.
+/// Snapshot clones retain Arcs; no document or point-vector clones per update.
+pub(super) struct DragSession {
+    pub(super) ids: HashSet<Uuid>,
+    sources: Vec<ObjectSnapshot>,
+    view: Transform,
+    revision: u64,
+}
+
 pub(super) enum SelectionGesture {
     ShapeEdit {
         surface: Surface,
@@ -42,6 +51,7 @@ pub(super) enum SelectionGesture {
         moved: bool,
     },
     Transform {
+        session: DragSession,
         surface: Surface,
         start: Point,
         bounds: ObjectBounds,
@@ -497,7 +507,23 @@ impl Canvas {
                 limits.1 = limits.1.min(1e4 / object.placement().scale);
             }
             limits.0 = limits.0.max(minimum_factor);
+            let Some((_, view, _)) = self.selection_view else {
+                return;
+            };
+            let session = DragSession {
+                ids: self.selection.ids.clone(),
+                sources: self
+                    .drawing
+                    .items()
+                    .iter()
+                    .filter(|o| self.selection.ids.contains(&o.id()))
+                    .cloned()
+                    .collect(),
+                view,
+                revision: self.drawing.revision(),
+            };
             self.selection_gesture = Some(SelectionGesture::Transform {
+                session,
                 surface,
                 start: point,
                 bounds,
@@ -652,6 +678,7 @@ impl Canvas {
                 delta,
                 moved,
                 limits,
+                ..
             }) if *s == surface => {
                 let movement = [point[0] - start[0], point[1] - start[1]];
                 if !*moved && movement[0].hypot(movement[1]) * scale < 3.0 {
@@ -698,14 +725,28 @@ impl Canvas {
             }) => {
                 self.selection.change(matches, mode, &self.drawing);
             }
-            Some(
-                SelectionGesture::Transform {
-                    delta, moved: true, ..
+            Some(SelectionGesture::Transform {
+                session,
+                delta,
+                moved: true,
+                ..
+            }) => {
+                // Never apply an old preview to changed content or a new selection.
+                if self.drawing.revision() == session.revision
+                    && self
+                        .drawing
+                        .items()
+                        .iter()
+                        .filter(|o| session.ids.contains(&o.id()))
+                        .eq(session.sources.iter())
+                {
+                    self.drawing.transform_objects(&session.ids, delta);
+                    self.prune_cache();
                 }
-                | SelectionGesture::Rotate {
-                    delta, moved: true, ..
-                },
-            ) => {
+            }
+            Some(SelectionGesture::Rotate {
+                delta, moved: true, ..
+            }) => {
                 self.drawing.transform_objects(&self.selection.ids, delta);
                 self.prune_cache();
             }
@@ -767,6 +808,11 @@ impl Canvas {
         transform: Transform,
     ) {
         if self.selection.surface == surface {
+            if let Some(SelectionGesture::Transform { session, .. }) = &self.selection_gesture
+                && (session.view != transform || session.revision != self.drawing.revision())
+            {
+                self.selection_gesture = None;
+            }
             if self.selection_gesture.is_some()
                 && self
                     .selection_view
@@ -799,7 +845,10 @@ impl Canvas {
                     button: PointerButton::Primary,
                     pressed: true,
                     modifiers,
-                } if owns(pos) && !ui.input(|i| i.key_down(egui::Key::Space)) => {
+                } if self.selection_gesture.is_none()
+                    && owns(pos)
+                    && !ui.input(|i| i.key_down(egui::Key::Space)) =>
+                {
                     let point = transform.to_document([pos.x as f64, pos.y as f64]);
                     let corner = if self.selection.surface == surface && !modifiers.alt {
                         self.handle(point, transform.scale)
@@ -920,7 +969,10 @@ impl Canvas {
                         self.commit_selection();
                     }
                 }
-                Event::PointerGone
+                // eframe sends this on canvas mouseleave, but continues mouse
+                // motion/up on document. Hover loss is not contact cancellation.
+                Event::PointerGone => {}
+                Event::WindowFocused(false)
                 | Event::Touch {
                     phase: egui::TouchPhase::Cancel,
                     ..

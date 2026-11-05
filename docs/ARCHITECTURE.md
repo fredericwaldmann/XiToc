@@ -552,3 +552,20 @@ connectors must add stable endpoint relationships and a perimeter-anchor/routing
 adapter; current lines/arrows contain no attachment IDs or routing state. Groups,
 text, resources and PDF graphics/embedded-data round trips remain separate work.
 The defaulted positive-scale reflection contract and mirrored-text policy remain.
+
+
+### Persistent drag ownership and visual clipping
+
+Selection transforms own frozen IDs, immutable Arc source snapshots, starting
+pointer/surface/bounds, view transform and revision. They calculate one Placement
+from the original pointer and use it for every member, regardless of visibility.
+Rendering and release use captured membership. Changes to view/content cancel
+rather than rebase a gesture. Release performs one source-validated journal
+transaction; preview frames do not rewrite document geometry.
+
+Viewport clipping belongs to the renderer, not the drag session. A translated
+preview's clip is the inverse viewport in layer coordinates, replacing rather
+than intersecting the screen-space clip. Hover loss preserves held gestures;
+explicit release, contact cancellation and focus/button-state loss govern their
+lifecycle. eframe's existing document-wide web mouse handlers remain authoritative;
+the browser boundary adds only the missing explicit mouse cancellation event.

@@ -400,3 +400,27 @@ release preview benchmarks pass, including 1,000 ellipses retaining mesh Arcs ov
 cancellation and undo/redo; repeated-position captures matched exactly. Native
 interactive visual performance was not tested. See TEST_PLAN for matrix,
 measurements, manual checks and limits.
+
+
+## 2026-11-05 — Persistent group dragging and viewport boundaries
+
+Continued the corrected Shapes branch and existing PR #38. Reproduced two red
+regressions before changing production code: inverse preview clipping intersected
+with screen-space clipping (progressive disappearance during large group moves),
+and PointerGone cancelled a held gesture on canvas hover loss. Pointer displacement
+was already derived correctly from the original document-space press.
+
+The common ink/shape preview now replaces its layer-space clip. Transform sessions
+capture IDs, immutable source snapshots, view/revision and original geometry;
+rendering/commit use captured membership, never visibility or re-hit-testing.
+Ignore hover loss, retain document-wide eframe mouse move/up handling, and forward
+only its missing explicit browser mouse cancellation event. Contact/focus/view
+cancellation and absent button state safely discard previews; release samples its
+final position and commits once. No smoothing, animation, auto-pan or PDF changes.
+
+143 active tests, formatting, Clippy, native release, WASM check and Trunk release
+pass; both explicit release preview benchmarks pass. Real Firefox tests verify
+fast five-object drags, leaving/returning to canvas, exact repeated positions,
+oversized selection at 400%, cancellation and history. Native release startup
+works, but Wayland desktop capture/input verification was unavailable. TEST_PLAN
+records failures, matrix, timings, visual evidence and manual checks.

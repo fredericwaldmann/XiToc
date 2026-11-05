@@ -316,3 +316,15 @@ off-center retains that offset rather than snapping the handle to the pointer.
 Movement previews follow the pointer immediately from the original gesture
 snapshot, without changing intrinsic size or angle. Release commits one undo
 step; a click, Escape cancellation or return to the starting position commits none.
+
+
+A selected group is one persistent drag session, including fully offscreen
+members. Dragging from a visible portion of an oversized shape remains valid.
+Viewport edges clip graphics only: they neither clamp Whiteboard movement nor
+end the session. A held pointer may leave the canvas into another application
+panel and return without dropping the selection. Hover loss alone does not
+cancel; explicit release finishes, while contact cancellation or focus loss
+restores the original geometry without history. View/layout changes cancel safely
+rather than changing the drag reference frame; navigation remains blocked during
+Whiteboard drags. Actual Page Note bounds still constrain movement independently
+of the viewport. No smoothing, animation or auto-pan is added.

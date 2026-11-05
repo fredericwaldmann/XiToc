@@ -427,3 +427,25 @@ this user-authorized basic-creation slice. Reference it without closing it. Futu
 styling can use ShapeStyle plus replace_shape; connector IDs/perimeter routing,
 text/font resources, grouping and PDF persistence still need explicit adapters.
 Current lines/arrows are freestanding. Existing reflection/text policy remains.
+
+
+## 2026-11-05 — Drag ownership is independent of visibility
+
+The first Shapes dragging follow-up retained a latent ink preview bug:
+`Painter::with_clip_rect` intersects in the painter's current coordinate frame.
+Passing the inverse-transformed viewport therefore double-clipped moving objects.
+A regression proved that even a 50-point move reduced the global clip; larger
+jumps emptied it. Use `set_clip_rect` to replace it with the correct layer-space
+viewport. Both ink and shapes use this helper.
+
+A second failing sequence proved `PointerGone` discarded a held group session.
+eframe 0.37 sends it on canvas mouseleave while continuing document-wide mouse
+move/up delivery. Keep session ownership until release or genuine cancellation;
+forward explicit browser mouse pointercancel, without adding competing movement
+handlers or mouse capture. Preserve existing pen pointer capture.
+
+Transform sessions explicitly freeze membership, source snapshots, view/revision
+and original geometry. Cached mesh previews remain transient; there is no
+incremental geometry mutation, animation, auto-pan or PDF change. A view/content
+change cancels instead of silently rebasing. This keeps existing Page limits and
+undo semantics while allowing unrestricted Whiteboard viewport crossings.
