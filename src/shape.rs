@@ -53,20 +53,70 @@ pub enum BorderStyle {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShapeStyle {
+    #[serde(default)]
+    pub start_head: bool,
+    #[serde(default = "border_enabled")]
+    pub border_enabled: bool,
     pub fill: Option<[u8; 3]>,
     pub fill_opacity: u8,
     pub border: [u8; 4],
     pub border_width: f64,
     pub border_style: BorderStyle,
 }
+fn border_enabled() -> bool {
+    true
+}
+impl ShapeStyle {
+    pub fn valid(&self) -> bool {
+        self.border_width.is_finite() && (0.1..=24.).contains(&self.border_width)
+    }
+}
 impl Default for ShapeStyle {
     fn default() -> Self {
         Self {
+            start_head: false,
+            border_enabled: true,
             fill: Some([90, 150, 220]),
             fill_opacity: 35,
             border: [37, 99, 200, 255],
             border_width: 2.,
             border_style: BorderStyle::Solid,
+        }
+    }
+}
+/// Application preferences copied into new objects, never looked up by existing shapes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ShapeDefaults {
+    pub style: ShapeStyle,
+    /// None retains the adaptive creation radius; configured radii clamp to bounds.
+    pub corner_radius: Option<f64>,
+    pub arrow_end: bool,
+}
+impl Default for ShapeDefaults {
+    fn default() -> Self {
+        Self {
+            style: ShapeStyle::default(),
+            corner_radius: None,
+            arrow_end: true,
+        }
+    }
+}
+impl ShapeDefaults {
+    pub fn valid(&self) -> bool {
+        self.style.valid()
+            && self
+                .corner_radius
+                .is_none_or(|v| v.is_finite() && (0.0..=1e9).contains(&v))
+    }
+    pub fn apply(&self, shape: &mut Shape) {
+        let kind = shape.kind();
+        shape.style = self.style.clone();
+        if let Some(radius) = self.corner_radius {
+            StylePatch::Radius(radius).apply(shape);
+        }
+        if kind == ShapeKind::Arrow {
+            StylePatch::Heads(self.style.start_head, self.arrow_end).apply(shape);
         }
     }
 }
@@ -185,8 +235,7 @@ impl Shape {
                 .iter()
                 .chain(&self.placement.position)
                 .all(|v| v.abs() <= 1e15)
-            && self.style.border_width.is_finite()
-            && (0.1..=24.).contains(&self.style.border_width)
+            && self.style.valid()
             && match self.geometry {
                 ShapeGeometry::Box {
                     kind,
@@ -224,6 +273,10 @@ impl Shape {
                 let mut paths = vec![vec![start, end]];
                 if head.is_some() {
                     let points = segment_points(start, end, head);
+                    paths.push(vec![points[1], points[2], points[3], points[1]]);
+                }
+                if self.style.start_head {
+                    let points = segment_points(end, start, Some(Arrowhead::default()));
                     paths.push(vec![points[1], points[2], points[3], points[1]]);
                 }
                 paths
@@ -321,10 +374,9 @@ impl Shape {
                     ObjectBounds::from_points(vertices.map(|p| self.placement.apply(p))).unwrap()
                 }
             }
-            ShapeGeometry::Segment { start, end, head } => ObjectBounds::from_points(
-                segment_points(start, end, head).map(|p| self.placement.apply(p)),
-            )
-            .unwrap(),
+            ShapeGeometry::Segment { .. } => {
+                ObjectBounds::from_points(self.contours(0.025).into_iter().flatten()).unwrap()
+            }
         }
     }
     pub fn filled(&self) -> bool {
@@ -352,8 +404,8 @@ impl Shape {
                 .corners()
                 .iter()
                 .any(|p| crate::selection::inside(*p, &paths[0])))
-            || (self.kind() == ShapeKind::Arrow
-                && paths.get(1).is_some_and(|head| {
+            || (self.kind().segment()
+                && paths.iter().skip(1).any(|head| {
                     bounds
                         .corners()
                         .iter()
@@ -519,7 +571,7 @@ impl CanvasObject for Shape {
         let paths = self.contours(0.025);
         (self.filled() && crate::selection::inside(point, &paths[0]))
             || paths.iter().enumerate().any(|(i, p)| {
-                (self.kind() == ShapeKind::Arrow && i == 1 && crate::selection::inside(point, p))
+                (self.kind().segment() && i > 0 && crate::selection::inside(point, p))
                     || crate::drawing::hit_path(
                         p,
                         point,
@@ -685,5 +737,54 @@ mod tests {
             edited.endpoints().unwrap()[1],
             arrow.endpoints().unwrap()[1]
         );
+    }
+}
+
+/// A property patch changes only compatible content; geometry/identity stay intact.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum StylePatch {
+    Fill(Option<[u8; 3]>),
+    FillOpacity(u8),
+    Border([u8; 3]),
+    BorderOpacity(u8),
+    Width(f64),
+    Pattern(BorderStyle),
+    BorderEnabled(bool),
+    Heads(bool, bool),
+    Radius(f64),
+}
+impl StylePatch {
+    pub fn apply(self, shape: &mut Shape) {
+        match self {
+            Self::Fill(v) if !shape.kind().segment() => shape.style.fill = v,
+            Self::FillOpacity(v) if !shape.kind().segment() => shape.style.fill_opacity = v,
+            Self::Border(v) => shape.style.border[..3].copy_from_slice(&v),
+            Self::BorderOpacity(v) => shape.style.border[3] = v,
+            Self::Width(v) => shape.style.border_width = v,
+            Self::Pattern(v) => shape.style.border_style = v,
+            Self::BorderEnabled(v) => shape.style.border_enabled = v,
+            Self::Heads(start, end) => {
+                if let ShapeGeometry::Segment { head, .. } = &mut shape.geometry {
+                    *head = if end {
+                        Some(head.unwrap_or_default())
+                    } else {
+                        None
+                    };
+                    shape.style.start_head = start;
+                }
+            }
+            Self::Radius(v) => {
+                if let ShapeGeometry::Box {
+                    kind: ShapeKind::RoundedRectangle,
+                    corner_radius,
+                    size,
+                } = &mut shape.geometry
+                    && v.is_finite()
+                {
+                    *corner_radius = v.clamp(0., size[0].min(size[1]) * 0.5);
+                }
+            }
+            _ => (),
+        }
     }
 }

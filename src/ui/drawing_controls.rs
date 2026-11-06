@@ -50,15 +50,16 @@ pub fn pen(ui: &mut egui::Ui, style: &mut PenStyle) {
     }
 }
 
-fn percentage(ui: &mut egui::Ui, value: &mut u8, minimum: u8) {
+pub fn styled_slider(ui: &mut egui::Ui, slider: egui::Slider<'_>) -> egui::Response {
     ui.scope(|ui| {
         ui.visuals_mut().widgets.inactive.bg_fill = super::style::palette(ui).border;
-        ui.add(
-            egui::Slider::new(value, minimum..=100)
-                .suffix("%")
-                .trailing_fill(true),
-        );
-    });
+        ui.add(slider.trailing_fill(true))
+    })
+    .inner
+}
+
+fn percentage(ui: &mut egui::Ui, value: &mut u8, minimum: u8) {
+    styled_slider(ui, egui::Slider::new(value, minimum..=100).suffix("%"));
 }
 
 pub fn preset(ui: &mut egui::Ui, presets: &mut Presets) {

@@ -162,6 +162,6 @@ clipping remain explicit; no shape/text/formula/image creation or PDF saving.
 The top Shapes picker creates editable rectangles, rounded rectangles, circles,
 ellipses, triangles, diamonds, lines and freestanding arrows. Drag previews and
 one-command creation, local corner/endpoint editing, mixed selection, shared
-transforms/clipboard/history work on both layouts. Styling fields/defaults exist;
-formatting controls and embedded text remain future work under #24. Shapes, like
+transforms/clipboard/history work on both layouts. Contextual and right-click formatting edit captured shape styles, with separate
+persistent creation defaults. Embedded text remains future work under #24. Shapes, like
 ink, remain memory-only until M2; no magnetic relationships or PDF saving.

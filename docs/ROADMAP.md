@@ -228,3 +228,15 @@ store/selection/transforms/clipboard/history and local box/endpoint editing.
 Captured styling fields prepare future controls. #24 also requires formatting and
 embedded/shared text, so remains open; no separate “Basic Shape Creation” issue
 exists. Connectors, text and PDF persistence are not part of this slice.
+
+
+### M1.5 — Shape styling and formatting slice (#24)
+
+Implemented independent fill color/0–100% opacity/no-fill, border color/width/
+opacity/pattern/no-border, start/end/both/no arrowheads and adjustable rounded
+radius. Contextual menus near the selection and right-click Format share property
+patches, compatible mixed-selection batches and atomic undo/redo. Continuous
+pointer adjustments coalesce; movement/resize/rotation/flip and cached dragging
+retain their existing controller. Creation defaults persist separately through
+Settings → Drawing and are captured when creating new objects. No embedded text,
+magnetic attachment or PDF saving; #24 remains open for its shared text criteria.

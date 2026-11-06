@@ -6,6 +6,7 @@ pub mod explorer;
 pub mod icons;
 pub mod selection_controls;
 pub mod settings;
+pub mod shape_controls;
 pub mod style;
 pub mod tabs;
 pub mod toolbar;

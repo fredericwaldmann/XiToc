@@ -469,3 +469,160 @@ fn shape_meshes_are_cached_on_idle_and_history_keeps_mixed_order() {
         [id, ink, id2]
     );
 }
+
+#[test]
+fn configured_defaults_are_captured_on_creation_at_all_zoom_levels() {
+    use crate::shape::BorderStyle;
+    for layout in [DocumentKind::Page, DocumentKind::Whiteboard] {
+        for scale in [0.5, 1., 2., 4.] {
+            let (mut c, s) = setup(layout);
+            let ctx = egui::Context::default();
+            let view = Transform {
+                scale,
+                origin: [10.; 2],
+                center: [0.; 2],
+            };
+            c.shape_defaults.style.fill = None;
+            c.shape_defaults.style.border_style = BorderStyle::Dotted;
+            c.shape_defaults.style.border_width = 7.;
+            c.shape_defaults.style.border[3] = 123;
+            let defaults = c.shape_defaults.clone();
+            c.select(Tool::Shape);
+            frame(
+                &ctx,
+                &mut c,
+                s,
+                view,
+                vec![
+                    moved(view, [40., 40.]),
+                    pointer(screen(view, [40., 40.]), true, egui::Modifiers::NONE),
+                ],
+                0.,
+                true,
+            );
+            c.shape_defaults = Default::default();
+            frame(
+                &ctx,
+                &mut c,
+                s,
+                view,
+                vec![
+                    moved(view, [100., 100.]),
+                    pointer(screen(view, [100., 100.]), false, egui::Modifiers::NONE),
+                ],
+                0.1,
+                true,
+            );
+            assert_eq!(shape(&c).style, defaults.style);
+            let created = c.drawing.items().to_vec();
+            c.undo();
+            assert!(c.drawing.items().is_empty());
+            c.redo();
+            assert_eq!(c.drawing.items(), created);
+        }
+    }
+}
+
+#[test]
+fn formatted_rendering_uses_alpha_patterns_and_no_border_without_geometry_changes() {
+    use crate::shape::{BorderStyle, StylePatch};
+    for scale in [0.5, 1., 2., 4.] {
+        let (mut c, s) = setup(DocumentKind::Whiteboard);
+        let ctx = egui::Context::default();
+        let view = Transform {
+            scale,
+            origin: [0.; 2],
+            center: [0.; 2],
+        };
+        let id = add(&mut c, s, ShapeKind::Rectangle, [40., 40.], [120., 100.]);
+        let ids = HashSet::from([id]);
+        let geometry = shape(&c).geometry.clone();
+        c.drawing.format_shapes(&ids, StylePatch::Fill(None), false);
+        c.drawing
+            .format_shapes(&ids, StylePatch::BorderEnabled(false), false);
+        frame(&ctx, &mut c, s, view, vec![], 0., true);
+        assert!(
+            c.shape_cache[&id].meshes.is_empty(),
+            "No-fill/no-border must paint nothing"
+        );
+        c.drawing
+            .format_shapes(&ids, StylePatch::Fill(Some([21, 80, 230])), false);
+        c.drawing
+            .format_shapes(&ids, StylePatch::FillOpacity(128), false);
+        frame(&ctx, &mut c, s, view, vec![], 0.1, true);
+        let color = egui::Color32::from_rgba_unmultiplied(21, 80, 230, 128);
+        assert!(
+            c.shape_cache[&id]
+                .meshes
+                .iter()
+                .flat_map(|m| &m.vertices)
+                .any(|v| v.color == color)
+        );
+        c.drawing
+            .format_shapes(&ids, StylePatch::FillOpacity(0), false);
+        frame(&ctx, &mut c, s, view, vec![], 0.2, true);
+        assert!(c.shape_cache[&id].meshes.is_empty());
+        c.drawing
+            .format_shapes(&ids, StylePatch::BorderEnabled(true), false);
+        for pattern in [BorderStyle::Solid, BorderStyle::Dashed, BorderStyle::Dotted] {
+            c.drawing
+                .format_shapes(&ids, StylePatch::Pattern(pattern), false);
+            frame(&ctx, &mut c, s, view, vec![], 0.3, true);
+            assert!(!c.shape_cache[&id].meshes.is_empty());
+            assert_eq!(shape(&c).geometry, geometry);
+        }
+    }
+}
+
+#[test]
+fn final_slider_sample_on_release_merges_into_one_mixed_selection_undo() {
+    use crate::shape::StylePatch;
+    let (mut c, s) = setup(DocumentKind::Whiteboard);
+    let a = add(&mut c, s, ShapeKind::Rectangle, [40., 40.], [100., 100.]);
+    let mut second = Shape::create(
+        c.drawing.owner(),
+        s,
+        ShapeKind::Rectangle,
+        [140., 40.],
+        [200., 100.],
+        false,
+    )
+    .unwrap();
+    second.style.border_width = 8.;
+    let b = second.id;
+    c.drawing.add_shape(second);
+    c.select(Tool::Select);
+    c.selection.change([a, b], Membership::Replace, &c.drawing);
+    let before = c.drawing.items().to_vec();
+    let ctx = egui::Context::default();
+    let id = egui::Id::unique("continuous-width");
+    for (events, width) in [
+        (vec![pointer([700., 500.], true, egui::Modifiers::NONE)], 4.),
+        (vec![Event::PointerMoved(egui::pos2(710., 500.))], 6.),
+        (
+            vec![pointer([720., 500.], false, egui::Modifiers::NONE)],
+            12.,
+        ),
+    ] {
+        crate::ui::settings::tests::render(&ctx, events, |ui| {
+            c.begin_frame(ui);
+            c.selection_controls(
+                ui,
+                Rect::from_min_size(Pos2::ZERO, egui::vec2(800., 600.)),
+                s,
+                t(),
+            );
+            assert!(c.apply_shape_style(
+                StylePatch::Width(width),
+                id,
+                ui.input(|i| i.pointer.primary_down())
+            ));
+            c.end_frame(ui);
+        });
+    }
+    let after = c.drawing.items().to_vec();
+    c.undo();
+    assert_eq!(c.drawing.items(), before);
+    c.redo();
+    assert_eq!(c.drawing.items(), after);
+}

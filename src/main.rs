@@ -12,6 +12,8 @@ mod pen;
 mod selection;
 mod settings;
 mod shape;
+#[cfg(test)]
+mod shape_style_tests;
 mod smoothing;
 mod storage;
 mod ui;

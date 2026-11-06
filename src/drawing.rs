@@ -528,6 +528,66 @@ impl Drawing {
         self.execute(Command::Replace { before, after });
         true
     }
+    /// One atomic mixed-selection formatting transaction. During a continuous
+    /// control gesture merge only when the preceding result exactly matches.
+    pub fn format_shapes(
+        &mut self,
+        ids: &std::collections::HashSet<Uuid>,
+        patch: crate::shape::StylePatch,
+        merge: bool,
+    ) -> bool {
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        let mut changed = false;
+        for (index, object) in self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| ids.contains(&o.id()))
+        {
+            let ObjectSnapshot::Shape(shape) = object else {
+                continue;
+            };
+            let mut target = (**shape).clone();
+            patch.apply(&mut target);
+            changed |= target != **shape;
+            let target = if target == **shape {
+                object.clone()
+            } else {
+                ObjectSnapshot::from(target)
+            };
+            if !self.valid_object(&target) {
+                return false;
+            }
+            before.push((index, object.clone()));
+            after.push((index, target));
+        }
+        if !changed {
+            return false;
+        }
+        let original = if merge && self.cursor == self.history.len() {
+            match self.history.last() {
+                Some(Command::Replace {
+                    before: original,
+                    after: previous,
+                }) if *previous == before => Some(original.clone()),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if let Some(original) = original {
+            self.history.pop();
+            self.cursor -= 1;
+            self.execute(Command::Replace {
+                before: original,
+                after,
+            });
+        } else {
+            self.execute(Command::Replace { before, after });
+        }
+        true
+    }
     pub fn replace_shape(&mut self, shape: crate::shape::Shape) -> bool {
         let Some(index) = self.items.iter().position(|o| o.id() == shape.id) else {
             return false;

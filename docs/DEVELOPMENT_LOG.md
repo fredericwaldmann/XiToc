@@ -424,3 +424,33 @@ fast five-object drags, leaving/returning to canvas, exact repeated positions,
 oversized selection at 400%, cancellation and history. Native release startup
 works, but Wayland desktop capture/input verification was unavailable. TEST_PLAN
 records failures, matrix, timings, visual evidence and manual checks.
+
+## 2026-11-06 — Shape styling and formatting (M1.5 slice of #24)
+
+Started feature/shape-styling from latest origin/main (75e7689). The requested
+issue title does not exist; read the complete matching #24 “[M1.5] Shapes and
+Styling” and its empty comments list. Its embedded/shared-text criteria remain
+outside this task, so the PR references #24 without closing it.
+
+Added independent optional fill/color/alpha, border enablement/color/width/alpha/
+solid-dashed-dotted pattern, segment start/end/both/no heads and clamped rounded
+radius. Captured semantic styles stay on the shared Shape objects. Compatible
+multi-selection patches use one validated Replace journal transaction, retaining
+identity, geometry/Placement, order, ink and unrelated objects. Arrowhead contours
+follow directed endpoints through existing transforms and handle edits.
+
+The existing selection toolbar now offers contextual formatting menus and the
+canvas right-click menu exposes the same Format hierarchy. Mixed values are
+explicit; shared slider rails use existing tokens. Shape creation defaults live
+separately in application settings and are captured on press. No text, connectors,
+PDF persistence, sidecars or Explorer/tab/main-toolbar redesign.
+
+Real browser testing exposed a final-release sample creating a second undo step.
+A focused mixed-selection controller test reproduced it before the fix. Formatting
+gesture cleanup now runs in end_frame after all surface/popup controls, allowing
+the last sample to merge. A second UI regression keeps mixed-to-common slider IDs
+and positions stable. Existing movement sessions and preview clipping are unchanged.
+
+See TEST_PLAN for final checks, actual browser observations, manual procedures and
+platform limits. CODEBASE_GUIDE/UI_DESIGN/ARCHITECTURE and the decision record
+specify model ownership, command coalescing, defaults and future connector work.

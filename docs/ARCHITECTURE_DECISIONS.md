@@ -449,3 +449,24 @@ and original geometry. Cached mesh previews remain transient; there is no
 incremental geometry mutation, animation, auto-pan or PDF change. A view/content
 change cancels instead of silently rebasing. This keeps existing Page limits and
 undo semantics while allowing unrestricted Whiteboard viewport crossings.
+
+
+## 2026-11-06 — Formatting uses object patches and the shared journal
+
+Keep captured styles on Shape, radius in Box geometry and the existing end head
+in Segment. Add an explicit border-enabled flag (rather than losing the preferred
+width/color) and a start-head style flag; both have backwards semantic defaults.
+Both heads derive from directed local endpoints before Placement, so no cached
+screen-space head positions can become stale during transformations.
+
+One typed StylePatch applies only supported properties. Batch formatting validates
+all target snapshots before replacing any; unchanged objects preserve Arcs. Reuse
+the existing Replace command, merging a continuous widget gesture only while its
+revision and prior snapshots agree. This avoids extra undo entries without a
+second formatting history or changing the movement preview/commit protocol.
+
+Persist ShapeDefaults solely in existing application preferences, snapshotting on
+creation press. Tradeoff: alpha retains the existing byte representation, so UI
+percentages round to 1/255 increments; radius drawing clamps on later shrinking.
+The actual matching issue is #24 with no comments and includes out-of-scope shared
+text. Reference it without Fixes; magnetic connectors and PDF saving remain future.

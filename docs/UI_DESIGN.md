@@ -224,7 +224,7 @@ never moves. Matching Copy/Paste/Duplicate/Delete/Select All and Undo/Redo comma
 are exposed through Edit and canvas context menus. Ctrl/Cmd+C/V/D, Delete/Backspace,
 Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z follow focus. The in-app clipboard remains available
 when system clipboard permissions/integration are unavailable; arbitrary clipboard
-text is not treated as a native note. No unfinished shape/style controls appear.
+text is not treated as a native note. No unfinished tools appear. Shapes formatting is specified below.
 
 ### M1.4 rotation, Cut and keyboard movement
 
@@ -296,7 +296,7 @@ fill RGB(90,150,220), opacity 35/255 (~14%). Fill None is semantically distinct
 from transparent fill. Rounded corners default to min(12 pt, 20% of shorter side).
 Arrowheads default to length 12 pt/width 10 pt, clamped for short segments. Widths
 scale with Placement; dash/dot spacing is proportional to logical width. These
-are captured semantic defaults, not new formatting controls.
+are initial semantic defaults; Settings → Drawing can configure creation styling.
 
 Click/add/subtract, directional rectangles, lasso, clipboard, move/rotate/flip and
 history work for mixed ink/shape selections. Singleton boxes show local corner
@@ -306,8 +306,7 @@ Singleton lines/arrows show their two endpoint handles: drag either to adjust
 length/direction, Shift to constrain angle, with the other endpoint fixed. Endpoint
 and corner click jitter below 3 screen points never commits a geometry edit.
 Each completed creation/edit is one undo step. Shape erasing uses selection
-Delete/Cut; ink erasers retain their existing behavior. No embedded text,
-formatting panel, magnetic attachments, connector routing or shape PDF saving.
+Delete/Cut; ink erasers retain their existing behavior. No embedded text, magnetic attachments, connector routing or shape PDF saving.
 
 Shape body drags preserve the initial pointer offset and current multi-selection.
 Only visible local corners/endpoints resize a singleton shape; an invisible
@@ -328,3 +327,48 @@ restores the original geometry without history. View/layout changes cancel safel
 rather than changing the drag reference frame; navigation remains blocked during
 Whiteboard drags. Actual Page Note bounds still constrain movement independently
 of the viewport. No smoothing, animation or auto-pan is added.
+
+
+## M1.5 shape styling and formatting
+
+Selection retains the nearby contextual toolbar. Shape selections add Fill (closed
+forms), Border or Line, Width, Style, Opacity, Arrowheads (segments), and More.
+Fill provides RGB color, 0–100% opacity and an explicit enabled/no-fill choice;
+Border/Line provides independent RGB/opacity and enabled/no-border choice. Width
+is 0.1–24 logical document points. Solid, dashed and dotted patterns share the
+same width infrastructure. Dash/gap lengths are 4×/2× width; dot center spacing is
+2.5× width and dot radius 0.5× width. Placement and zoom scale these together;
+DPI affects tessellation only. Closed fills composite in canonical object order.
+
+Arrowheads offers None, Start, End and Both ends, also for straight lines.
+Filled heads remain solid when the shaft is dashed/dotted and follow directed
+endpoints through rotation, reflection, resizing and endpoint editing. More
+includes No fill, No border/line and rounded rectangles' Corner radius. Radius is
+nonnegative and clamps to half the shorter local side; later shrinking safely
+clamps the displayed radius without invalid geometry.
+
+Mixed compatible selections show “Mixed values”; the first compatible value seeds
+the editor, and changing a property applies just that property to all compatible
+shapes. Fill skips segments, radius skips other forms, arrowheads skip closed
+shapes, and ink is untouched. A batch is one undo operation; continuous pointer
+adjustments preview immediately and coalesce until release. New adjustments remain
+separate undo steps. Unselected objects and application defaults do not change.
+
+Right-click → Format exposes these same menus and commands. Interactive menus use
+CloseOnClickOutside so sliders and nested color pickers remain open. Existing
+selection-group right-click and Transform behavior remains. Widgets retain native
+egui keyboard focus, picker interaction and light/dark styling.
+
+The toolbar uses Surface/Border tokens, six-point corners and existing compact
+spacing. FORMAT_TOOLBAR_WIDTH=480 is a maximum, clamped to available editor width;
+controls wrap in small editors. FORMAT_TOOLBAR_GAP=12 and the existing rotation
+clearance place it above the handles when possible, otherwise below the selection,
+constrained to the visible editor. Oversized selections may leave no completely
+unoccupied space; the editor constraint takes precedence. No drawing tools move
+from the top, and Explorer/tabs remain unchanged.
+
+Settings → Drawing → Default shape style configures new objects with these same
+widgets, including new-arrow heads and rounded radius. Defaults persist through
+the existing local application preferences backend. Unconfigured radius preserves
+adaptive min(12 pt, 20% of shorter side) creation behavior. A configured radius
+clamps to each new shape's bounds. Object edits never implicitly set defaults.

@@ -993,3 +993,78 @@ unverified. Use the following manual protocol on a real desktop and browser:
 5. On Page Notes repeat after scrolling/zooming. Actual page edges constrain
    geometry; the visible scroll viewport must only clip graphics. Navigation or
    layout changes during a gesture safely cancel rather than rebase it.
+
+## Shape styling and formatting (M1.5 slice of #24, 2026-11-06)
+
+Automated coverage: 155 active tests passing, eight manual release benchmarks
+ignored in the ordinary suite. New shape styling fixtures cover fill color/alpha/
+no-fill, border color/alpha/width/enablement, solid/dashed/dotted rendering,
+start/end/both/no heads through rotation/scale/reflection/endpoint editing,
+clamped radius and later shrinking, semantic/default compatibility and validation,
+clipboard suitability, untouched ink/unselected Arcs, IDs/geometry/order,
+compatible batches, exact undo/redo, mixed initial values and redo truncation.
+Controller fixtures verify captured creation defaults on both layouts at
+50/100/200/400% zoom; cached renderer fixtures verify alpha and invisible
+no-fill/no-border output at those scales. Existing dragging, offscreen clipping,
+hover loss, group movement, local handles, selection/lasso, transforms, clipboard,
+ink and eraser regressions pass.
+
+Two formatting gesture regressions have focused coverage: mixed-to-common values
+must preserve control identity/position, and a changed final slider sample on
+release must merge with the preceding held-pointer samples. The latter was
+reproduced failing before cleanup moved to end_frame. Displaying 0/1/35/64/127/
+128/254/255 byte alpha must never modify it merely by rounding the displayed
+percentage; a separate UI test guards against such implicit edits.
+
+Performed checks: cargo fmt --all -- --check, cargo clippy --all-targets -- -D
+warnings, cargo test --all-targets, native cargo build --release and cargo check
+--target wasm32-unknown-unknown. Native release remained alive without errors for
+a deliberate eight-second startup timeout. This is startup, not native interactive
+input certification. Final Trunk release packaging is recorded below.
+
+Actual packaged-WASM Firefox smoke created shapes, changed fill opacity through
+a continuous pointer drag, used Undo/Redo, chose dashed borders, opened the canvas
+Format submenu, created a freestanding arrow and selected Both ends. Inspected
+the selection toolbar and opacity controls in Light/Dark at 1100×760 and the
+wrapped toolbar at 480×360 with a partly offscreen selected rectangle. The main
+drawing tools remain directly below tabs; Explorer and tabs retain their layout.
+Visual evidence: [fill Light](screenshots/shape-styling/fill-light.png),
+[fill Dark](screenshots/shape-styling/fill-dark.png),
+[narrow](screenshots/shape-styling/narrow.png),
+[Format](screenshots/shape-styling/format-menu.png),
+[both heads](screenshots/shape-styling/arrowheads.png).
+
+Manual verification:
+1. Create all eight forms on Page and Whiteboard notes. Select closed forms and
+   change Fill color/opacity, disable Fill, then restore it. Place shapes over
+   handwriting to check source-over transparency and independent object styles.
+2. Change Border/Line color, Width, Opacity and Solid/Dashed/Dotted; disable and
+   restore borders. Repeat under pan/zoom and device scaling. Select mixed ink,
+   boxes and segments: fill/radius/heads must skip incompatible content.
+3. Select several differently styled rectangles. Drag a slider continuously,
+   release at a new value, Undo once and verify all original mixed values. Redo
+   restores the batch. Confirm opening any menu alone does not edit content.
+4. Set None/Start/End/Both ends on segments, then move/resize/rotate/flip and edit
+   endpoints. Adjust rounded radius, shrink its box, and check smooth clamping.
+5. Repeat through right-click → Format, from Selection/Lasso and other tools.
+   Confirm right-clicking a selected member preserves the group. Copy/paste,
+   duplicate, delete, Undo/Redo and both erasers retain existing behavior.
+6. Settings → Drawing → Default shape style: configure common style, radius and
+   arrowheads; create more shapes and verify old objects are unchanged. Restart
+   and verify preferences, without expecting any handwritten/shape PDF saving.
+7. Repeat recent drag regression protocols above, especially partly offscreen/
+   oversized objects and fast mixed-group movement. Test 480×360, both themes,
+   keyboard focus and high-DPI devices on native and browser.
+
+Windows/macOS runtime, physical stylus/high-DPI monitors, exhaustive interactive
+native gestures and low-end device latency remain unverified. No magnetic
+relationships, embedded text or PDF serialization are implemented.
+
+Final `trunk build --release` completed successfully after the complete native/
+WASM/check suite. The packaged application remains local-only for note content.
+
+After the final build, a fresh Firefox session repeated a continuous fill-opacity
+drag followed by one Ctrl+Z and Redo. RGB comparisons of the unobstructed shape
+interior matched exactly before versus Undo and adjusted versus Redo; the adjusted
+image differed from the original. This verifies the release/coalescing and
+no-implicit-alpha-rounding fixes in the actual packaged application.

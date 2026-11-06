@@ -339,5 +339,9 @@ circle, ellipse, triangle, diamond, straight line and arrow. Drag to create; Shi
 constrains proportions/angles and Escape cancels. The new shape becomes selected.
 Use local corner handles to resize boxes or endpoint handles to edit lines/arrows;
 move/rotate/flip/copy/paste/delete and undo/redo share the ink object pipeline.
-Formatting controls, text inside shapes, magnetic connectors and PDF persistence
-remain future work. Shapes and handwriting are currently memory-only.
+Select shapes to edit fill, border, independent opacity, width and solid/dashed/
+dotted styles in the nearby toolbar or right-click → Format. Lines/arrows support
+start/end/both/no arrowheads; rounded rectangles expose radius under More.
+Compatible multi-selections format in one undo step. Settings → Drawing stores
+separate defaults for new shapes. Text inside shapes, magnetic connectors and PDF
+persistence remain future work. Shapes and handwriting are currently memory-only.

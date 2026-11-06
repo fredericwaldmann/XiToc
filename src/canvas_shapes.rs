@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
     object::{Placement, Point},
-    shape::{BorderStyle, Shape, ShapeKind},
+    shape::{BorderStyle, Shape},
 };
 
 pub(super) struct ShapeDraft {
@@ -12,6 +12,7 @@ pub(super) struct ShapeDraft {
     view: Transform,
     id: Uuid,
     preview: Option<Shape>,
+    defaults: crate::shape::ShapeDefaults,
 }
 pub(super) struct ShapeCache {
     source: Shape,
@@ -56,8 +57,8 @@ pub(super) fn paint_shape(
             (shape.style.border_width * shape.placement.scale * delta.scale * view.scale) as f32;
         for (index, path) in paths.into_iter().enumerate() {
             let points: Vec<_> = path.into_iter().map(|p| screen(delta.apply(p))).collect();
-            let head = shape.kind() == ShapeKind::Arrow && index == 1;
-            let fill = if head {
+            let head = shape.kind().segment() && index > 0;
+            let fill = if head && shape.style.border_enabled {
                 Some(border)
             } else if shape.filled() {
                 shape.style.fill.map(|c| {
@@ -73,7 +74,14 @@ pub(super) fn paint_shape(
                 }
                 shapes.push(egui::Shape::convex_polygon(polygon, fill, Line::NONE));
             }
-            match shape.style.border_style {
+            if !shape.style.border_enabled {
+                continue;
+            }
+            match if head {
+                BorderStyle::Solid
+            } else {
+                shape.style.border_style
+            } {
                 BorderStyle::Solid => {
                     shapes.push(egui::Shape::line(points, Line::new(width, border)))
                 }
@@ -153,6 +161,7 @@ impl Canvas {
             shift,
         ) {
             shape.id = draft.id;
+            draft.defaults.apply(&mut shape);
             if self
                 .drawing
                 .valid_object(&ObjectSnapshot::from(shape.clone()))
@@ -205,6 +214,7 @@ impl Canvas {
                             view,
                             id: Uuid::new_v4(),
                             preview: None,
+                            defaults: self.shape_defaults.clone(),
                         });
                     }
                 }

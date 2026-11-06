@@ -58,6 +58,8 @@ impl SettingsDialog {
                             });
                             super::drawing_controls::preset(ui, &mut prefs.drawing.presets);
                             ui.separator();
+                            super::shape_controls::defaults(ui, &mut prefs.drawing.shape_defaults);
+                            ui.separator();
                             super::drawing_controls::eraser_radius(ui, &mut prefs.drawing.eraser_radius);
                             ui.strong("Eraser mode");
                             egui::ComboBox::from_id_salt("preferred-eraser-mode")

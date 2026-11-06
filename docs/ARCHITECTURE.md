@@ -569,3 +569,26 @@ than intersecting the screen-space clip. Hover loss preserves held gestures;
 explicit release, contact cancellation and focus/button-state loss govern their
 lifecycle. eframe's existing document-wide web mouse handlers remain authoritative;
 the browser boundary adds only the missing explicit mouse cancellation event.
+
+
+## M1.5 — Shape formatting slice of #24
+
+Semantic ShapeStyle now exposes independent fill/border alpha, optional fill,
+explicit border enablement, line pattern/width and start-arrowhead styling.
+Existing Segment head and Box radius geometry remain authoritative. Directed
+head contours feed bounds, selection and cached rendering after every Placement
+or endpoint edit. No separate formatting object system or egui semantic types.
+
+StylePatch and Drawing::format_shapes reuse the canonical snapshot Replace
+journal for atomic compatible batch edits. UI-only widget/revision tracking
+coalesces continuous adjustments when previous snapshots match exactly; history
+retains original mixed values. Selection bounds/indexes refresh via revisions.
+The frozen movement session and graphics-layer preview/clipping are unchanged.
+
+ShapeDefaults is independent application state under DrawingPreferences, captured
+on shape pointer-down and copied into newly created objects. Settings, contextual
+selection and Format menus share patch widgets; selecting an object never mutates
+defaults. New fields default for older schema-5 preferences/semantic styles.
+Unknown fields still fail validation. PDF schema 1, storage and save guards remain
+unchanged. #24 remains open for embedded/shared text; #25 still needs attachment
+relationships, perimeter anchors, routing and relation-aware commands.
