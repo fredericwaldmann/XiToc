@@ -1,6 +1,7 @@
 //! XiToc design tokens. See docs/UI_DESIGN.md before extending the interface.
 use egui::{Color32, FontFamily, FontId, Margin, Stroke, TextStyle};
 
+pub const COLOR_PICKER_WIDTH: f32 = 180.0;
 pub const FORMAT_TOOLBAR_WIDTH: f32 = 480.0;
 pub const FORMAT_TOOLBAR_GAP: f32 = 12.0;
 pub const SHAPE_PICKER_ICON: f32 = 30.0;

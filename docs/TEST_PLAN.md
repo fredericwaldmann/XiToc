@@ -1068,3 +1068,70 @@ drag followed by one Ctrl+Z and Redo. RGB comparisons of the unobstructed shape
 interior matched exactly before versus Undo and adjusted versus Redo; the adjusted
 image differed from the original. This verifies the release/coalescing and
 no-implicit-alpha-rounding fixes in the actual packaged application.
+
+## Border rendering and color-picker correction (2026-11-06, PR #39)
+
+Passed: formatting check, Clippy all-targets with warnings denied, 165 active tests
+(eight manual benchmarks ignored), native Linux release build, wasm32 compilation
+and Trunk release build. New fixtures verify cyclic rectangle edge/corner mesh
+coverage at 50/100/200/400% with rotation, rounded/circle/ellipse continuity,
+bounded acute joins, cross-corner joined dash lengths, full closing seam gaps,
+equal closed dash periods, even nonoverlapping dots, density/degenerate bounds,
+independent custom pattern lengths/thickness, legacy defaults, transform and
+clipboard/duplicate/paste preservation, undo/redo, conditional UI controls and
+interactive inline picker/hex changes without alpha/border mutation. Existing
+smooth/offscreen/multi-object drag, selection/lasso/directional selection,
+transform/clipboard, ink/preset/eraser and continuous-slider regressions pass.
+
+Actual Firefox WASM reproduction: clicking the old Fill swatch dismissed the
+parent menu and left no usable picker. The corrected inline picker remained open
+while pointer changes to hue and saturation/value changed the selected fill.
+Hex RGB #35A34D recolored that shape; a second rectangle's pixels stayed unchanged,
+and the separate 24% fill opacity and blue border were retained. A six-object
+border recolor to #A52B64 changed all outlines. One Undo restored all original body
+pixels exactly; Redo restored all recolored pixels exactly (RGB crop excludes
+menu/toolbar hover feedback). Dashed Style controls accepted dash 24/gap 8, while
+Width still displayed the original 3 pt. Solid and Dotted conditionals are also
+automated through real menu widgets.
+
+The visual scene was seeded through the existing semantic clipboard event route
+with six objects, then manipulated using actual pointer/key controls: solid and
+dashed rectangles, dashed rounded rectangle, dotted circle, dashed triangle and
+rotated dotted diamond. This is not certification of an OS system clipboard.
+Final packaged-build screenshots inspect all six at 100%, and pan/zoom checks at
+50/100/200/400%; zoomed solid corners remain fully connected. Additional 400%
+dash/rounded/dot inspections are recorded with the captures below. The top drawing
+toolbar, Explorer and tabs retain their existing placement.
+
+Manual review:
+1. Create the six forms above; disable fill to inspect their borders. Check every
+   corner and seam while resizing/rotating/flipping and at 50/100/200/400% zoom.
+2. Style → Dashed: set dash 12, gap 6, then 24/8. Check equal periods around the
+   whole outline (closed fitting scales lengths uniformly). Change thickness and
+   confirm requested dash/gap remain unchanged. Repeat for open lines/arrows.
+3. Dotted: adjust spacing and diameter, including tight curves/skinny shapes.
+   Check even distribution, no seam cluster and no geometric dot overlap. Solid
+   must not show dash/dot controls; head triangles remain solid.
+4. Fill/Border → Color picker: use hue/SV/RGB controls and custom hex RGB. Preview
+   updates immediately, selection remains intact, and opacity stays independent.
+   Repeat with mixed multi-selections and via right-click → Format and Settings.
+5. Undo/Redo edits, including a continuous slider's final release sample; copy,
+   duplicate and paste, transform objects, then reopen the formatting menus to
+   verify custom values. Repeat on Page Notes; no PDF object saving is expected.
+
+Interactive native Windows/macOS/high-DPI hardware and physical input latency
+remain unverified; shared controller/mesh tests and native/WASM builds do not
+certify those devices. No magnetic connectors or PDF persistence were added.
+
+Captures: [six shapes](screenshots/border-correction/scene.png),
+[working picker](screenshots/border-correction/color-picker.png),
+[24/8 custom pattern](screenshots/border-correction/custom-dashes.png),
+[unchanged thickness](screenshots/border-correction/thickness.png),
+[50%](screenshots/border-correction/zoom50.png),
+[400% solid corners](screenshots/border-correction/zoom400.png).
+[400% dashed rectangle](screenshots/border-correction/dashed400.png) and
+[400% rounded rectangle](screenshots/border-correction/rounded400.png).
+Opaque pixel-run inspection of the rounded rectangle's straight top edge measured
+49–50 px dashes (one-pixel raster rounding), consistent with uniform perimeter fit.
+[400% dotted circle](screenshots/border-correction/dotted400.png) shows uniform
+centers and round, separated dots after panning it fully into the editor.

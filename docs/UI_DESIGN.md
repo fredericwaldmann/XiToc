@@ -295,7 +295,7 @@ Defaults: blue border RGB(37,99,200), 2 document points, solid; closed shapes ha
 fill RGB(90,150,220), opacity 35/255 (~14%). Fill None is semantically distinct
 from transparent fill. Rounded corners default to min(12 pt, 20% of shorter side).
 Arrowheads default to length 12 pt/width 10 pt, clamped for short segments. Widths
-scale with Placement; dash/dot spacing is proportional to logical width. These
+scale with Placement; pattern dimensions are independent logical-point values. These
 are initial semantic defaults; Settings → Drawing can configure creation styling.
 
 Click/add/subtract, directional rectangles, lasso, clipboard, move/rotate/flip and
@@ -336,8 +336,8 @@ forms), Border or Line, Width, Style, Opacity, Arrowheads (segments), and More.
 Fill provides RGB color, 0–100% opacity and an explicit enabled/no-fill choice;
 Border/Line provides independent RGB/opacity and enabled/no-border choice. Width
 is 0.1–24 logical document points. Solid, dashed and dotted patterns share the
-same width infrastructure. Dash/gap lengths are 4×/2× width; dot center spacing is
-2.5× width and dot radius 0.5× width. Placement and zoom scale these together;
+same width infrastructure. Dash/gap and dot dimensions are independent logical-point settings (see the
+border correction below). Placement and zoom scale these together;
 DPI affects tessellation only. Closed fills composite in canonical object order.
 
 Arrowheads offers None, Start, End and Both ends, also for straight lines.
@@ -355,7 +355,7 @@ adjustments preview immediately and coalesce until release. New adjustments rema
 separate undo steps. Unselected objects and application defaults do not change.
 
 Right-click → Format exposes these same menus and commands. Interactive menus use
-CloseOnClickOutside so sliders and nested color pickers remain open. Existing
+CloseOnClickOutside; color selection expands inline to preserve the parent menu. Existing
 selection-group right-click and Transform behavior remains. Widgets retain native
 egui keyboard focus, picker interaction and light/dark styling.
 
@@ -372,3 +372,40 @@ widgets, including new-arrow heads and rounded radius. Defaults persist through
 the existing local application preferences backend. Unconfigured radius preserves
 adaptive min(12 pt, 20% of shorter side) creation behavior. A configured radius
 clamps to each new shape's bounds. Object edits never implicitly set defaults.
+
+
+### Shape border and color corrections
+
+Style → Dashed exposes Dash length and Gap length; Dotted exposes Dot spacing
+(center-to-center) and Dot size (diameter). Solid exposes neither. Values are
+0.25–256 logical document points, independent of the 0.1–24 pt border thickness.
+Defaults are dash 8, gap 4, spacing 5, diameter 2 pt. Each shape captures its own
+settings; defaults in Settings use the same controls. Placement/group scaling
+scales appearance uniformly, while camera zoom/DPI never rewrites properties.
+If spacing is reduced below diameter, diameter clamps; increasing diameter beyond
+spacing raises spacing. Thickness never changes any pattern setting.
+
+Closed dashed contours fit round(perimeter / requested period) equal periods
+(at least one), scaling all dash/gap lengths by the same factor to retain their
+ratio. The closing seam lies at the center of a full gap. Open strokes retain
+requested lengths, clipping only the final dash. Dashes crossing a corner remain
+one joined polyline. Closed dots use floor(perimeter / spacing) uniformly spaced
+centers; if chords at sharp corners/opposite sides would overlap circles, reduce
+the count globally while retaining even arclength distribution. No duplicate seam
+point. Pattern output is bounded to 8192 marks on extreme geometry; fitting that
+limit increases effective spacing rather than allocating unbounded geometry.
+
+Borders have explicit cyclic closure. Joins use a miter limit of two half-widths,
+then bounded bevels at sharper turns; they do not leave disconnected caps at
+corners. Curves use a stable 0.01-world-point contour tolerance (existing sample
+caps remain), so pattern phase/count does not depend on view zoom or pixel density.
+Head triangles remain solid, independent of shaft pattern.
+
+Fill and Border/Line show a transparency-aware color swatch, Color picker toggle,
+Hex RGB field, and separate opacity slider. Clicking either the swatch or toggle
+expands egui's RGB/HSV picker inline in the same menu, avoiding competing root
+popups. The preview includes the object's actual alpha; RGB edits preserve that
+alpha. Hex accepts #RRGGBB or RRGGBB and commits valid input on Enter/focus loss;
+invalid input never changes semantic color. Picking a fill color enables fill;
+editing a disabled border retains its disabled state. Mixed compatible selections
+reuse the same color commands and shared batch history.

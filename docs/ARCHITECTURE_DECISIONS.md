@@ -470,3 +470,23 @@ creation press. Tradeoff: alpha retains the existing byte representation, so UI
 percentages round to 1/255 increments; radius drawing clamps on later shrinking.
 The actual matching issue is #24 with no comments and includes out-of-scope shared
 text. Reference it without Fixes; magnetic connectors and PDF saving remain future.
+
+## 2026-11-06 — Measure patterns before view transforms; retain joined paths
+
+Solid borders must use cyclic tessellation; repeated endpoint coordinates on an
+open path do not supply a cyclic join. egui's dashed helper keeps length phase
+across edges but emits separate segment shapes, so it cannot provide a joined
+dash across a corner or a balanced closed seam. Its dot helper likewise does not
+fit a closed perimeter. Introduce one pure MeasuredPath and one cached rendering
+adapter, with limited miter/bevel joins and independent semantic pattern lengths.
+Closed fitting scales dash/gap uniformly (retaining their ratio) and puts the seam
+in a gap. Dots remain uniformly distributed, reducing count globally to avoid
+geometric overlap. Extremely dense output is bounded to 8192 marks. These fitting
+policies must be replicated by future PDF export rather than silently reverting
+to per-edge/different screen-space patterns.
+
+The actual running WASM app reproduced a second root color popup closing the
+parent formatting menu. Inline RGB/HSV selection avoids that competing popup
+lifecycle, as the existing pen settings already do. Keep RGB edits and hex input
+separate from captured alpha to avoid premultiplication or implicit opacity loss.
+No connector relations or saved-PDF schema changes are part of this correction.

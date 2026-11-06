@@ -538,13 +538,13 @@ placement inverse and keep the opposite endpoint fixed. Group/ink transforms
 reuse M1.4 proportional placement, rotation and reflection commands atomically.
 
 Rendering caches convex fills/border paths as meshes by content/view/DPI/preview.
-Adaptive contours target 0.15 physical-pixel chord error, capped at 2048 vertices
+Rendering contours use stable 0.01-world-point chord tolerance, capped at 2048 vertices
 per ellipse and 512 samples per rounded corner. Geometry selection uses tighter
 0.025-point contours; curve bounds are analytic and polygon/head bounds use their
 actual transformed vertices. Bounds only prune the exact narrow phase. Filled interiors
 participate in point/crossing tests; line/arrow shafts and heads remain precise
 vector hits. Lasso requires full contour envelopes and excludes lasso boundaries
-intruding into filled interiors. Dash/dot lengths derive from logical border width.
+intruding into filled interiors. Dash/gap/dot dimensions are captured independently in logical document points.
 Ink erasers intentionally ignore semantic shapes; selection deletes/cuts them.
 
 Future styling edits can replace Shape snapshots in the same journal. Future
@@ -592,3 +592,27 @@ defaults. New fields default for older schema-5 preferences/semantic styles.
 Unknown fields still fail validation. PDF schema 1, storage and save guards remain
 unchanged. #24 remains open for embedded/shared text; #25 still needs attachment
 relationships, perimeter anchors, routing and relation-aware commands.
+
+
+### Shared stroke patterns and joined borders
+
+`stroke_pattern.rs` is UI-independent: PatternSettings stores independent logical
+point dash/gap/spacing/diameter, and MeasuredPath removes duplicate vertices and
+builds cumulative f64 arclength. It emits joined dash polylines and evenly spaced
+dot centers for open/closed contours. Closed patterns fit whole periods with a
+balanced gap seam; dot overlap prevention reduces count globally. Density caps
+bound extreme inputs. These are derived geometry, not canonical saved objects.
+
+`shape_border.rs` adapts those paths to anti-aliased egui meshes using explicit
+closed tessellation and miter/bevel normals with a two-half-width miter limit.
+All shape outlines and segment shafts share this adapter; heads use its solid
+closed-path branch. Shape meshes remain content/view/DPI cached, and the existing
+frozen drag/layer clipping pipeline is unchanged. Style bounds/hits include an
+independently configured dot diameter. Future connectors can reuse open routed
+polylines and these same style settings without restarting patterns at bends;
+attachment identities, anchors and routing remain future work.
+
+ShapeStyle's defaulted PatternSettings round-trips through semantic clipboard
+snapshots/default preferences. M2 must encode the same effective dash array/phase,
+round dots, joined outlines and transparency in conventional PDF graphics and
+embedded edit data. No PDF codec/schema, sidecar or save lifecycle changes here.

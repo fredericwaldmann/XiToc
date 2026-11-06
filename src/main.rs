@@ -12,10 +12,12 @@ mod pen;
 mod selection;
 mod settings;
 mod shape;
+mod shape_border;
 #[cfg(test)]
 mod shape_style_tests;
 mod smoothing;
 mod storage;
+mod stroke_pattern;
 mod ui;
 #[cfg(target_arch = "wasm32")]
 mod web_pressure;

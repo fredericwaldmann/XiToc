@@ -47,6 +47,8 @@ egui/eframe 0.37.0, and eframe's Glow rendering and persistence features.
 | [canvas_selection.rs](../src/canvas_selection.rs) | Private `canvas::selection_ui` submodule via `#[path]`; `SelectionGesture` and additional `impl Canvas` methods for selection/clipboard/previews |
 | [selection.rs](../src/selection.rs) | UI-independent `Selection`, `SelectionCommand`, `Membership`, `LassoRegion`, `rectangle_matches`, `move_by`, `scale_about` |
 | [shape.rs](../src/shape.rs) | UI-independent `Shape`, `ShapeGeometry`, `ShapeKind`, `ShapeStyle`, vector contours, hits/regions and local handle edits |
+| [stroke_pattern.rs](../src/stroke_pattern.rs) | UI-independent PatternSettings and cumulative MeasuredPath; joined dash slices, closed fitting and evenly distributed dots |
+| [shape_border.rs](../src/shape_border.rs) | Shared cached border adapter with closed miter/bevel tessellation for outlines, shafts and heads |
 | [canvas_shapes.rs](../src/canvas_shapes.rs) | Shared-controller shape draft input, endpoint/corner adapters and view-keyed mesh caching |
 | [object_clipboard.rs](../src/object_clipboard.rs) | `ObjectBundle`; capture, bounded validation/encode/decode, paste/duplicate with fresh IDs |
 | [smoothing.rs](../src/smoothing.rs) | Incremental `Preview::update`, `path`; local adaptive quadratic geometry/pressure |
@@ -358,7 +360,7 @@ after rotation). Rendering caches tessellated Arc
 meshes by semantic shape, Placement preview, view and pixel density. Idle frames
 reuse meshes. Translation/proportional-scale previews share the ink graphics-layer
 transform and retain base shape meshes, including return-to-start frames; rotation
-and intrinsic edits retain the geometry preview path. Curves target 0.15 physical-pixel chord tolerance, with bounded
+and intrinsic edits retain the geometry preview path. Curves use a stable 0.01-world-point chord tolerance, with bounded
 segment counts. Region/hit adapters use 0.025-document-point contours. Filled
 interiors participate in picking/crossing; no-fill interiors do not. Lines/arrows
 use shaft/head geometry rather than their bounding rectangle. The existing index
@@ -522,7 +524,7 @@ is included by the private selection adapter via `#[path]`; it is not a second
 editor implementation. Tests assert cache Arc reuse, index pruning, exact history,
 legacy decoding, clip geometry, ownership, layout/focus and discard behavior.
 
-The current source has 163 Rust tests: 155 normally run and eight ignored
+The current source has 173 Rust tests: 165 normally run and eight ignored
 release benchmarks (whole erase, partial document, partial geometry, smoothing,
 indexed lasso, rectangle selection, multi-stroke rotation preview, and multi-shape movement preview). Historical recorded results are in TEST_PLAN, not proof of hardware
 latency or a fresh run of every platform. [scripts/test_release.py](../scripts/test_release.py)
@@ -666,3 +668,27 @@ preferences use existing defaults. Settings → Drawing edits these independentl
 of selection; every shape draft captures them on press. Existing shape styles
 never resolve through preferences. Shape/default serde is preparation for future
 serialization, not PDF saving; the blank codec/schema is unchanged.
+
+
+### Border-pattern correction
+
+`stroke_pattern.rs::{PatternSettings,MeasuredPath}` owns pure f64 path measurement,
+closed-period fitting, joined dash slices, even dot placement and bounded-density/
+overlap policy. Parameters default to 8/4/5/2 pt (dash/gap/spacing/diameter), validate
+0.25–256 pt and live in `ShapeStyle::pattern`, independent of border_width. New
+StylePatch variants use the existing batch/continuous journal, preserving styles
+through placement, geometry edits, duplicate/paste and undo/redo. Legacy semantic
+styles default the missing field. Explicit dot size expands selection/cull bounds.
+
+`shape_border.rs` is the shared presentation adapter for all outline types. Closed
+contours no longer enter an open-line tessellator; joined dashes retain intermediate
+vertices and use limited miter/bevel normals. Curve measurement is independent of
+camera zoom/DPI; rebuilding still occurs only on cache-key changes. Geometry tests
+check corners, cross-corner lengths, seam balance, dot spacing/overlap, bounds and
+zoom/width independence; UI/model tests cover custom parameters and colors.
+
+`ui/shape_controls.rs::color_control` replaces the nested root picker popup with
+an inline RGB/HSV picker, alpha-aware preview and hex RGB input. The actual prior
+WASM swatch click dismissed Fill without a usable picker. Inline selection keeps
+parent focus/membership and commits color patches only on real RGB changes;
+opacity remains independent. Pattern controls appear conditionally in Style.

@@ -49,6 +49,98 @@ fn opacity(
     );
     changed(edits, r, patch((percent * 255. / 100.).round() as u8));
 }
+/// Inline picker: nested root popups close the parent formatting menu in egui.
+fn color_control(ui: &mut egui::Ui, rgb: &mut [u8; 3], alpha: u8) -> Option<egui::Id> {
+    let original = *rgb;
+    let toggle = ui.make_persistent_id("color-expanded");
+    let mut open = ui.data(|d| d.get_temp::<bool>(toggle).unwrap_or(false));
+    ui.horizontal(|ui| {
+        let preview = egui::color_picker::show_color(
+            ui,
+            egui::Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], alpha),
+            egui::vec2(38., 24.),
+        );
+        let swatch = ui
+            .interact(
+                preview.rect,
+                ui.make_persistent_id("color-swatch"),
+                egui::Sense::click(),
+            )
+            .on_hover_text("Open color picker");
+        if ui.button("Color picker").clicked() || swatch.clicked() {
+            open = !open;
+        }
+    });
+    ui.data_mut(|d| d.insert_temp(toggle, open));
+    if open {
+        ui.spacing_mut().slider_width = super::style::COLOR_PICKER_WIDTH;
+        let mut value = egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
+        if egui::color_picker::color_picker_color32(
+            ui,
+            &mut value,
+            egui::color_picker::Alpha::Opaque,
+        ) {
+            *rgb = [value.r(), value.g(), value.b()];
+        }
+        ui.weak("RGB color · opacity is adjusted separately");
+    }
+    let id = ui.make_persistent_id("hex-rgb");
+    let focused = ui.ctx().memory(|m| m.has_focus(id));
+    let mut hex = if focused {
+        ui.data(|d| d.get_temp::<String>(id))
+            .unwrap_or_else(|| format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]))
+    } else {
+        format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2])
+    };
+    ui.horizontal(|ui| {
+        ui.label("Hex RGB");
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut hex)
+                .id(id)
+                .desired_width(90.)
+                .char_limit(7),
+        );
+        if response.lost_focus()
+            && let Some(parsed) = parse_hex(&hex)
+        {
+            *rgb = parsed;
+        }
+    });
+    ui.data_mut(|d| d.insert_temp(id, hex));
+    (*rgb != original).then(|| ui.make_persistent_id("color-edit"))
+}
+fn parse_hex(text: &str) -> Option<[u8; 3]> {
+    let text = text.trim().strip_prefix('#').unwrap_or(text.trim());
+    if text.len() != 6 || !text.is_ascii() {
+        return None;
+    }
+    Some([
+        u8::from_str_radix(&text[..2], 16).ok()?,
+        u8::from_str_radix(&text[2..4], 16).ok()?,
+        u8::from_str_radix(&text[4..], 16).ok()?,
+    ])
+}
+fn pattern_length(
+    ui: &mut egui::Ui,
+    shapes: &[Shape],
+    label: &str,
+    value: impl Fn(&Shape) -> f64,
+    patch: impl Fn(f64) -> StylePatch,
+    edits: &mut Edits,
+) {
+    ui.push_id(label, |ui| {
+        mixed(ui, shapes, &value);
+        let mut v = value(&shapes[0]);
+        let response = super::drawing_controls::styled_slider(
+            ui,
+            egui::Slider::new(&mut v, 0.25..=256.)
+                .logarithmic(true)
+                .text(label)
+                .suffix(" pt"),
+        );
+        changed(edits, response, patch(v));
+    });
+}
 /// Horizontal contextual controls or the same menu hierarchy inside right-click.
 pub fn controls(ui: &mut egui::Ui, shapes: &[Shape]) -> Edits {
     let mut edits = Vec::new();
@@ -70,11 +162,9 @@ pub fn controls(ui: &mut egui::Ui, shapes: &[Shape]) -> Edits {
                 StylePatch::Fill(enabled.then_some(shape.style.fill.unwrap_or([90, 150, 220]))),
             );
             let mut color = shape.style.fill.unwrap_or([90, 150, 220]);
-            changed(
-                &mut edits,
-                ui.color_edit_button_srgb(&mut color),
-                StylePatch::Fill(Some(color)),
-            );
+            if let Some(id) = color_control(ui, &mut color, shape.style.fill_opacity) {
+                edits.push((StylePatch::Fill(Some(color)), id));
+            }
             opacity(
                 ui,
                 "Fill opacity",
@@ -100,11 +190,9 @@ pub fn controls(ui: &mut egui::Ui, shapes: &[Shape]) -> Edits {
                 first.style.border[1],
                 first.style.border[2],
             ];
-            changed(
-                &mut edits,
-                ui.color_edit_button_srgb(&mut color),
-                StylePatch::Border(color),
-            );
+            if let Some(id) = color_control(ui, &mut color, first.style.border[3]) {
+                edits.push((StylePatch::Border(color), id));
+            }
             opacity(
                 ui,
                 "Border / line opacity",
@@ -140,6 +228,54 @@ pub fn controls(ui: &mut egui::Ui, shapes: &[Shape]) -> Edits {
             if r.clicked() {
                 edits.push((StylePatch::Pattern(value), r.id));
             }
+        }
+        let dashed: Vec<_> = shapes
+            .iter()
+            .filter(|s| s.style.border_style == BorderStyle::Dashed)
+            .cloned()
+            .collect();
+        if !dashed.is_empty() {
+            ui.separator();
+            pattern_length(
+                ui,
+                &dashed,
+                "Dash length",
+                |s| s.style.pattern.dash,
+                StylePatch::DashLength,
+                &mut edits,
+            );
+            pattern_length(
+                ui,
+                &dashed,
+                "Gap length",
+                |s| s.style.pattern.gap,
+                StylePatch::GapLength,
+                &mut edits,
+            );
+        }
+        let dotted: Vec<_> = shapes
+            .iter()
+            .filter(|s| s.style.border_style == BorderStyle::Dotted)
+            .cloned()
+            .collect();
+        if !dotted.is_empty() {
+            ui.separator();
+            pattern_length(
+                ui,
+                &dotted,
+                "Dot spacing",
+                |s| s.style.pattern.dot_spacing,
+                StylePatch::DotSpacing,
+                &mut edits,
+            );
+            pattern_length(
+                ui,
+                &dotted,
+                "Dot size",
+                |s| s.style.pattern.dot_size,
+                StylePatch::DotSize,
+                &mut edits,
+            );
         }
     });
     menu(ui, "Opacity", |ui| {
@@ -336,6 +472,67 @@ mod tests {
         }
     }
     #[test]
+    fn inline_picker_and_custom_hex_recolor_shapes_without_touching_alpha() {
+        use super::super::settings::tests::{pointer, render};
+        let ctx = egui::Context::default();
+        let mut shape = Shape::create(
+            uuid::Uuid::new_v4(),
+            crate::drawing::Surface::Canvas,
+            ShapeKind::Rectangle,
+            [0., 0.],
+            [100., 80.],
+            false,
+        )
+        .unwrap();
+        shape.style.border[3] = 127;
+        let mut changes = Vec::new();
+        let mut frame = |events| {
+            render(&ctx, events, |ui| {
+                for (patch, _) in controls(ui, &[shape.clone()]) {
+                    changes.push(patch);
+                    patch.apply(&mut shape);
+                }
+            })
+        };
+        frame(vec![]);
+        let labels = frame(vec![]);
+        frame(pointer(labels["Fill"], true));
+        frame(pointer(labels["Fill"], false));
+        let labels = frame(vec![]);
+        let picker = labels["Color picker"];
+        frame(pointer(picker, true));
+        frame(pointer(picker, false));
+        let labels = frame(vec![]);
+        assert!(labels.contains_key("RGB color · opacity is adjusted separately"));
+        assert!(
+            labels.contains_key("Fill opacity"),
+            "Parent menu must stay open"
+        );
+        let label = labels["Hex RGB"];
+        let input = label + egui::vec2(80., 0.);
+        frame(pointer(input, true));
+        frame(pointer(input, false));
+        let key = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        frame(vec![
+            key(egui::Key::A, egui::Modifiers::COMMAND),
+            egui::Event::Text("#D82040".into()),
+        ]);
+        frame(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+        drop(frame);
+        assert_eq!(shape.style.fill, Some([216, 32, 64]));
+        assert_eq!(shape.style.fill_opacity, 35);
+        assert_eq!(shape.style.border, [37, 99, 200, 127]);
+        assert_eq!(changes, vec![StylePatch::Fill(Some([216, 32, 64]))]);
+        assert_eq!(parse_hex("#aBcD09"), Some([171, 205, 9]));
+        assert!(parse_hex("#xyz123").is_none());
+    }
+    #[test]
     fn real_menu_routes_style_with_mixed_values() {
         let ctx = egui::Context::default();
         let owner = uuid::Uuid::new_v4();
@@ -380,8 +577,12 @@ mod tests {
         click(&mut render, labels["Style"]);
         let labels = render(vec![]);
         assert!(labels.contains_key("Mixed values"), "{labels:?}");
+        assert!(labels.contains_key("Dash length") && labels.contains_key("Gap length"));
         let pos = labels["Dotted"];
         click(&mut render, pos);
+        let labels = render(vec![]);
+        assert!(labels.contains_key("Dot spacing") && labels.contains_key("Dot size"));
+        assert!(!labels.contains_key("Dash length") && !labels.contains_key("Gap length"));
         drop(render);
         assert_eq!(patches, vec![StylePatch::Pattern(BorderStyle::Dotted)]);
         assert!(

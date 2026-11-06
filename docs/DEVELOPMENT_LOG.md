@@ -454,3 +454,32 @@ and positions stable. Existing movement sessions and preview clipping are unchan
 See TEST_PLAN for final checks, actual browser observations, manual procedures and
 platform limits. CODEBASE_GUIDE/UI_DESIGN/ARCHITECTURE and the decision record
 specify model ownership, command coalescing, defaults and future connector work.
+
+
+## 2026-11-06 — Correct joined borders, perimeter patterns and color controls
+
+Continued feature/shape-styling and PR #39 without merging. Source investigation
+found solid contours repeated their start vertex but were tessellated as open
+lines, leaving cap joins at the seam. egui's dashed helper carried phase across
+edges, but emitted independent line segments at vertices, losing connected joins;
+neither its dash nor dot helper balanced the closing seam. Width-derived screen
+patterns also prevented independent formatting.
+
+Added UI-independent cumulative path measurement with joined cross-corner dash
+slices, whole-period closed fitting/gap-centered seam, even closed dot placement
+and global overlap/density bounds. One cached border adapter uses explicit closed
+stroke tessellation and limited miter/bevel joins across every shape/shaft/head.
+ShapeStyle captures independent logical-point pattern values with defaults and
+validation; shared Style controls expose conditional dash/gap/spacing/diameter.
+
+Actual Firefox reproduction confirmed that clicking the old swatch closed Fill
+without leaving a usable picker. The nested color button opened another root menu
+popup. Replaced it with an inline RGB/HSV picker, alpha-aware preview and hex RGB
+entry; RGB edits retain independent opacity. Automated real-widget tests exercise
+inline expansion, hex color commits, conditional pattern controls and unchanged
+alpha/border state. Model/history/clipboard tests preserve custom pattern values;
+mesh/path tests check closure, corners, uniform periods/dots and zoom independence.
+
+Existing drag sessions, layer preview clipping, IDs/order, pen/erasers and one-PDF
+save guards remain intact. No connectors, text or PDF persistence were introduced.
+See TEST_PLAN for completed checks, screenshots and platform limits.

@@ -40,6 +40,10 @@ fn properties_batch_history_preserve_objects_and_skip_incompatible() {
         StylePatch::Width(8.5),
         StylePatch::Pattern(BorderStyle::Dashed),
         StylePatch::Pattern(BorderStyle::Dotted),
+        StylePatch::DashLength(12.),
+        StylePatch::GapLength(6.),
+        StylePatch::DotSpacing(9.),
+        StylePatch::DotSize(3.),
         StylePatch::BorderEnabled(false),
         StylePatch::Heads(true, true),
         StylePatch::Heads(false, false),
@@ -75,6 +79,10 @@ fn properties_batch_history_preserve_objects_and_skip_incompatible() {
                 StylePatch::BorderOpacity(value) => assert_eq!(shape.style.border[3], value),
                 StylePatch::Width(value) => assert_eq!(shape.style.border_width, value),
                 StylePatch::Pattern(value) => assert_eq!(shape.style.border_style, value),
+                StylePatch::DashLength(v) => assert_eq!(shape.style.pattern.dash, v),
+                StylePatch::GapLength(v) => assert_eq!(shape.style.pattern.gap, v),
+                StylePatch::DotSpacing(v) => assert_eq!(shape.style.pattern.dot_spacing, v),
+                StylePatch::DotSize(v) => assert_eq!(shape.style.pattern.dot_size, v),
                 StylePatch::BorderEnabled(value) => assert_eq!(shape.style.border_enabled, value),
                 StylePatch::Heads(start, end) => {
                     if source.kind().segment() {
@@ -301,4 +309,81 @@ fn legacy_style_defaults_and_default_geometry_are_validated() {
     assert!(!defaults.valid());
     defaults.corner_radius = Some(f64::NAN);
     assert!(!defaults.valid());
+}
+
+#[test]
+fn custom_patterns_survive_transform_clipboard_history_and_ignore_thickness() {
+    let (mut drawing, shapes) = fixture();
+    let ids = shapes.iter().map(|s| s.id).collect();
+    for patch in [
+        StylePatch::DashLength(12.),
+        StylePatch::GapLength(6.),
+        StylePatch::DotSpacing(10.),
+        StylePatch::DotSize(3.),
+    ] {
+        assert!(drawing.format_shapes(&ids, patch, false));
+    }
+    let styled = drawing.items().to_vec();
+    for width in [1., 2., 12., 24.] {
+        drawing.format_shapes(&ids, StylePatch::Width(width), false);
+        for object in drawing.items() {
+            let ObjectSnapshot::Shape(s) = object else {
+                panic!()
+            };
+            assert_eq!(
+                s.style.pattern,
+                crate::stroke_pattern::PatternSettings {
+                    dash: 12.,
+                    gap: 6.,
+                    dot_spacing: 10.,
+                    dot_size: 3.
+                }
+            );
+        }
+    }
+    for object in &styled {
+        let ObjectSnapshot::Shape(source) = object else {
+            panic!()
+        };
+        let transformed = object.transformed(Placement {
+            rotation: 0.6,
+            reflected: [true, false],
+            scale: 2.,
+            position: [20., 30.],
+            ..Default::default()
+        });
+        let ObjectSnapshot::Shape(target) = transformed else {
+            panic!()
+        };
+        assert_eq!(source.style, target.style);
+    }
+    let bundle =
+        crate::object_clipboard::ObjectBundle::capture_objects(styled.iter().cloned()).unwrap();
+    let bundle = crate::object_clipboard::ObjectBundle::decode(&bundle.encode().unwrap()).unwrap();
+    let duplicate = bundle.duplicate(&mut drawing, Surface::Canvas);
+    assert_eq!(duplicate.len(), shapes.len());
+    for source in drawing
+        .items()
+        .iter()
+        .filter(|s| duplicate.contains(&s.id()))
+    {
+        let ObjectSnapshot::Shape(s) = source else {
+            panic!()
+        };
+        assert_eq!(s.style.pattern.dash, 12.);
+        assert_eq!(s.style.pattern.gap, 6.);
+    }
+    drawing.undo();
+    assert_eq!(drawing.items().len(), shapes.len());
+    drawing.redo();
+    assert_eq!(drawing.items().len(), shapes.len() * 2);
+    let pasted = bundle.paste(&mut drawing, Surface::Canvas, [500., 500.]);
+    assert_eq!(pasted.len(), shapes.len());
+    let mut legacy = serde_json::to_value(&shapes[0]).unwrap();
+    legacy["style"].as_object_mut().unwrap().remove("pattern");
+    let legacy: Shape = serde_json::from_value(legacy).unwrap();
+    assert_eq!(legacy.style.pattern, Default::default());
+    for invalid in [f64::NAN, f64::INFINITY, 0., -1., 257.] {
+        assert!(!drawing.format_shapes(&ids, StylePatch::DashLength(invalid), false));
+    }
 }

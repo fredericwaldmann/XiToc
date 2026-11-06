@@ -62,13 +62,24 @@ pub struct ShapeStyle {
     pub border: [u8; 4],
     pub border_width: f64,
     pub border_style: BorderStyle,
+    #[serde(default)]
+    pub pattern: crate::stroke_pattern::PatternSettings,
 }
 fn border_enabled() -> bool {
     true
 }
 impl ShapeStyle {
+    pub fn envelope_width(&self) -> f64 {
+        if self.border_style == BorderStyle::Dotted {
+            self.border_width.max(self.pattern.dot_size)
+        } else {
+            self.border_width
+        }
+    }
     pub fn valid(&self) -> bool {
-        self.border_width.is_finite() && (0.1..=24.).contains(&self.border_width)
+        self.border_width.is_finite()
+            && (0.1..=24.).contains(&self.border_width)
+            && self.pattern.valid()
     }
 }
 impl Default for ShapeStyle {
@@ -81,6 +92,7 @@ impl Default for ShapeStyle {
             border: [37, 99, 200, 255],
             border_width: 2.,
             border_style: BorderStyle::Solid,
+            pattern: Default::default(),
         }
     }
 }
@@ -384,7 +396,7 @@ impl Shape {
     }
     pub fn rectangle_matches(&self, bounds: ObjectBounds, crossing: bool) -> bool {
         let paths = self.contours(0.025);
-        let width = self.style.border_width * self.placement.scale;
+        let width = self.style.envelope_width() * self.placement.scale;
         if !crossing {
             return paths.iter().all(|p| {
                 crate::selection::rectangle_matches(
@@ -426,7 +438,7 @@ impl Shape {
             region.encloses(
                 p,
                 &[],
-                self.style.border_width * self.placement.scale,
+                self.style.envelope_width() * self.placement.scale,
                 Default::default(),
             )
         })
@@ -548,13 +560,13 @@ impl CanvasObject for Shape {
         Some(
             local
                 .geometry_bounds()
-                .expand(self.style.border_width * 0.5),
+                .expand(self.style.envelope_width() * 0.5),
         )
     }
     fn world_bounds(&self) -> Option<ObjectBounds> {
         Some(
             self.geometry_bounds()
-                .expand(self.style.border_width * self.placement.scale * 0.5),
+                .expand(self.style.envelope_width() * self.placement.scale * 0.5),
         )
     }
     fn geometry_bounds(&self) -> Option<ObjectBounds> {
@@ -576,7 +588,7 @@ impl CanvasObject for Shape {
                         p,
                         point,
                         point,
-                        tolerance + self.style.border_width * self.placement.scale * 0.5,
+                        tolerance + self.style.envelope_width() * self.placement.scale * 0.5,
                     )
             })
     }
@@ -749,6 +761,10 @@ pub enum StylePatch {
     BorderOpacity(u8),
     Width(f64),
     Pattern(BorderStyle),
+    DashLength(f64),
+    GapLength(f64),
+    DotSpacing(f64),
+    DotSize(f64),
     BorderEnabled(bool),
     Heads(bool, bool),
     Radius(f64),
@@ -762,6 +778,16 @@ impl StylePatch {
             Self::BorderOpacity(v) => shape.style.border[3] = v,
             Self::Width(v) => shape.style.border_width = v,
             Self::Pattern(v) => shape.style.border_style = v,
+            Self::DashLength(v) => shape.style.pattern.dash = v,
+            Self::GapLength(v) => shape.style.pattern.gap = v,
+            Self::DotSpacing(v) => {
+                shape.style.pattern.dot_spacing = v;
+                shape.style.pattern.dot_size = shape.style.pattern.dot_size.min(v);
+            }
+            Self::DotSize(v) => {
+                shape.style.pattern.dot_size = v;
+                shape.style.pattern.dot_spacing = shape.style.pattern.dot_spacing.max(v);
+            }
             Self::BorderEnabled(v) => shape.style.border_enabled = v,
             Self::Heads(start, end) => {
                 if let ShapeGeometry::Segment { head, .. } = &mut shape.geometry {
