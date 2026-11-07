@@ -490,3 +490,30 @@ parent formatting menu. Inline RGB/HSV selection avoids that competing popup
 lifecycle, as the existing pen settings already do. Keep RGB edits and hex input
 separate from captured alpha to avoid premultiplication or implicit opacity loss.
 No connector relations or saved-PDF schema changes are part of this correction.
+
+
+## 2026-11-07 — Connectors use stable ports and relationship-aware transactions
+
+Represent straight connectors as distinct semantic snapshots with stable IDs,
+Free or Attached endpoints, local cardinal port identities and last-position
+fallbacks. Reuse ShapeStyle/arrowheads and existing cached stroke-pattern rendering.
+Cardinal anchors are exact for the supported convex shapes and stay meaningful
+through rotation/reflection; triangle side anchors are actual edge intersections,
+not box-edge points. No screen-coordinate or nearest-point reattachment on move.
+
+Keep an ObjectId lookup and reverse incident-edge index alongside existing derived
+ink views. Preview resolution reads only referenced shape previews; committed node
+changes replace incident fallback snapshots in the same journal entry. Deletion
+detaches rather than deletes wires. Clipboard internal links remap; external links
+detach even in the same document, avoiding references to originals after copying.
+
+Command selection metadata records user intent separately from dependent fallback
+updates. Undo of a node edit must not suddenly select all connected wires. Do not
+add a second journal or persist selection. Zero-length resolved routes remain
+valid links; rendering hides their degenerate heads while formatting preserves
+canonical head settings. Shape bodies have predictable pick priority over wires.
+
+The actual #25 has no comments and additionally requires orthogonal routes. The
+current request explicitly starts with straight connectors and excludes advanced
+routing. Implement only Route::Straight and leave #25 open; no speculative routing
+controls, text, PDF saving or sidecar storage are introduced.

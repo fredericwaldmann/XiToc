@@ -409,3 +409,48 @@ alpha. Hex accepts #RRGGBB or RRGGBB and commits valid input on Enter/focus loss
 invalid input never changes semantic color. Picking a fill color enables fill;
 editing a disabled border retains its disabled state. Mixed compatible selections
 reuse the same color commands and shared batch history.
+
+
+## M1.6 magnetic connection interaction
+
+Selection shows four circled-plus ports on each selected closed shape, nine
+screen points beyond its top/right/bottom/left border anchor. They rotate/reflect
+with intrinsic shape coordinates; four-point radius circles distinguish them
+from corner resize handles and the plain rotation ring. Hit radius is seven
+screen points at every zoom. Source ports may occupy page margins within the
+editor clip; actual connector graphics/endpoints still obey page bounds. Tokens:
+CONNECTOR_RADIUS=4, CONNECTOR_HIT=7, CONNECTOR_OFFSET=9, CONNECTOR_SNAP=16. Existing
+Surface/Accent colors apply in both themes; hovering a port uses a crosshair.
+No ports on unselected shapes except target feedback during an active connection.
+
+Press/drag a port to preview a straight connector. Compatible nearby targets
+highlight their border and cardinal anchors; the preview snaps to the closest
+port. Release commits once; release in empty space creates a free destination.
+Returning into the source cancels new insertion; self attachment is forbidden.
+Escape, focus loss/contact cancellation, tool/view/revision changes cancel without
+editing history. Hover loss alone retains ownership; held gestures may leave the
+viewport and return. Page endpoints clamp to actual page bounds, never merely to
+visible scroll bounds. Touch uses the primary pointer gesture; no hover is needed.
+
+Selected connector endpoints have plain rings. Drag either to reconnect to another
+shape/port or detach into free space, with the initial grab offset preserved.
+Click-only/no-op/cancelled interactions do not enter history. Shape bodies win
+picking over connector shafts at overlaps; selected connector endpoints deliberately
+retain editing priority. Shift/Alt, directional rectangle and strict lasso retain
+the shared rules. Moving/rotating/resizing a selected connector without its targets
+detaches those ends; selecting targets with it preserves each attachment once.
+
+For keyboard creation, select two closed shapes and press Ctrl/Cmd+Shift+K, or
+choose Connect selected shapes in the canvas context menu. Canonical order chooses
+source/destination, with the nearest border-port pair. Tab/Enter can activate the
+context action. This supplies a keyboard alternative to small ports, without a
+new drawing tool or top-toolbar rearrangement. Keyboard/text focus keeps priority.
+
+New connectors inherit current common shape-stroke defaults and a destination
+arrowhead. The existing Line/Width/Style/Opacity/Arrowheads/More contextual menus
+and right-click Format edit their color, thickness, alpha, solid/dashed/dotted,
+custom dash/gap/dot settings and independent heads. Fill/radius are incompatible
+and remain hidden. Edits/continuous sliders share the same batch undo policy.
+Deleting a connected node retains its wires as free ends at their last locations;
+Undo restores the node and attachments together. No routing/label/text/PDF-save
+controls appear. Explorer, tabs and the TOP drawing toolbar remain unchanged.

@@ -1135,3 +1135,67 @@ Opaque pixel-run inspection of the rounded rectangle's straight top edge measure
 49–50 px dashes (one-pixel raster rounding), consistent with uniform perimeter fit.
 [400% dotted circle](screenshots/border-correction/dotted400.png) shows uniform
 centers and round, separated dots after panning it fully into the editor.
+
+## M1.6 straight magnetic connectors (2026-11-07)
+
+Automated coverage includes all six closed shape kinds, four local ports,
+rotation/reflection, far coordinates, one/both selected nodes moving, resizing,
+multiple incident connections, endpoint reconnect/detach, safe deletion and exact
+graph undo/redo. Clipboard tests check fresh IDs, internal reference remapping,
+external reference detachment and cross-document Page placement. Validation rejects
+self/missing/cross-surface references and unknown routing variants. A hub test
+checks 80 incident edges and reuse of unrelated object snapshots.
+
+Real egui controller tests exercise Page Notes and Whiteboards at 50/100/200/400%:
+port creation, endpoint editing, live node-drag preview, cancellation, no-op clicks,
+shape-over-connector hit priority, modifier selection, rectangle/lasso selection,
+keyboard creation, page-margin ports, offscreen pointer movement and focus loss.
+Coincident endpoint formatting preserves canonical arrowheads despite suppressing
+their undefined direction in the render adapter.
+
+Checks passed: `cargo fmt --all -- --check`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets`
+(177 passed, eight pre-existing ignored timing tests), `cargo build --release`,
+`cargo check --target wasm32-unknown-unknown`, and `trunk build --release`.
+
+Manual review:
+1. Create three rectangles in either document kind. Select A; drag its right plus
+   port to B, then connect B to C. Check live preview and target highlight.
+2. Move, resize, rotate and flip B; both wires must track the correct local ports.
+   Repeat with multi-selection and with nodes outside the viewport at 200/400%.
+3. Select a wire away from shape bodies. Change color, opacity, width, dash/gap,
+   dot settings and arrowheads using the existing contextual controls.
+4. Drag a selected endpoint onto another closed shape, then onto empty space.
+   Escape cancels. Shift-click adds and Alt-click removes selected objects.
+5. Delete B: surviving wires retain their last positions as free endpoints.
+   Undo restores B and its original relationships; redo repeats the detachment.
+6. Copy A/B and their connector together: the pasted connector must reference the
+   new shapes. Copy a wire alone: both endpoints become free.
+7. Select two closed shapes and use the context command or Ctrl/Cmd+Shift+K.
+
+These are straight connectors only. Orthogonal routing from issue #25 remains
+out of scope. PDF persistence is still deferred to M2; no connector saving is
+claimed. Native builds and shared tests do not certify native interactive input
+or physical stylus latency.
+
+The packaged WASM application was actually inspected in Firefox using pointer
+and keyboard input. Three rectangles were created from the top shape picker,
+connected A→B→C, then B was moved, resized and rotated. Both connections followed
+its transformed local ports. Deleting B preserved the two free endpoint positions;
+undo restored the node and relationships without adding the dependent wires to
+the selection. Custom hex color and dashed styling were applied to one connector. An endpoint
+was reconnected from C to A; Ctrl+Z and Ctrl+Shift+Z restored both attachment
+states.
+Rapid alternating pointer movements at 200% and 400% retained attachment while
+the other nodes were offscreen. This is a functional browser check, not a
+measurement of physical input latency.
+
+Inspected captures: [ports](screenshots/magnetic-connectors/ports.png),
+[live snapping](screenshots/magnetic-connectors/snap.png),
+[rotation](screenshots/magnetic-connectors/rotated.png),
+[deleted node](screenshots/magnetic-connectors/deleted.png),
+[undo](screenshots/magnetic-connectors/restored.png),
+[connector styling](screenshots/magnetic-connectors/styled.png),
+[200%](screenshots/magnetic-connectors/zoom200.png),
+[400%](screenshots/magnetic-connectors/zoom400.png),
+[reconnected endpoint after redo](screenshots/magnetic-connectors/reconnected-redo.png).

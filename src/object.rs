@@ -101,6 +101,7 @@ fn rotate([x, y]: Point, angle: f64) -> Point {
 pub enum ObjectType {
     Stroke,
     Shape,
+    Connector,
 }
 
 /// Tagged semantic object snapshot shared with bounded clipboard interchange.
@@ -110,6 +111,7 @@ pub enum ObjectType {
 pub enum ObjectSnapshot {
     Stroke(std::sync::Arc<Stroke>),
     Shape(std::sync::Arc<crate::shape::Shape>),
+    Connector(std::sync::Arc<crate::connector::Connector>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -659,21 +661,29 @@ impl From<crate::shape::Shape> for ObjectSnapshot {
         Self::Shape(std::sync::Arc::new(value))
     }
 }
+impl From<crate::connector::Connector> for ObjectSnapshot {
+    fn from(c: crate::connector::Connector) -> Self {
+        Self::Connector(std::sync::Arc::new(c))
+    }
+}
 impl ObjectSnapshot {
     pub fn as_object(&self) -> &dyn CanvasObject {
         match self {
             Self::Stroke(s) => s.as_ref(),
             Self::Shape(s) => s.as_ref(),
+            Self::Connector(c) => c.as_ref(),
         }
     }
     pub fn id(&self) -> ObjectId {
         match self {
             Self::Stroke(s) => s.id,
             Self::Shape(s) => s.id,
+            Self::Connector(c) => c.id,
         }
     }
     pub fn transformed(&self, delta: Placement) -> Self {
         match self {
+            Self::Connector(c) => c.transformed(delta, &Default::default()).into(),
             Self::Stroke(s) => {
                 let mut t = (**s).clone();
                 t.placement = s.placement.then(delta, s.points[0].position);
@@ -688,6 +698,13 @@ impl ObjectSnapshot {
     }
     pub fn relocated(&self, owner: Uuid, surface: crate::drawing::Surface) -> Self {
         match self {
+            Self::Connector(c) => {
+                let mut c = (**c).clone();
+                c.id = Uuid::new_v4();
+                c.document_id = owner;
+                c.surface = surface;
+                c.into()
+            }
             Self::Stroke(s) => {
                 let mut t = (**s).clone();
                 t.id = Uuid::new_v4();

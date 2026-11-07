@@ -46,6 +46,10 @@ impl ObjectBundle {
                 return Err("Duplicate object clipboard ID.".into());
             }
             let s = match object {
+                ClipboardObject::Connector(c) => {
+                    if !c.valid() || c.ends().iter().any(|e| e.target().is_some_and(|id| self.objects.iter().find(|o|o.id()==id).is_some_and(|target| !matches!(target,ClipboardObject::Shape(s) if !s.kind().segment() && s.surface==c.surface && s.document_id==c.document_id)))) {return Err("Invalid connector clipboard relationship.".into());}
+                    continue;
+                }
                 ClipboardObject::Stroke(s) => s,
                 ClipboardObject::Shape(s) => {
                     if !s.valid()
@@ -147,11 +151,31 @@ impl ObjectBundle {
         surface: Surface,
         delta: Placement,
     ) -> Vec<Uuid> {
-        let objects: Vec<_> = self
+        let selected = self.objects.iter().map(|o| o.id()).collect();
+        let mut objects: Vec<_> = self
             .objects
             .iter()
-            .map(|s| s.transformed(delta).relocated(drawing.owner(), surface))
+            .map(|o| {
+                let transformed = match o {
+                    ClipboardObject::Connector(c) => c.transformed(delta, &selected).into(),
+                    _ => o.transformed(delta),
+                };
+                transformed.relocated(drawing.owner(), surface)
+            })
             .collect();
+        let remap = self
+            .objects
+            .iter()
+            .zip(&objects)
+            .map(|(old, new)| (old.id(), new.id()))
+            .collect();
+        for object in &mut objects {
+            if let ClipboardObject::Connector(c) = object {
+                let mut copy = (**c).clone();
+                copy.remap(&remap);
+                *object = copy.into();
+            }
+        }
         let ids = objects.iter().map(ClipboardObject::id).collect();
         if drawing.insert_snapshots(objects) {
             ids

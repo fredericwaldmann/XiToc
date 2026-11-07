@@ -1,6 +1,10 @@
 //! XiToc design tokens. See docs/UI_DESIGN.md before extending the interface.
 use egui::{Color32, FontFamily, FontId, Margin, Stroke, TextStyle};
 
+pub const CONNECTOR_RADIUS: f32 = 4.0;
+pub const CONNECTOR_HIT: f32 = 7.0;
+pub const CONNECTOR_OFFSET: f32 = 9.0;
+pub const CONNECTOR_SNAP: f32 = 16.0;
 pub const COLOR_PICKER_WIDTH: f32 = 180.0;
 pub const FORMAT_TOOLBAR_WIDTH: f32 = 480.0;
 pub const FORMAT_TOOLBAR_GAP: f32 = 12.0;

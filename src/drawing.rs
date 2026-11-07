@@ -256,14 +256,22 @@ impl Command {
     }
 }
 
+struct HistoryEntry {
+    command: Command,
+    // UI selection intent excludes automatically updated dependent connectors.
+    selection: Option<Vec<Uuid>>,
+}
+
 pub struct Drawing {
     owner: Uuid,
     layout: Layout,
     items: Vec<ObjectSnapshot>,
     live_ids: std::collections::HashSet<Uuid>,
+    object_slots: std::collections::HashMap<Uuid, usize>,
+    pub(crate) links: std::collections::HashMap<Uuid, std::collections::HashSet<Uuid>>,
     // Derived ink-only view: Arc references, never a second canonical store.
     strokes: Vec<Arc<Stroke>>,
-    history: Vec<Command>,
+    history: Vec<HistoryEntry>,
     cursor: usize,
     revision: u64,
 }
@@ -274,13 +282,15 @@ impl Drawing {
             layout: data.layout().clone(),
             items: Vec::new(),
             live_ids: Default::default(),
+            object_slots: Default::default(),
+            links: Default::default(),
             strokes: Vec::new(),
             history: Vec::new(),
             cursor: 0,
             revision: 0,
         }
     }
-    /// Changes only when committed ink changes; invalidates derived spatial data.
+    /// Changes only when committed objects change; invalidates derived spatial data.
     pub fn revision(&self) -> u64 {
         self.revision
     }
@@ -297,9 +307,28 @@ impl Drawing {
         self.items.iter().map(ObjectSnapshot::as_object)
     }
     pub fn object(&self, id: crate::object::ObjectId) -> Option<&dyn CanvasObject> {
-        self.objects().find(|o| o.object_id() == id)
+        self.snapshot(id).map(ObjectSnapshot::as_object)
+    }
+    pub fn snapshot(&self, id: Uuid) -> Option<&ObjectSnapshot> {
+        self.object_slots.get(&id).map(|i| &self.items[*i])
+    }
+    fn index_object(&mut self, index: usize) {
+        let object = &self.items[index];
+        self.object_slots.insert(object.id(), index);
+        if let ObjectSnapshot::Connector(c) = object {
+            for end in c.ends() {
+                if let Some(target) = end.target() {
+                    self.links.entry(target).or_default().insert(c.id);
+                }
+            }
+        }
     }
     fn refresh_ink_view(&mut self) {
+        self.object_slots.clear();
+        self.links.clear();
+        for index in 0..self.items.len() {
+            self.index_object(index);
+        }
         self.live_ids = self.items.iter().map(ObjectSnapshot::id).collect();
         self.strokes = self
             .items
@@ -387,6 +416,7 @@ impl Drawing {
     }
     pub fn valid_object(&self, object: &ObjectSnapshot) -> bool {
         match object {
+            ObjectSnapshot::Connector(c) => self.valid_connector(c, |id| self.snapshot(id)),
             ObjectSnapshot::Stroke(s) => self.valid_stroke(s),
             ObjectSnapshot::Shape(s) => {
                 s.valid()
@@ -397,6 +427,110 @@ impl Drawing {
                         .all(|p| self.contains(s.surface, *p))
             }
         }
+    }
+    pub fn valid_connector<'a>(
+        &self,
+        c: &crate::connector::Connector,
+        lookup: impl Fn(Uuid) -> Option<&'a ObjectSnapshot>,
+    ) -> bool {
+        c.valid() && c.document_id==self.owner && c.ends().iter().all(|e| {
+            self.contains(c.surface,e.position()) && e.target().is_none_or(|id|matches!(lookup(id),Some(ObjectSnapshot::Shape(s)) if s.document_id==self.owner && s.surface==c.surface && !s.kind().segment()))
+        })
+    }
+    fn resolve_connector(
+        &self,
+        c: &mut crate::connector::Connector,
+        replacements: &std::collections::HashMap<Uuid, ObjectSnapshot>,
+    ) {
+        for e in c.ends_mut() {
+            if let crate::connector::Endpoint::Attached {
+                object_id, anchor, ..
+            } = e
+                && let Some(ObjectSnapshot::Shape(shape)) = replacements
+                    .get(object_id)
+                    .or_else(|| self.snapshot(*object_id))
+                && let Some(p) = anchor.point(shape)
+            {
+                e.set_position(p);
+            }
+        }
+    }
+    /// Resolve only reverse-index dependents, within the same target transaction.
+    fn update_links(
+        &self,
+        before: &mut Vec<(usize, ObjectSnapshot)>,
+        after: &mut Vec<(usize, ObjectSnapshot)>,
+    ) -> bool {
+        let replacements: std::collections::HashMap<_, _> =
+            after.iter().map(|(_, o)| (o.id(), o.clone())).collect();
+        let affected: std::collections::HashSet<_> = after
+            .iter()
+            .filter(|(_, o)| matches!(o, ObjectSnapshot::Shape(_)))
+            .flat_map(|(_, o)| self.links.get(&o.id()).into_iter().flatten().copied())
+            .collect();
+        let mut before_ids: std::collections::HashSet<_> =
+            before.iter().map(|(_, o)| o.id()).collect();
+        let mut after_slots: std::collections::HashMap<_, _> = after
+            .iter()
+            .enumerate()
+            .map(|(i, (_, o))| (o.id(), i))
+            .collect();
+        for id in affected {
+            let Some(ObjectSnapshot::Connector(original)) = self.snapshot(id) else {
+                continue;
+            };
+            let mut c = match replacements.get(&id) {
+                Some(ObjectSnapshot::Connector(c)) => (**c).clone(),
+                _ => (**original).clone(),
+            };
+            self.resolve_connector(&mut c, &replacements);
+            if c == **original && !replacements.contains_key(&id) {
+                continue;
+            }
+            let index = self.object_slots[&id];
+            if before_ids.insert(id) {
+                before.push((index, self.items[index].clone()));
+            }
+            if let Some(slot) = after_slots.get(&id) {
+                after[*slot].1 = c.into();
+            } else {
+                after_slots.insert(id, after.len());
+                after.push((index, c.into()));
+            }
+        }
+        before.sort_by_key(|(i, _)| *i);
+        after.sort_by_key(|(i, _)| *i);
+        let resolved: std::collections::HashMap<_, _> =
+            after.iter().map(|(_, o)| (o.id(), o)).collect();
+        after.iter().all(|(_, o)| match o {
+            ObjectSnapshot::Connector(c) => self.valid_connector(c, |id| {
+                resolved.get(&id).copied().or_else(|| self.snapshot(id))
+            }),
+            _ => self.valid_object(o),
+        })
+    }
+    pub fn replace_connector(&mut self, mut c: crate::connector::Connector) -> bool {
+        let Some(ObjectSnapshot::Connector(old)) = self.snapshot(c.id) else {
+            return false;
+        };
+        if c.document_id != old.document_id || c.surface != old.surface {
+            return false;
+        }
+        self.resolve_connector(&mut c, &Default::default());
+        if c == **old || !self.valid_object(&ObjectSnapshot::from(c.clone())) {
+            return false;
+        }
+        let index = self.object_slots[&c.id];
+        let before = vec![(index, self.items[index].clone())];
+        self.execute(Command::Replace {
+            before,
+            after: vec![(index, c.into())],
+        });
+        true
+    }
+    pub fn add_connector(&mut self, mut c: crate::connector::Connector) -> bool {
+        self.resolve_connector(&mut c, &Default::default());
+        self.add_snapshot(c.into())
     }
     pub fn add(&mut self, stroke: Stroke) -> bool {
         self.add_snapshot(stroke.into())
@@ -423,9 +557,41 @@ impl Drawing {
             .filter(|(_, o)| ids.contains(&o.id()))
             .map(|(i, o)| (i, o.clone()))
             .collect();
-        if !removed.is_empty() {
-            self.execute(Command::Erase(removed));
+        if removed.is_empty() {
+            return;
         }
+        let affected: std::collections::HashSet<_> = ids
+            .iter()
+            .flat_map(|id| self.links.get(id).into_iter().flatten().copied())
+            .filter(|id| !ids.contains(id))
+            .collect();
+        if affected.is_empty() {
+            self.execute(Command::Erase(removed));
+            return;
+        }
+        let primary = removed.iter().map(|(_, o)| o.id()).collect();
+        let mut before = removed.clone();
+        let mut after = Vec::new();
+        for id in affected {
+            let Some(ObjectSnapshot::Connector(source)) = self.snapshot(id) else {
+                continue;
+            };
+            let mut c = (**source).clone();
+            for end in c.ends_mut() {
+                if end.target().is_some_and(|id| ids.contains(&id)) {
+                    *end = crate::connector::Endpoint::Free {
+                        position: end.position(),
+                    };
+                }
+            }
+            let index = self.object_slots[&id];
+            let shifted = index - removed.partition_point(|(i, _)| *i < index);
+            before.push((index, self.items[index].clone()));
+            after.push((shifted, c.into()));
+        }
+        before.sort_by_key(|(i, _)| *i);
+        after.sort_by_key(|(i, _)| *i);
+        self.execute_selected(Command::Replace { before, after }, Some(primary));
     }
     pub fn replace_partial(
         &mut self,
@@ -479,14 +645,27 @@ impl Drawing {
     pub fn insert_objects(&mut self, objects: Vec<Stroke>) -> bool {
         self.insert_snapshots(objects.into_iter().map(Into::into).collect())
     }
-    pub fn insert_snapshots(&mut self, objects: Vec<ObjectSnapshot>) -> bool {
-        let mut ids = self.live_ids.clone();
-        if objects.is_empty()
-            || objects
-                .iter()
-                .any(|o| !self.valid_object(o) || !ids.insert(o.id()))
-        {
+    pub fn insert_snapshots(&mut self, mut objects: Vec<ObjectSnapshot>) -> bool {
+        if objects.is_empty() {
             return false;
+        }
+        let replacements: std::collections::HashMap<_, _> =
+            objects.iter().map(|o| (o.id(), o.clone())).collect();
+        let mut ids = self.live_ids.clone();
+        for object in &mut objects {
+            if let ObjectSnapshot::Connector(c) = object {
+                let mut resolved = (**c).clone();
+                self.resolve_connector(&mut resolved, &replacements);
+                *object = resolved.into();
+            }
+            let valid = match &*object {
+                ObjectSnapshot::Connector(c) => self
+                    .valid_connector(c, |id| replacements.get(&id).or_else(|| self.snapshot(id))),
+                other => self.valid_object(other),
+            };
+            if !valid || !ids.insert(object.id()) {
+                return false;
+            }
         }
         let start = self.items.len();
         self.execute(Command::Replace {
@@ -515,7 +694,10 @@ impl Drawing {
             .enumerate()
             .filter(|(_, s)| ids.contains(&s.id()))
         {
-            let target = source.transformed(delta);
+            let target = match source {
+                ObjectSnapshot::Connector(c) => c.transformed(delta, ids).into(),
+                _ => source.transformed(delta),
+            };
             if !self.valid_object(&target) {
                 return false;
             }
@@ -525,7 +707,11 @@ impl Drawing {
         if before.len() != ids.len() {
             return false;
         }
-        self.execute(Command::Replace { before, after });
+        let primary = before.iter().map(|(_, o)| o.id()).collect();
+        if !self.update_links(&mut before, &mut after) {
+            return false;
+        }
+        self.execute_selected(Command::Replace { before, after }, Some(primary));
         true
     }
     /// One atomic mixed-selection formatting transaction. During a continuous
@@ -545,17 +731,28 @@ impl Drawing {
             .enumerate()
             .filter(|(_, o)| ids.contains(&o.id()))
         {
-            let ObjectSnapshot::Shape(shape) = object else {
-                continue;
+            let target = match object {
+                ObjectSnapshot::Shape(shape) => {
+                    let mut target = (**shape).clone();
+                    patch.apply(&mut target);
+                    if target == **shape {
+                        object.clone()
+                    } else {
+                        target.into()
+                    }
+                }
+                ObjectSnapshot::Connector(c) => {
+                    let mut target = (**c).clone();
+                    target.apply_style(patch);
+                    if target == **c {
+                        object.clone()
+                    } else {
+                        target.into()
+                    }
+                }
+                _ => continue,
             };
-            let mut target = (**shape).clone();
-            patch.apply(&mut target);
-            changed |= target != **shape;
-            let target = if target == **shape {
-                object.clone()
-            } else {
-                ObjectSnapshot::from(target)
-            };
+            changed |= target != *object;
             if !self.valid_object(&target) {
                 return false;
             }
@@ -566,7 +763,7 @@ impl Drawing {
             return false;
         }
         let original = if merge && self.cursor == self.history.len() {
-            match self.history.last() {
+            match self.history.last().map(|entry| &entry.command) {
                 Some(Command::Replace {
                     before: original,
                     after: previous,
@@ -602,13 +799,19 @@ impl Drawing {
         if !self.valid_object(&target) {
             return false;
         }
-        self.execute(Command::Replace {
-            before: vec![(index, self.items[index].clone())],
-            after: vec![(index, target)],
-        });
+        let mut before = vec![(index, self.items[index].clone())];
+        let mut after = vec![(index, target)];
+        let primary = before.iter().map(|(_, o)| o.id()).collect();
+        if !self.update_links(&mut before, &mut after) {
+            return false;
+        }
+        self.execute_selected(Command::Replace { before, after }, Some(primary));
         true
     }
     fn execute(&mut self, command: Command) {
+        self.execute_selected(command, None);
+    }
+    fn execute_selected(&mut self, command: Command, selection: Option<Vec<Uuid>>) {
         self.history.truncate(self.cursor);
         let append = matches!(&command,Command::Replace {before,after} if before.is_empty()&&after.iter().enumerate().all(|(i,(index,_))|*index==self.items.len()+i));
         command.apply(&mut self.items);
@@ -616,6 +819,9 @@ impl Drawing {
             let Command::Replace { after, .. } = &command else {
                 unreachable!()
             };
+            for &(index, _) in after {
+                self.index_object(index);
+            }
             self.live_ids.extend(after.iter().map(|(_, o)| o.id()));
             self.strokes.extend(after.iter().filter_map(|(_, o)| {
                 if let ObjectSnapshot::Stroke(s) = o {
@@ -627,7 +833,7 @@ impl Drawing {
         } else {
             self.refresh_ink_view();
         }
-        self.history.push(command);
+        self.history.push(HistoryEntry { command, selection });
         self.cursor += 1;
         self.revision += 1;
     }
@@ -637,14 +843,15 @@ impl Drawing {
         }
         self.cursor -= 1;
         self.revision += 1;
-        let command = &self.history[self.cursor];
+        let entry = &self.history[self.cursor];
+        let command = &entry.command;
         command.revert(&mut self.items);
-        let ids = match command {
+        let ids = entry.selection.clone().unwrap_or_else(|| match command {
             Command::Erase(objects)
             | Command::Replace {
                 before: objects, ..
             } => objects.iter().map(|(_, s)| s.id()).collect(),
-        };
+        });
         self.refresh_ink_view();
         ids
     }
@@ -652,12 +859,13 @@ impl Drawing {
         if !self.can_redo() {
             return Vec::new();
         }
-        let command = &self.history[self.cursor];
+        let entry = &self.history[self.cursor];
+        let command = &entry.command;
         command.apply(&mut self.items);
-        let ids = match command {
+        let ids = entry.selection.clone().unwrap_or_else(|| match command {
             Command::Erase(_) => Vec::new(),
             Command::Replace { after, .. } => after.iter().map(|(_, s)| s.id()).collect(),
-        };
+        });
         self.cursor += 1;
         self.revision += 1;
         self.refresh_ink_view();

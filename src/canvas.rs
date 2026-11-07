@@ -14,6 +14,8 @@ use uuid::Uuid;
 mod selection_ui;
 use crate::object::{CanvasObject, ObjectSnapshot};
 use selection_ui::SelectionGesture;
+#[path = "canvas_connectors.rs"]
+mod connectors_ui;
 #[path = "canvas_shapes.rs"]
 mod shapes_ui;
 
@@ -287,6 +289,7 @@ pub struct Canvas {
     cache: HashMap<Uuid, Cached>,
     eraser_index: crate::eraser_index::EraserIndex,
     object_index: crate::eraser_index::EraserIndex,
+    connection_gesture: Option<connectors_ui::ConnectionGesture>,
     pub shape_defaults: crate::shape::ShapeDefaults,
     style_gesture: Option<(egui::Id, u64)>,
     pub shape_kind: crate::shape::ShapeKind,
@@ -338,6 +341,7 @@ impl Canvas {
             cache: HashMap::new(),
             eraser_index: Default::default(),
             object_index: Default::default(),
+            connection_gesture: None,
             shape_defaults: Default::default(),
             style_gesture: None,
             shape_kind: crate::shape::ShapeKind::Rectangle,
@@ -348,13 +352,17 @@ impl Canvas {
         }
     }
     pub fn interacting(&self) -> bool {
-        self.gesture.is_some() || self.selection_gesture.is_some() || self.shape_draft.is_some()
+        self.gesture.is_some()
+            || self.selection_gesture.is_some()
+            || self.shape_draft.is_some()
+            || self.connection_gesture.is_some()
     }
     pub fn dirty(&self) -> bool {
         self.drawing.dirty()
             || matches!(&self.gesture, Some(Gesture::Pen(stroke)) if !stroke.points.is_empty())
     }
     pub fn finish(&mut self) {
+        self.connection_gesture = None;
         self.selection_gesture = None;
         self.cancel_shape_draft();
         self.pending_paste = None;
@@ -483,6 +491,7 @@ impl Canvas {
             // Sliders may emit their last value on release. Clear only after
             // every surface/popup has had a chance to merge that final sample.
             self.style_gesture = None;
+            self.connection_gesture = None;
             self.cancel_shape_draft();
             // Explicit releases have already committed on the owning surface.
             // A lost button state without a release safely cancels the preview.
@@ -508,6 +517,12 @@ impl Canvas {
         if !matches!(self.tool, Tool::Select | Tool::Lasso) && self.selection.surface == surface {
             self.selection_view = Some((surface, transform, bounds.intersect(ui.clip_rect())));
         }
+        if self.connector_surface(ui, bounds, surface, transform) {
+            self.paint(ui, bounds, surface, transform);
+            self.paint_selection(ui, bounds, surface, transform);
+            self.paint_connection_controls(ui, bounds, surface, transform);
+            return;
+        }
         self.selection_controls(ui, bounds, surface, transform);
         if self.tool == Tool::Shape {
             self.shape_surface(ui, bounds, surface, transform);
@@ -519,6 +534,7 @@ impl Canvas {
             self.selection_surface(ui, bounds, surface, transform);
             self.paint(ui, bounds, surface, transform);
             self.paint_selection(ui, bounds, surface, transform);
+            self.paint_connection_controls(ui, bounds, surface, transform);
             return;
         }
         if !self.processed.contains(&surface) {
@@ -827,6 +843,24 @@ impl Canvas {
             }
             let stroke = match object {
                 ObjectSnapshot::Stroke(stroke) => stroke,
+                ObjectSnapshot::Connector(c) => {
+                    let preview = connectors_ui::preview_shape(
+                        c,
+                        &self.drawing,
+                        preview_ids,
+                        selection_preview,
+                        endpoint_preview,
+                    );
+                    shapes_ui::paint_shape(
+                        ui,
+                        &painter,
+                        transform,
+                        &preview,
+                        crate::object::Placement::default(),
+                        &mut self.shape_cache,
+                    );
+                    continue;
+                }
                 ObjectSnapshot::Shape(shape) => {
                     let delta = selection_preview
                         .filter(|_| preview_ids.contains(&shape.id))
