@@ -1,6 +1,7 @@
 mod app;
 mod canvas;
 mod connector;
+mod connector_route;
 mod document;
 mod drawing;
 mod editor;

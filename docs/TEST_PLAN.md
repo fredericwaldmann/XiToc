@@ -1199,3 +1199,62 @@ Inspected captures: [ports](screenshots/magnetic-connectors/ports.png),
 [200%](screenshots/magnetic-connectors/zoom200.png),
 [400%](screenshots/magnetic-connectors/zoom400.png),
 [reconnected endpoint after redo](screenshots/magnetic-connectors/reconnected-redo.png).
+
+## Advanced connector routing (#25, 2026-11-07)
+
+All 192 active tests pass, with eight existing ignored timing tests. Those eight
+also pass when explicitly run in release mode. Fmt, Clippy with warnings denied,
+native release, WASM check and Trunk release pass. New domain tests cover aligned/
+diagonal and exterior orthogonal routes, automatic/fixed ports and hysteresis,
+local obstacle clearance, exact cubic tangents, smooth adaptive geometry, route
+hits/regions, manual edits, parameter validation/round trips, clipboard remapping,
+transform preservation, exact history and whole-path dash measurement. Real egui
+controller tests cover manual handles/cancel/history on both layouts at
+50/100/200/400% with panned views; unrelated curve meshes retain Arc identity.
+
+Actual Firefox packaged-WASM review created four rectangles through the top shape
+picker, connected them A→B→C→D, retained the straight A→B, changed B→C to orthogonal
+and dragged its segment diamond, then changed C→D to curved and edited its control
+point. All four rectangles were moved; D was resized and rotated. Manual paths
+retained attachments. Undo/redo restored the tested movement. Shared custom hex
+color changed only the curve; dash/gap sliders produced 27/10 logical points.
+
+400% group movement exposed a filled-region rendering artifact in the first
+package. Near-reversal bevel calculations were bounded and a deterministic
+corridor mesh regression added. The rebuilt app was inspected again at 400%
+with rapid alternating group drags and offscreen neighbors; the artifact was
+absent and attachment remained intact. For the fresh-build repeat, the scene
+created above was restored through XiToc's semantic clipboard event route. This
+is not certification of the OS clipboard or a claim of physical input latency.
+A Page Note also accepted a linked clipboard pair from that scene; its curved
+control was edited and its target moved in light/dark appearance. This exposed
+a control beyond curve bounds under the toolbar; placement now includes handle
+bounds, with a real pointer regression proving it remains clickable.
+
+Manual procedure:
+1. Create four shapes and drag ports to make A→B→C→D. Select each connector away
+   from shape bodies; Routing offers Straight, Orthogonal and Curved.
+2. Drag a diamond on an orthogonal segment; drag either cubic control diamond.
+   Move, resize, rotate and flip attached shapes. Manual adjustments must persist.
+3. Toggle Automatic source/target anchor; move shapes across alignments. Explicit
+   fixed ports must stay fixed. Reset Route removes only the current manual route.
+4. Change color, width, alpha, dash/gap, dot settings and start/end/both/no heads.
+   Patterns must carry across every elbow/curve subdivision.
+5. Undo/redo modes, handles, anchors and style edits. Copy a linked group; pasted
+   wires must reference pasted targets. Delete a target and undo.
+6. Repeat in both layouts at 50/100/200/400%, dark/light and narrow windows. Rapidly
+   move a selected connected group, including with neighbors outside the viewport.
+
+Native interactive hardware testing remains unverified. Neither passing builds
+nor shared controller tests certify Windows/macOS tablet input. Global obstacle
+avoidance is intentionally absent: unrelated shapes may intersect routes, and
+overlapping endpoint shapes may prevent local clearance. Manual rails may cross
+shapes deliberately. Labels are excluded by #25; PDF persistence remains M2.
+
+Inspected captures: [orthogonal edit](screenshots/advanced-connectors/orthogonal.png),
+[cubic edit](screenshots/advanced-connectors/curve-controls.png),
+[transforms/redo](screenshots/advanced-connectors/transformed-redo.png),
+[custom dash/gap](screenshots/advanced-connectors/custom-dashes.png),
+[corrected 400% group move](screenshots/advanced-connectors/zoom400.png),
+[Page Note curve](screenshots/advanced-connectors/page-curve.png),
+[dark Page Note](screenshots/advanced-connectors/page-dark.png).

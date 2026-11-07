@@ -268,6 +268,8 @@ pub struct Drawing {
     items: Vec<ObjectSnapshot>,
     live_ids: std::collections::HashSet<Uuid>,
     object_slots: std::collections::HashMap<Uuid, usize>,
+    // Transient Schmitt state for live target previews; never canonical content.
+    routing_hints: std::collections::HashMap<Uuid, [Option<(Uuid, crate::connector::Port)>; 2]>,
     pub(crate) links: std::collections::HashMap<Uuid, std::collections::HashSet<Uuid>>,
     // Derived ink-only view: Arc references, never a second canonical store.
     strokes: Vec<Arc<Stroke>>,
@@ -283,6 +285,7 @@ impl Drawing {
             items: Vec::new(),
             live_ids: Default::default(),
             object_slots: Default::default(),
+            routing_hints: Default::default(),
             links: Default::default(),
             strokes: Vec::new(),
             history: Vec::new(),
@@ -437,23 +440,53 @@ impl Drawing {
             self.contains(c.surface,e.position()) && e.target().is_none_or(|id|matches!(lookup(id),Some(ObjectSnapshot::Shape(s)) if s.document_id==self.owner && s.surface==c.surface && !s.kind().segment()))
         })
     }
+    pub(crate) fn clear_routing_hints(&mut self) {
+        self.routing_hints.clear();
+    }
+    pub(crate) fn hint_routing(&mut self, c: &crate::connector::Connector) {
+        self.routing_hints.insert(
+            c.id,
+            c.ends().map(|end| match end {
+                crate::connector::Endpoint::Attached {
+                    object_id,
+                    anchor,
+                    automatic: true,
+                    ..
+                } => Some((*object_id, *anchor)),
+                _ => None,
+            }),
+        );
+    }
+    pub(crate) fn apply_routing_hint(&self, c: &mut crate::connector::Connector) {
+        if let Some(hints) = self.routing_hints.get(&c.id) {
+            for (end, hint) in c.ends_mut().into_iter().zip(hints) {
+                if let (
+                    crate::connector::Endpoint::Attached {
+                        object_id,
+                        anchor,
+                        automatic: true,
+                        ..
+                    },
+                    Some((id, port)),
+                ) = (end, hint)
+                    && object_id == id
+                {
+                    *anchor = *port;
+                }
+            }
+        }
+    }
     fn resolve_connector(
         &self,
         c: &mut crate::connector::Connector,
         replacements: &std::collections::HashMap<Uuid, ObjectSnapshot>,
     ) {
-        for e in c.ends_mut() {
-            if let crate::connector::Endpoint::Attached {
-                object_id, anchor, ..
-            } = e
-                && let Some(ObjectSnapshot::Shape(shape)) = replacements
-                    .get(object_id)
-                    .or_else(|| self.snapshot(*object_id))
-                && let Some(p) = anchor.point(shape)
-            {
-                e.set_position(p);
-            }
-        }
+        c.resolve_routes(
+            |id| match replacements.get(&id).or_else(|| self.snapshot(id)) {
+                Some(ObjectSnapshot::Shape(s)) => Some(s),
+                _ => None,
+            },
+        );
     }
     /// Resolve only reverse-index dependents, within the same target transaction.
     fn update_links(
@@ -526,6 +559,38 @@ impl Drawing {
             before,
             after: vec![(index, c.into())],
         });
+        true
+    }
+    pub fn edit_connectors(
+        &mut self,
+        ids: &std::collections::HashSet<Uuid>,
+        edit: impl Fn(&mut crate::connector::Connector),
+    ) -> bool {
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        for id in ids {
+            let Some(ObjectSnapshot::Connector(old)) = self.snapshot(*id) else {
+                continue;
+            };
+            let mut c = (**old).clone();
+            edit(&mut c);
+            self.resolve_connector(&mut c, &Default::default());
+            if c == **old {
+                continue;
+            }
+            if !self.valid_connector(&c, |id| self.snapshot(id)) {
+                return false;
+            }
+            let index = self.object_slots[id];
+            before.push((index, self.items[index].clone()));
+            after.push((index, c.into()));
+        }
+        if before.is_empty() {
+            return false;
+        }
+        before.sort_by_key(|(i, _)| *i);
+        after.sort_by_key(|(i, _)| *i);
+        self.execute(Command::Replace { before, after });
         true
     }
     pub fn add_connector(&mut self, mut c: crate::connector::Connector) -> bool {
@@ -812,6 +877,7 @@ impl Drawing {
         self.execute_selected(command, None);
     }
     fn execute_selected(&mut self, command: Command, selection: Option<Vec<Uuid>>) {
+        self.clear_routing_hints();
         self.history.truncate(self.cursor);
         let append = matches!(&command,Command::Replace {before,after} if before.is_empty()&&after.iter().enumerate().all(|(i,(index,_))|*index==self.items.len()+i));
         command.apply(&mut self.items);
@@ -838,6 +904,7 @@ impl Drawing {
         self.revision += 1;
     }
     pub fn undo(&mut self) -> Vec<Uuid> {
+        self.clear_routing_hints();
         if !self.can_undo() {
             return Vec::new();
         }
@@ -856,6 +923,7 @@ impl Drawing {
         ids
     }
     pub fn redo(&mut self) -> Vec<Uuid> {
+        self.clear_routing_hints();
         if !self.can_redo() {
             return Vec::new();
         }

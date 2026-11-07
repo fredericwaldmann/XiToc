@@ -405,3 +405,188 @@ fn page_margin_ports_remain_clickable_and_zero_length_formatting_keeps_heads() {
     assert_eq!(zero.end_head, head);
     assert!(zero.style.start_head);
 }
+
+#[test]
+fn advanced_route_handle_drags_preview_commit_cancel_and_undo_once_across_views() {
+    use crate::connector::Route;
+    for kind in [DocumentKind::Page, DocumentKind::Whiteboard] {
+        for scale in [0.5, 1., 2., 4.] {
+            for route in [
+                Route::Orthogonal { rail: None },
+                Route::Curved { controls: None },
+            ] {
+                let (mut c, s) = setup(kind);
+                let ctx = egui::Context::default();
+                let view = Transform {
+                    scale,
+                    origin: [25., 30.],
+                    center: [10., 15.],
+                };
+                let a = add_shape(&mut c, s, ShapeKind::Rectangle, [25., 60.], [65., 90.]);
+                let b = add_shape(&mut c, s, ShapeKind::Rectangle, [140., 140.], [180., 170.]);
+                let mut link = Connector::new(
+                    c.drawing.owner(),
+                    s,
+                    Endpoint::attached(&a, Port::Right).unwrap(),
+                    Endpoint::attached(&b, Port::Left).unwrap(),
+                    Default::default(),
+                );
+                link.route = route;
+                let id = link.id;
+                assert!(c.drawing.add_connector(link));
+                c.select(Tool::Select);
+                c.selection.change([id], Membership::Replace, &c.drawing);
+                let handle = edge(&c).route_handles()[0];
+                let target = [handle[0] + 10., handle[1] + 20.];
+                let before = c.drawing.items().to_vec();
+                frame(
+                    &ctx,
+                    &mut c,
+                    s,
+                    view,
+                    vec![
+                        moved(view, handle),
+                        pointer(screen(view, handle), true, egui::Modifiers::NONE),
+                        moved(view, target),
+                    ],
+                    0.,
+                    true,
+                );
+                assert!(c.connection_gesture.is_some());
+                assert_eq!(c.drawing.items(), before);
+                frame(
+                    &ctx,
+                    &mut c,
+                    s,
+                    view,
+                    vec![pointer(screen(view, target), false, egui::Modifiers::NONE)],
+                    0.1,
+                    true,
+                );
+                assert_ne!(edge(&c).route, route);
+                assert_eq!(edge(&c).source.target(), Some(a.id));
+                assert_eq!(edge(&c).target.target(), Some(b.id));
+                let after = c.drawing.items().to_vec();
+                c.undo();
+                assert_eq!(c.drawing.items(), before);
+                c.redo();
+                assert_eq!(c.drawing.items(), after);
+                let handle = edge(&c).route_handles()[0];
+                frame(
+                    &ctx,
+                    &mut c,
+                    s,
+                    view,
+                    vec![
+                        moved(view, handle),
+                        pointer(screen(view, handle), true, egui::Modifiers::NONE),
+                        moved(view, [handle[0] + 20., handle[1] + 10.]),
+                    ],
+                    0.2,
+                    true,
+                );
+                frame(
+                    &ctx,
+                    &mut c,
+                    s,
+                    view,
+                    vec![Event::Key {
+                        key: egui::Key::Escape,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    0.3,
+                    true,
+                );
+                assert!(c.connection_gesture.is_none());
+                assert_eq!(c.drawing.items(), after);
+            }
+        }
+    }
+}
+
+#[test]
+fn unchanged_curves_reuse_meshes_when_unrelated_shapes_move_and_pick_only_visible_paths() {
+    use crate::connector::Route;
+    let (mut c, s) = setup(DocumentKind::Whiteboard);
+    let ctx = egui::Context::default();
+    let view = t();
+    let a = add_shape(&mut c, s, ShapeKind::Rectangle, [25., 60.], [65., 90.]);
+    let b = add_shape(&mut c, s, ShapeKind::Rectangle, [300., 250.], [340., 280.]);
+    let other = add_shape(&mut c, s, ShapeKind::Rectangle, [500., 100.], [550., 140.]);
+    let mut link = Connector::new(
+        c.drawing.owner(),
+        s,
+        Endpoint::attached(&a, Port::Right).unwrap(),
+        Endpoint::attached(&b, Port::Left).unwrap(),
+        Default::default(),
+    );
+    link.route = Route::Curved { controls: None };
+    let id = link.id;
+    assert!(c.drawing.add_connector(link));
+    c.select(Tool::Select);
+    frame(&ctx, &mut c, s, view, vec![], 0., true);
+    let meshes = c.shape_cache[&id].meshes.clone();
+    let points = edge(&c).path(0.01);
+    let p = points[points.len() / 2];
+    assert_eq!(c.pick(s, p, 2.), Some(id));
+    assert_eq!(c.pick(s, [100., 260.], 1.), None);
+    assert!(c.drawing.transform_objects(
+        &HashSet::from([other.id]),
+        Placement {
+            position: [10., 15.],
+            ..Default::default()
+        }
+    ));
+    frame(&ctx, &mut c, s, view, vec![], 0.1, true);
+    assert_eq!(meshes.len(), c.shape_cache[&id].meshes.len());
+    for (old, new) in meshes.iter().zip(&c.shape_cache[&id].meshes) {
+        assert!(Arc::ptr_eq(old, new));
+    }
+}
+
+#[test]
+fn formatting_toolbar_keeps_bezier_controls_clickable_outside_curve_bounds() {
+    use crate::connector::Route;
+    let (mut c, s) = setup(DocumentKind::Whiteboard);
+    let ctx = egui::Context::default();
+    let view = t();
+    let a = add_shape(&mut c, s, ShapeKind::Rectangle, [100., 300.], [200., 380.]);
+    let b = add_shape(&mut c, s, ShapeKind::Rectangle, [400., 350.], [500., 430.]);
+    let mut link = Connector::new(
+        c.drawing.owner(),
+        s,
+        Endpoint::attached(&a, Port::Right).unwrap(),
+        Endpoint::attached(&b, Port::Left).unwrap(),
+        Default::default(),
+    );
+    link.route = Route::Curved {
+        controls: Some([[50., -90.], [-60., 0.]]),
+    };
+    let id = link.id;
+    let handle = link.controls()[0];
+    assert!(c.drawing.add_connector(link));
+    c.select(Tool::Select);
+    c.selection.change([id], Membership::Replace, &c.drawing);
+    frame(&ctx, &mut c, s, view, vec![], 0., true);
+    frame(&ctx, &mut c, s, view, vec![], 0.1, true);
+    frame(
+        &ctx,
+        &mut c,
+        s,
+        view,
+        vec![
+            moved(view, handle),
+            pointer(screen(view, handle), true, egui::Modifiers::NONE),
+            moved(view, [handle[0] + 10., handle[1] - 10.]),
+        ],
+        0.2,
+        true,
+    );
+    assert!(
+        c.connection_gesture.is_some(),
+        "Formatting area covered the control handle"
+    );
+}

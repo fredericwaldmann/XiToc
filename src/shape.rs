@@ -154,6 +154,13 @@ pub enum ShapeGeometry {
         size: Point,
         corner_radius: f64,
     },
+    /// Derived connector display path; canonical routing lives on Connector.
+    #[serde(skip)]
+    Path {
+        points: Vec<Point>,
+        tangents: [Point; 2],
+        head: Option<Arrowhead>,
+    },
     Segment {
         start: Point,
         end: Point,
@@ -228,7 +235,7 @@ impl Shape {
     pub fn kind(&self) -> ShapeKind {
         match self.geometry {
             ShapeGeometry::Box { kind, .. } => kind,
-            ShapeGeometry::Segment { head, .. } => {
+            ShapeGeometry::Segment { head, .. } | ShapeGeometry::Path { head, .. } => {
                 if head.is_some() {
                     ShapeKind::Arrow
                 } else {
@@ -249,6 +256,25 @@ impl Shape {
                 .all(|v| v.abs() <= 1e15)
             && self.style.valid()
             && match self.geometry {
+                ShapeGeometry::Path {
+                    ref points,
+                    tangents,
+                    head,
+                } => {
+                    tangents.iter().flatten().all(|v| v.is_finite())
+                        && head.is_none_or(|h| {
+                            h.length.is_finite()
+                                && h.width.is_finite()
+                                && (0.1..=1e4).contains(&h.length)
+                                && (0.1..=1e4).contains(&h.width)
+                        })
+                        && points.len() >= 2
+                        && points.len() <= 16385
+                        && points
+                            .iter()
+                            .flatten()
+                            .all(|v| v.is_finite() && v.abs() <= 1e15)
+                }
                 ShapeGeometry::Box {
                     kind,
                     size,
@@ -281,6 +307,44 @@ impl Shape {
     /// bounded chord-error tolerance, shared by hits/regions and display caches.
     pub fn contours(&self, tolerance: f64) -> Vec<Vec<Point>> {
         let local = match self.geometry {
+            ShapeGeometry::Path {
+                ref points,
+                tangents,
+                head,
+            } => {
+                let mut paths = vec![points.clone()];
+                if points.len() > 1 {
+                    let length = points
+                        .windows(2)
+                        .map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]))
+                        .sum::<f64>()
+                        .max(0.01);
+                    if let Some(h) = head {
+                        let end = *points.last().unwrap();
+                        let p = segment_points(
+                            [
+                                end[0] - tangents[1][0] * length,
+                                end[1] - tangents[1][1] * length,
+                            ],
+                            end,
+                            Some(h),
+                        );
+                        paths.push(vec![p[1], p[2], p[3], p[1]]);
+                    }
+                    if self.style.start_head {
+                        let p = segment_points(
+                            [
+                                points[0][0] + tangents[0][0] * length,
+                                points[0][1] + tangents[0][1] * length,
+                            ],
+                            points[0],
+                            Some(Arrowhead::default()),
+                        );
+                        paths.push(vec![p[1], p[2], p[3], p[1]]);
+                    }
+                }
+                paths
+            }
             ShapeGeometry::Segment { start, end, head } => {
                 let mut paths = vec![vec![start, end]];
                 if head.is_some() {
@@ -386,7 +450,7 @@ impl Shape {
                     ObjectBounds::from_points(vertices.map(|p| self.placement.apply(p))).unwrap()
                 }
             }
-            ShapeGeometry::Segment { .. } => {
+            ShapeGeometry::Segment { .. } | ShapeGeometry::Path { .. } => {
                 ObjectBounds::from_points(self.contours(0.025).into_iter().flatten()).unwrap()
             }
         }
@@ -495,6 +559,11 @@ impl Shape {
     pub fn endpoints(&self) -> Option<[Point; 2]> {
         if let ShapeGeometry::Segment { start, end, .. } = self.geometry {
             Some([self.placement.apply(start), self.placement.apply(end)])
+        } else if let ShapeGeometry::Path { ref points, .. } = self.geometry {
+            Some([
+                self.placement.apply(points[0]),
+                self.placement.apply(*points.last()?),
+            ])
         } else {
             None
         }

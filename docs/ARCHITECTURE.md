@@ -657,3 +657,41 @@ Issue #25 includes orthogonal routing. This user-authorized slice is straight-on
 so #25 remains open. Future routes consume resolved endpoints, shape ports and the
 shared measured-polyline renderer; routing/control data, collision policy and
 labels require later explicitly implemented variants.
+
+## Advanced local connector routing (#25)
+
+The prior straight-only boundary above is superseded: Route now supports Straight,
+Orthogonal { rail } and Curved { controls }. Canonical manual rail/control offsets
+use logical document coordinates and are independent of egui and viewport zoom.
+Curve control offsets follow their respective endpoints; rail offsets follow the
+endpoints' midpoint. Shape movement does not reset manual routing. Connectors
+remain the same stable-ID variant in Drawing and the existing command journal.
+
+Attached endpoints add automatic/fixed preference and derived outward normal/AABB
+fallbacks. Every authoritative resolution refreshes these from target transforms.
+Automatic selection uses outward alignment and distance with a 20–40 logical-point
+Schmitt dead band. A transient Drawing routing-hint map retains automatic choices
+between immutable-source preview frames and release; no canonical edits occur
+until the target transaction commits. Commit, cancellation, undo and redo clear
+that cache. Fixed local ports never switch automatically.
+
+Only the two endpoint obstacles influence orthogonal routing. Bounded candidates
+include direct facing alignment, L/Z corridors and exterior detours. Scoring
+penalizes crossings, reversals, length and bends; ties retain deterministic
+candidate order. Overlapping targets may make clearance impossible, so the router
+returns a deterministic least-penalty path. Manual rails intentionally permit user
+paths through objects. No global obstacle graph or asynchronous routing exists.
+
+Cubic geometry remains semantic; adaptive vector subdivision is derived only.
+The derived Path shape adapter shares bounds/hits/region selection and the existing
+joined-stroke renderer. Endpoint arrowheads use exact cubic derivative directions;
+patterns measure the whole polyline once. Route caches avoid reflattening unchanged
+connectors. The reverse relationship index still limits authoritative updates to
+incident connectors; group transforms are applied once.
+
+Mode, automatic-anchor and reset changes batch into one Replace command. Manual
+handle editing uses the existing frozen view/revision gesture owner, one release
+commit, Escape/focus cancellation and viewport-independent pointer tracking.
+Future obstacle avoidance can extend the routing boundary without changing target
+references, clipboard remapping or history. No text labels (excluded by #25),
+PDF persistence, sidecars or unrelated canvas architecture changes.

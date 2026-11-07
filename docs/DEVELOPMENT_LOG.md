@@ -509,3 +509,28 @@ Page-margin ports remain clickable while connector content stays on its page.
 See TEST_PLAN for performed checks and actual visual observations. No orthogonal/
 curved routing, text, magnetic links to ink/arrows, PDF persistence or unrelated
 Explorer/tab/top-toolbar changes were added.
+
+## 2026-11-07 — Advanced magnetic connector routing (#25)
+
+Started feature/advanced-connector-routing from latest main c0a20e0, retaining
+merged straight connectors. No issue titled Advanced Connector Routing exists;
+read complete #25 “[M1.6] Magnetic Connectors” and empty comments. It covers
+orthogonal routing and explicitly excludes labels; no duplicate issue was created.
+
+Added orthogonal and cubic modes, endpoint-specific automatic/fixed preference,
+anchor hysteresis, semantic manual rail/control offsets and Reset Route. Reused
+shared object identity/selection/journal, reverse dependencies, persistent gestures,
+joined border/pattern meshes and contextual formatting. Derived paths use one
+measured shaft; arrowheads use path tangents. Cached routes avoid idle recomputes.
+
+Tests cover local obstacle clearance, alignment, transformed attachments, manual
+edits, clipboard/history, curve geometry/picking, patterns, live hysteresis and
+real route-handle controller input in both layouts at 50/100/200/400% zoom.
+See TEST_PLAN for actual completed build/visual checks and known limitations.
+No global obstacle avoidance, text labels, PDF saving or unrelated UI changes.
+
+Visual 400% group-drag inspection caught a filled-region stroke artifact; bounded
+near-reversal bevels and a corridor mesh regression were added, then the rebuilt
+package was rechecked. Toolbar wrapping reserves extra clearance for Routing.
+Analytical direction transforms preserve normals independently of far-origin
+translation. Final checks and screenshots are recorded in TEST_PLAN.

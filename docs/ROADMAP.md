@@ -240,3 +240,11 @@ pointer adjustments coalesce; movement/resize/rotation/flip and cached dragging
 retain their existing controller. Creation defaults persist separately through
 Settings → Drawing and are captured when creating new objects. No embedded text,
 magnetic attachment or PDF saving; #24 remains open for its shared text criteria.
+
+## Advanced connector routing (M1.7 request, #25)
+
+Straight, bounded local orthogonal and editable cubic routes extend the same
+magnetic objects. Automatic/fixed local ports, stable live attachment, manual
+rail/control handles, Reset Route and shared formatting/history/selection operate
+on both layouts. Global obstacle avoidance and labels remain future work.
+This does not change the M2 PDF persistence gate.

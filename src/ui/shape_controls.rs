@@ -18,7 +18,7 @@ fn mixed<T: PartialEq>(ui: &mut egui::Ui, shapes: &[Shape], value: impl Fn(&Shap
     })
     .on_hover_text("Changes apply to all compatible selected shapes.");
 }
-fn menu(ui: &mut egui::Ui, name: &str, content: impl FnOnce(&mut egui::Ui)) {
+pub(crate) fn menu(ui: &mut egui::Ui, name: &str, content: impl FnOnce(&mut egui::Ui)) {
     let config = egui::containers::menu::MenuConfig::new()
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
     if egui::containers::menu::is_in_menu(ui) {
