@@ -318,7 +318,8 @@ impl Canvas {
     pub(super) fn single_shape_handles(&self) -> bool {
         self.selection.ids.len() == 1
             && self.drawing.items().iter().any(|o| {
-                self.selection.ids.contains(&o.id()) && matches!(o, ObjectSnapshot::Shape(_))
+                self.selection.ids.contains(&o.id())
+                    && matches!(o, ObjectSnapshot::Shape(_) | ObjectSnapshot::Connector(_))
             })
     }
     pub(super) fn cancel_shape_draft(&mut self) {

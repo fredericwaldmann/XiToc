@@ -336,6 +336,7 @@ impl Canvas {
         if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             // Cancel first so a later pointer release cannot commit a preview.
             self.selection_gesture = None;
+            self.connection_gesture = None;
             self.cancel_shape_draft();
             self.selection.clear();
         }
@@ -347,9 +348,21 @@ impl Canvas {
         {
             self.selection_action(SelectionCommand::Delete, ui.ctx());
         }
+        if self.selection_gesture.is_none()
+            && self.connection_gesture.is_none()
+            && ui.input_mut(|i| {
+                i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                    egui::Key::K,
+                ))
+            })
+        {
+            self.connect_selected_shapes();
+        }
         let modifiers = ui.input(|i| i.modifiers);
         if matches!(self.tool, Tool::Select | Tool::Lasso)
             && self.selection_gesture.is_none()
+            && self.connection_gesture.is_none()
             && !self.selection.ids.is_empty()
             && !modifiers.alt
             && !modifiers.ctrl
@@ -402,7 +415,15 @@ impl Canvas {
         let mut top = None;
         self.object_index
             .query(surface, point, point, tolerance, |index| {
-                if top.is_some_and(|(old, _)| old > index) {
+                if top.is_some_and(|(old, _)| {
+                    let previous = &self.drawing.items()[old];
+                    let current = &self.drawing.items()[index];
+                    (matches!(previous, ObjectSnapshot::Shape(_))
+                        && matches!(current, ObjectSnapshot::Connector(_)))
+                        || (old > index
+                            && !(matches!(previous, ObjectSnapshot::Connector(_))
+                                && matches!(current, ObjectSnapshot::Shape(_))))
+                }) {
                     return;
                 }
                 let object = &self.drawing.items()[index];
@@ -422,6 +443,7 @@ impl Canvas {
                         )
                     }
                     ObjectSnapshot::Shape(shape) => shape.hit_test(point, tolerance),
+                    ObjectSnapshot::Connector(c) => c.hit_test(point, tolerance),
                 };
                 if hit {
                     top = Some((index, object.id()));
@@ -608,6 +630,9 @@ impl Canvas {
                                 ObjectSnapshot::Shape(shape) => {
                                     shape.rectangle_matches(bounds, point[0] < start[0])
                                 }
+                                ObjectSnapshot::Connector(c) => {
+                                    c.as_shape().rectangle_matches(bounds, point[0] < start[0])
+                                }
                             };
                             if hit {
                                 matches.push(object.id());
@@ -790,6 +815,7 @@ impl Canvas {
                                 )
                             }
                             ObjectSnapshot::Shape(shape) => shape.lasso_matches(&region),
+                            ObjectSnapshot::Connector(c) => c.as_shape().lasso_matches(&region),
                         };
                         if hit {
                             selected.push(object.id());
@@ -1148,6 +1174,9 @@ impl Canvas {
             .items()
             .iter()
             .filter_map(|o| match o {
+                ObjectSnapshot::Connector(c) if self.selection.ids.contains(&c.id) => {
+                    Some(c.formatting_shape())
+                }
                 ObjectSnapshot::Shape(s) if self.selection.ids.contains(&s.id) => {
                     Some((**s).clone())
                 }
@@ -1196,6 +1225,7 @@ impl Canvas {
         if matches!(self.tool, Tool::Select | Tool::Lasso)
             && self.selection.surface == surface
             && self.selection_gesture.is_none()
+            && self.connection_gesture.is_none()
             && let Some(group) = self.selection.bounds
         {
             let display = Self::display_bounds(group, transform.scale);
@@ -1289,6 +1319,23 @@ impl Canvas {
         }
 
         response.context_menu(|ui| {
+            let compatible = self
+                .drawing
+                .items()
+                .iter()
+                .filter(|o| {
+                    matches!(o, ObjectSnapshot::Shape(s)
+                        if self.selection.ids.contains(&s.id) && !s.kind().segment())
+                })
+                .count();
+            if compatible == 2
+                && ui
+                    .button("Connect selected shapes · Ctrl/Cmd+Shift+K")
+                    .clicked()
+            {
+                self.connect_selected_shapes();
+                ui.close();
+            }
             if !self.selected_shapes().is_empty() {
                 egui::containers::menu::SubMenuButton::new("Format")
                     .config(
@@ -1326,3 +1373,7 @@ mod shape_tests;
 #[cfg(test)]
 #[path = "shape_drag_tests.rs"]
 mod shape_drag_tests;
+
+#[cfg(test)]
+#[path = "connector_tests.rs"]
+mod connector_tests;

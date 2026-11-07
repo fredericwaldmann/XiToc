@@ -16,7 +16,7 @@ move/proportional resize, clipboard operations and undo/redo are implemented.
 Rotation has a live group handle and 15-degree Shift snapping; explicit z-order
 changes remain domain APIs without Arrange controls. Cut and arrow-key nudges are
 implemented alongside the existing clipboard and manipulation commands.
-Stroke and Shape are implemented canvas-object content types. Shapes include
+Stroke, Shape and Connector are implemented canvas-object content types. Shapes include
 rectangle, rounded rectangle, circle, ellipse, triangle, diamond, line and arrow.
 Selected shapes support contextual fill/border/opacity/pattern/radius/arrowhead
 formatting, mixed-selection batch changes and separate persistent creation defaults.
@@ -24,7 +24,7 @@ formatting, mixed-selection batch changes and separate persistent creation defau
 The PDF codec creates and reopens **blank** native documents. It does not save or
 reload handwriting. Dirty drawing disables browser PDF export; Ctrl/Cmd+S explains
 the M2 limitation. Ordinary PDFs open as read-only with no PDF preview renderer.
-Connectors, text, sticky notes, formulas, images, multipage creation,
+Orthogonal/curved routing, text, sticky notes, formulas, images, multipage creation,
 browser directory handles, ink autosave and crash recovery remain planned.
 
 ## Crate and module map
@@ -46,6 +46,8 @@ egui/eframe 0.37.0, and eframe's Glow rendering and persistence features.
 | [canvas.rs](../src/canvas.rs) | `Canvas`, `Tool`, `Gesture`, `Erasing`, `Cached`, `PartialPreview`, `RotationPreview`; ordered input, previews, cached mesh rendering |
 | [canvas_selection.rs](../src/canvas_selection.rs) | Private `canvas::selection_ui` submodule via `#[path]`; `SelectionGesture` and additional `impl Canvas` methods for selection/clipboard/previews |
 | [selection.rs](../src/selection.rs) | UI-independent `Selection`, `SelectionCommand`, `Membership`, `LassoRegion`, `rectangle_matches`, `move_by`, `scale_about` |
+| [connector.rs](../src/connector.rs) | Connector, Endpoint, Port and Straight route semantics; border anchors, fallbacks, style and clipboard remapping |
+| [canvas_connectors.rs](../src/canvas_connectors.rs) | Source-port and endpoint gestures, snap candidates/feedback and relationship-aware rendering previews |
 | [shape.rs](../src/shape.rs) | UI-independent `Shape`, `ShapeGeometry`, `ShapeKind`, `ShapeStyle`, vector contours, hits/regions and local handle edits |
 | [stroke_pattern.rs](../src/stroke_pattern.rs) | UI-independent PatternSettings and cumulative MeasuredPath; joined dash slices, closed fitting and evenly distributed dots |
 | [shape_border.rs](../src/shape_border.rs) | Shared cached border adapter with closed miter/bevel tessellation for outlines, shafts and heads |
@@ -524,7 +526,7 @@ is included by the private selection adapter via `#[path]`; it is not a second
 editor implementation. Tests assert cache Arc reuse, index pruning, exact history,
 legacy decoding, clip geometry, ownership, layout/focus and discard behavior.
 
-The current source has 173 Rust tests: 165 normally run and eight ignored
+The current source has 185 Rust tests: 177 normally run and eight ignored
 release benchmarks (whole erase, partial document, partial geometry, smoothing,
 indexed lasso, rectangle selection, multi-stroke rotation preview, and multi-shape movement preview). Historical recorded results are in TEST_PLAN, not proof of hardware
 latency or a fresh run of every platform. [scripts/test_release.py](../scripts/test_release.py)
@@ -692,3 +694,56 @@ an inline RGB/HSV picker, alpha-aware preview and hex RGB input. The actual prio
 WASM swatch click dismissed Fill without a usable picker. Inline selection keeps
 parent focus/membership and commits color patches only on real RGB changes;
 opacity remains independent. Pattern controls appear conditionally in Style.
+
+
+## M1.6 straight magnetic connectors
+
+`ObjectSnapshot::Connector(Arc<Connector>)` is distinct from Shape/Stroke and shares
+the canonical vector order, CanvasObject protocol, spatial selection index and
+Replace/Erase journal. It stores ID/owner/surface, source/target Endpoint,
+Route::Straight, ShapeStyle and destination Arrowhead dimensions. Endpoint is Free
+{position} or Attached {object_id, anchor: Port, last_position}; Port is Top/Right/
+Bottom/Left in the target's intrinsic geometry. Cardinal ellipse/rounded ports lie
+on the actual contour; triangle side ports use 25%/75% width at half height.
+Placement maps those points through resize/rotation/reflection. Line/arrow shapes
+and ink are not attachment targets. Self-links and cross-owner/surface links fail
+validation; independent duplicate links are permitted. Coincident ends remain
+valid relationships but suppress zero-length visible heads without losing style.
+
+Drawing maintains derived ObjectId→slot and target→incident-connector indexes.
+Append updates them incrementally; other commits/undo/redo refresh metadata along
+with the existing ink view. Preview samples do not rebuild these indexes or clone
+the document. Attached ends resolve from current shape previews, including frozen
+group transforms and local corner edits; only affected cached connector geometry
+changes. Committed shape replacements resolve incident endpoints inside the same
+validated transaction. Last positions support bounds, detachment and clipboard,
+never override the authoritative target/port relationship. Connector placement
+is an identity protocol adapter over surface-coordinate endpoints; transforms act
+on free endpoints or through selected targets, once, with unchanged logical style.
+
+Deleting a shape detaches surviving incident ends at their last positions within
+one indexed Replace transaction. Undo restores the shape, references and exact
+order. HistoryEntry wraps the existing command with optional transient primary
+selection IDs, so automatically updated connectors do not unexpectedly become
+selected after undoing a node move/resize/delete. This is one shared history.
+
+Clipboard inserts first remap every copied object ID. Internal copied attachments
+refer to the new targets; endpoints referencing targets outside the copied bundle
+become free at transformed last positions, also across documents. Validation
+rejects incompatible internal targets. ShapeStyle/heads and all pattern values
+are preserved. Moving a selected connector without its attached targets detaches
+those ends; selected targets supply their own delta exactly once in mixed groups.
+
+Canvas source ports are small circled pluses outside selected closed shapes;
+connector endpoint rings edit attachments. Magnetic candidates use the shared
+bounds hierarchy and exact contour narrow phase. A 16-screen-point snap tolerance
+is independent of zoom; movement/port coordinates remain f64 document coordinates.
+Hover loss does not cancel a held gesture; Escape, focus/contact cancellation,
+view/revision changes or tool changes safely discard it. Shape bodies have pick
+priority over connectors at overlaps; an explicitly selected connector's endpoint
+handles retain editing priority. Rectangle/lasso and modifiers use the shared
+adapters; formatting reuses the existing line widgets and property patches.
+
+Only straight routing ships. #25 also requires orthogonal routes, so this slice
+references it without closing it. A Route enum and shared polyline/pattern renderer
+prepare later routing without implementing obstacles/labels/text or PDF saving.

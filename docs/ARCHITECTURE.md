@@ -616,3 +616,44 @@ ShapeStyle's defaulted PatternSettings round-trips through semantic clipboard
 snapshots/default preferences. M2 must encode the same effective dash array/phase,
 round dots, joined outlines and transparency in conventional PDF graphics and
 embedded edit data. No PDF codec/schema, sidecar or save lifecycle changes here.
+
+
+## M1.6 — Straight magnetic connectors (#25 slice)
+
+Add a distinct Connector tagged snapshot to the existing canonical store/protocol.
+Semantic endpoints are Free surface-coordinate f64 points or Attached target IDs
+plus stable cardinal Port identities and bounded last-position fallbacks. Anchors
+are evaluated against local Shape geometry then Placement, including rotation,
+reflection, proportional group scaling and intrinsic singleton box resizing.
+Closed shapes only; no ink/line/arrow/connector targets, self-links or cross-surface/
+owner links. Duplicate connections are allowed. Route::Straight is the only known
+route; unsupported future variants fail explicitly.
+
+Target IDs/ports are authoritative. Drawing keeps transient ID lookup/reverse
+incident-edge indexes and refreshes linked fallbacks in the same validated Replace
+transaction as target changes. Metadata index maintenance runs once per commit;
+only incident connector geometry is resolved, never every route per pointer frame.
+During gestures, Canvas evaluates endpoints against the current immutable-source
+shape preview and frozen common transform. Cache keys invalidate only changed
+geometry. No mutation of committed targets or endpoint links during previews.
+
+Connector world endpoints use an identity CanvasObject placement adapter. Selected
+free ends transform directly; attachments to selected targets follow those targets
+once. Moving a connector without its target detaches that end. Deleting targets
+detaches surviving incident ends at last positions in one journal command; undo
+restores references, identities and order. HistoryEntry adds only transient primary
+selection intent to the existing command, excluding incident updates from selection.
+Clipboard remaps copied internal target IDs before insertion; uncopied targets
+become free. Batch validation rejects malformed/missing/cross-surface references.
+
+Rendering adapts resolved connectors to the existing segment/head and shared
+stroke-pattern renderer. Styling reuses ShapeStyle and StylePatch; formatting
+adapters preserve heads even when coincident endpoints suppress visible geometry.
+No separate storage, formatting journal, note format, PDF codec/schema or saving
+lifecycle. M2 must version/store authoritative references, ports, free points,
+route/style and visible graphics together inside the same PDF.
+
+Issue #25 includes orthogonal routing. This user-authorized slice is straight-only,
+so #25 remains open. Future routes consume resolved endpoints, shape ports and the
+shared measured-polyline renderer; routing/control data, collision policy and
+labels require later explicitly implemented variants.

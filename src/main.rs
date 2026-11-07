@@ -1,5 +1,6 @@
 mod app;
 mod canvas;
+mod connector;
 mod document;
 mod drawing;
 mod editor;

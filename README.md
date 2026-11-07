@@ -345,3 +345,13 @@ start/end/both/no arrowheads; rounded rectangles expose radius under More.
 Compatible multi-selections format in one undo step. Settings → Drawing stores
 separate defaults for new shapes. Text inside shapes, magnetic connectors and PDF
 persistence remain future work. Shapes and handwriting are currently memory-only.
+
+
+Select a closed shape to reveal four circled-plus connection ports. Drag a port
+to another shape to create a magnetic straight connector, or into empty space for
+a free end. Wires follow node movement, resizing, rotation and flips. Select a
+wire to drag/reconnect/detach its endpoint rings or use the existing line-format
+menus. Select two shapes and press Ctrl/Cmd+Shift+K for keyboard creation. Deleting
+a node detaches surviving wires; Undo restores its attachments. Copied linked
+groups refer to the copied nodes. Connectors remain memory-only until M2; advanced
+routing, labels and editable PDF saving are not implemented.

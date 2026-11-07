@@ -483,3 +483,29 @@ mesh/path tests check closure, corners, uniform periods/dots and zoom independen
 Existing drag sessions, layer preview clipping, IDs/order, pen/erasers and one-PDF
 save guards remain intact. No connectors, text or PDF persistence were introduced.
 See TEST_PLAN for completed checks, screenshots and platform limits.
+
+
+## 2026-11-07 — M1.6 straight magnetic connectors (#25 slice)
+
+Created feature/magnetic-connectors from latest main 23e21b2. Read complete #25 and
+its empty comment list plus #24/#23 dependencies and repository docs. The requested
+long title corresponds to “[M1.6] Magnetic Connectors”; its orthogonal-route gate
+remains outside the user-requested straight-only scope, so the PR will not close it.
+
+Added Connector/Endpoint/Port semantic types, shared store/protocol/selection/style
+adapters, ID/reverse relationship indexes and atomic linked graph updates. Drag
+previews resolve attached ends against current shape geometry/placement without
+canonical writes or whole-document geometry clones. Port and endpoint gestures
+support snap feedback, free ends, reconnect/detach and persistent hover-loss/viewport
+ownership. Ctrl/Cmd+Shift+K/context creation connects selected shapes. Existing
+ink/shape movement mesh layers and clipping remain unchanged.
+
+Node deletion detaches surviving endpoints; undo restores node/links/order.
+Clipboard remaps copied internal IDs and frees external references. All edits use
+the same journal; primary selection metadata avoids selecting incident wires on
+undo. Tests also preserve styles on temporarily coincident/zero-length routes.
+Page-margin ports remain clickable while connector content stays on its page.
+
+See TEST_PLAN for performed checks and actual visual observations. No orthogonal/
+curved routing, text, magnetic links to ink/arrows, PDF persistence or unrelated
+Explorer/tab/top-toolbar changes were added.
