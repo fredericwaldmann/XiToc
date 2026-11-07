@@ -14,6 +14,7 @@ pub enum Theme {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DrawingPreferences {
+    pub shape_defaults: crate::shape::ShapeDefaults,
     pub presets: crate::pen::Presets,
     pub eraser_radius: f64,
     pub eraser_mode: crate::drawing::EraserMode,
@@ -21,6 +22,7 @@ pub struct DrawingPreferences {
 impl Default for DrawingPreferences {
     fn default() -> Self {
         Self {
+            shape_defaults: Default::default(),
             presets: Default::default(),
             eraser_radius: 14.0,
             eraser_mode: Default::default(),
@@ -155,7 +157,8 @@ impl Preferences {
         if prefs.schema_version != VERSION {
             return Err("Unsupported preferences version.".into());
         }
-        if !prefs.drawing.presets.validate()
+        if !prefs.drawing.shape_defaults.valid()
+            || !prefs.drawing.presets.validate()
             || !prefs.drawing.eraser_radius.is_finite()
             || !(4.0..=48.0).contains(&prefs.drawing.eraser_radius)
         {
@@ -175,6 +178,7 @@ impl Preferences {
         storage.get_string(STORAGE_KEY).as_deref() == Some(json.as_str())
     }
     pub fn apply_drawing(&self, canvas: &mut crate::canvas::Canvas) {
+        canvas.shape_defaults = self.drawing.shape_defaults.clone();
         canvas.apply_pen(&self.drawing.presets.active().style);
         canvas.eraser_radius = self.drawing.eraser_radius;
         canvas.eraser_mode = self.drawing.eraser_mode;

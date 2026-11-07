@@ -123,6 +123,7 @@ pub fn show(
             if width >= 1000.0 { export(ui, action, editor.canvas.dirty()); }
         });
     });
+    editor.canvas.shape_defaults = prefs.shape_defaults.clone();
     editor.canvas.apply_pen(&prefs.presets.active().style);
 }
 

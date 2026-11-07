@@ -1143,6 +1143,43 @@ impl Canvas {
             }
         }
     }
+    fn selected_shapes(&self) -> Vec<crate::shape::Shape> {
+        self.drawing
+            .items()
+            .iter()
+            .filter_map(|o| match o {
+                ObjectSnapshot::Shape(s) if self.selection.ids.contains(&s.id) => {
+                    Some((**s).clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+    fn apply_shape_style(
+        &mut self,
+        patch: crate::shape::StylePatch,
+        id: egui::Id,
+        held: bool,
+    ) -> bool {
+        let merge = self.style_gesture == Some((id, self.drawing.revision()));
+        if !self
+            .drawing
+            .format_shapes(&self.selection.ids, patch, merge)
+        {
+            return false;
+        }
+        self.selection.refresh(&self.drawing);
+        self.style_gesture = held.then_some((id, self.drawing.revision()));
+        true
+    }
+    fn shape_format_controls(&mut self, ui: &mut egui::Ui) {
+        let shapes = self.selected_shapes();
+        for (patch, id) in crate::ui::shape_controls::controls(ui, &shapes) {
+            if self.apply_shape_style(patch, id, ui.input(|i| i.pointer.primary_down())) {
+                ui.ctx().request_repaint();
+            }
+        }
+    }
     pub(super) fn selection_controls(
         &mut self,
         ui: &egui::Ui,
@@ -1169,11 +1206,20 @@ impl Canvas {
                 egui::pos2(transform.to_screen(group.max)[0] as f32, bottom[1] as f32),
             );
             if rect.intersects(viewport) {
-                let clearance = style::ROTATION_OFFSET + 44.0;
+                let toolbar_width =
+                    style::FORMAT_TOOLBAR_WIDTH.min((viewport.width() - 16.).max(100.));
+                let height = if !self.drawing.items().iter().any(|o| {
+                    self.selection.ids.contains(&o.id()) && matches!(o, ObjectSnapshot::Shape(_))
+                }) {
+                    34.
+                } else {
+                    (style::FORMAT_TOOLBAR_WIDTH / toolbar_width).ceil() * 32. + 8.
+                };
+                let clearance = style::ROTATION_OFFSET + height + style::FORMAT_TOOLBAR_GAP;
                 let y = if top[1] as f32 - clearance >= viewport.top() {
                     top[1] as f32 - clearance
                 } else {
-                    (bottom[1] as f32 + 8.0).min(viewport.bottom() - 34.0)
+                    (bottom[1] as f32 + style::FORMAT_TOOLBAR_GAP).min(viewport.bottom() - height)
                 };
                 egui::Area::new(
                     egui::Id::unique("selection-context")
@@ -1191,8 +1237,10 @@ impl Canvas {
                         .stroke(Line::new(1.0, p.border))
                         .corner_radius(6)
                         .show(ui, |ui| {
-                            ui.horizontal(|ui| {
+                            ui.set_max_width(toolbar_width);
+                            ui.horizontal_wrapped(|ui| {
                                 ui.spacing_mut().item_spacing.x = 2.0;
+                                self.shape_format_controls(ui);
                                 for (icon, label, cmd) in [
                                     (
                                         Icon::Duplicate,
@@ -1241,6 +1289,15 @@ impl Canvas {
         }
 
         response.context_menu(|ui| {
+            if !self.selected_shapes().is_empty() {
+                egui::containers::menu::SubMenuButton::new("Format")
+                    .config(
+                        egui::containers::menu::MenuConfig::new()
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+                    )
+                    .ui(ui, |ui| self.shape_format_controls(ui));
+                ui.separator();
+            }
             let state = crate::ui::selection_controls::MenuState::for_canvas(self);
             if let Some(command) = crate::ui::selection_controls::menu(ui, state) {
                 self.selection_action(command, ui.ctx());

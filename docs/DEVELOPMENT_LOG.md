@@ -424,3 +424,62 @@ fast five-object drags, leaving/returning to canvas, exact repeated positions,
 oversized selection at 400%, cancellation and history. Native release startup
 works, but Wayland desktop capture/input verification was unavailable. TEST_PLAN
 records failures, matrix, timings, visual evidence and manual checks.
+
+## 2026-11-06 — Shape styling and formatting (M1.5 slice of #24)
+
+Started feature/shape-styling from latest origin/main (75e7689). The requested
+issue title does not exist; read the complete matching #24 “[M1.5] Shapes and
+Styling” and its empty comments list. Its embedded/shared-text criteria remain
+outside this task, so the PR references #24 without closing it.
+
+Added independent optional fill/color/alpha, border enablement/color/width/alpha/
+solid-dashed-dotted pattern, segment start/end/both/no heads and clamped rounded
+radius. Captured semantic styles stay on the shared Shape objects. Compatible
+multi-selection patches use one validated Replace journal transaction, retaining
+identity, geometry/Placement, order, ink and unrelated objects. Arrowhead contours
+follow directed endpoints through existing transforms and handle edits.
+
+The existing selection toolbar now offers contextual formatting menus and the
+canvas right-click menu exposes the same Format hierarchy. Mixed values are
+explicit; shared slider rails use existing tokens. Shape creation defaults live
+separately in application settings and are captured on press. No text, connectors,
+PDF persistence, sidecars or Explorer/tab/main-toolbar redesign.
+
+Real browser testing exposed a final-release sample creating a second undo step.
+A focused mixed-selection controller test reproduced it before the fix. Formatting
+gesture cleanup now runs in end_frame after all surface/popup controls, allowing
+the last sample to merge. A second UI regression keeps mixed-to-common slider IDs
+and positions stable. Existing movement sessions and preview clipping are unchanged.
+
+See TEST_PLAN for final checks, actual browser observations, manual procedures and
+platform limits. CODEBASE_GUIDE/UI_DESIGN/ARCHITECTURE and the decision record
+specify model ownership, command coalescing, defaults and future connector work.
+
+
+## 2026-11-06 — Correct joined borders, perimeter patterns and color controls
+
+Continued feature/shape-styling and PR #39 without merging. Source investigation
+found solid contours repeated their start vertex but were tessellated as open
+lines, leaving cap joins at the seam. egui's dashed helper carried phase across
+edges, but emitted independent line segments at vertices, losing connected joins;
+neither its dash nor dot helper balanced the closing seam. Width-derived screen
+patterns also prevented independent formatting.
+
+Added UI-independent cumulative path measurement with joined cross-corner dash
+slices, whole-period closed fitting/gap-centered seam, even closed dot placement
+and global overlap/density bounds. One cached border adapter uses explicit closed
+stroke tessellation and limited miter/bevel joins across every shape/shaft/head.
+ShapeStyle captures independent logical-point pattern values with defaults and
+validation; shared Style controls expose conditional dash/gap/spacing/diameter.
+
+Actual Firefox reproduction confirmed that clicking the old swatch closed Fill
+without leaving a usable picker. The nested color button opened another root menu
+popup. Replaced it with an inline RGB/HSV picker, alpha-aware preview and hex RGB
+entry; RGB edits retain independent opacity. Automated real-widget tests exercise
+inline expansion, hex color commits, conditional pattern controls and unchanged
+alpha/border state. Model/history/clipboard tests preserve custom pattern values;
+mesh/path tests check closure, corners, uniform periods/dots and zoom independence.
+
+Existing drag sessions, layer preview clipping, IDs/order, pen/erasers and one-PDF
+save guards remain intact. No connectors, text or PDF persistence were introduced.
+See TEST_PLAN for completed checks, screenshots and platform limits.

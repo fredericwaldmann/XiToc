@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
     object::{Placement, Point},
-    shape::{BorderStyle, Shape, ShapeKind},
+    shape::Shape,
 };
 
 pub(super) struct ShapeDraft {
@@ -12,6 +12,7 @@ pub(super) struct ShapeDraft {
     view: Transform,
     id: Uuid,
     preview: Option<Shape>,
+    defaults: crate::shape::ShapeDefaults,
 }
 pub(super) struct ShapeCache {
     source: Shape,
@@ -31,7 +32,7 @@ pub(super) fn paint_shape(
     let b = shape
         .geometry_bounds()
         .placed(delta)
-        .expand(shape.style.border_width * shape.placement.scale * delta.scale);
+        .expand(shape.style.envelope_width() * shape.placement.scale * delta.scale);
     let screen = |p: Point| {
         let p = view.to_screen(p);
         Pos2::new(p[0] as f32, p[1] as f32)
@@ -44,7 +45,7 @@ pub(super) fn paint_shape(
         .get(&shape.id)
         .is_none_or(|c| c.source != *shape || c.view != view || c.delta != delta || c.ppp != ppp);
     if rebuild {
-        let paths = shape.contours(0.15 / (view.scale * delta.scale * f64::from(ppp)).max(0.001));
+        let paths = shape.contours(0.01); // Stable arclength table across view zoom/DPI.
         let mut shapes = Vec::new();
         let border = Color32::from_rgba_unmultiplied(
             shape.style.border[0],
@@ -52,12 +53,11 @@ pub(super) fn paint_shape(
             shape.style.border[2],
             shape.style.border[3],
         );
-        let width =
-            (shape.style.border_width * shape.placement.scale * delta.scale * view.scale) as f32;
         for (index, path) in paths.into_iter().enumerate() {
-            let points: Vec<_> = path.into_iter().map(|p| screen(delta.apply(p))).collect();
-            let head = shape.kind() == ShapeKind::Arrow && index == 1;
-            let fill = if head {
+            let world: Vec<_> = path.into_iter().map(|p| delta.apply(p)).collect();
+            let points: Vec<_> = world.iter().copied().map(screen).collect();
+            let head = shape.kind().segment() && index > 0;
+            let fill = if head && shape.style.border_enabled {
                 Some(border)
             } else if shape.filled() {
                 shape.style.fill.map(|c| {
@@ -73,23 +73,15 @@ pub(super) fn paint_shape(
                 }
                 shapes.push(egui::Shape::convex_polygon(polygon, fill, Line::NONE));
             }
-            match shape.style.border_style {
-                BorderStyle::Solid => {
-                    shapes.push(egui::Shape::line(points, Line::new(width, border)))
-                }
-                BorderStyle::Dashed => shapes.extend(egui::Shape::dashed_line(
-                    &points,
-                    Line::new(width, border),
-                    width * 4.,
-                    width * 2.,
-                )),
-                BorderStyle::Dotted => shapes.extend(egui::Shape::dotted_line(
-                    &points,
-                    border,
-                    width * 2.5,
-                    width * 0.5,
-                )),
-            }
+            shapes.extend(crate::shape_border::shapes(
+                &world,
+                !shape.kind().segment() || head,
+                &shape.style,
+                shape.placement.scale * delta.scale,
+                view,
+                ppp,
+                head,
+            ));
         }
         let primitives = ui.ctx().tessellate(
             shapes
@@ -153,6 +145,7 @@ impl Canvas {
             shift,
         ) {
             shape.id = draft.id;
+            draft.defaults.apply(&mut shape);
             if self
                 .drawing
                 .valid_object(&ObjectSnapshot::from(shape.clone()))
@@ -205,6 +198,7 @@ impl Canvas {
                             view,
                             id: Uuid::new_v4(),
                             preview: None,
+                            defaults: self.shape_defaults.clone(),
                         });
                     }
                 }

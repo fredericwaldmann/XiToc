@@ -224,7 +224,7 @@ never moves. Matching Copy/Paste/Duplicate/Delete/Select All and Undo/Redo comma
 are exposed through Edit and canvas context menus. Ctrl/Cmd+C/V/D, Delete/Backspace,
 Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z follow focus. The in-app clipboard remains available
 when system clipboard permissions/integration are unavailable; arbitrary clipboard
-text is not treated as a native note. No unfinished shape/style controls appear.
+text is not treated as a native note. No unfinished tools appear. Shapes formatting is specified below.
 
 ### M1.4 rotation, Cut and keyboard movement
 
@@ -295,8 +295,8 @@ Defaults: blue border RGB(37,99,200), 2 document points, solid; closed shapes ha
 fill RGB(90,150,220), opacity 35/255 (~14%). Fill None is semantically distinct
 from transparent fill. Rounded corners default to min(12 pt, 20% of shorter side).
 Arrowheads default to length 12 pt/width 10 pt, clamped for short segments. Widths
-scale with Placement; dash/dot spacing is proportional to logical width. These
-are captured semantic defaults, not new formatting controls.
+scale with Placement; pattern dimensions are independent logical-point values. These
+are initial semantic defaults; Settings → Drawing can configure creation styling.
 
 Click/add/subtract, directional rectangles, lasso, clipboard, move/rotate/flip and
 history work for mixed ink/shape selections. Singleton boxes show local corner
@@ -306,8 +306,7 @@ Singleton lines/arrows show their two endpoint handles: drag either to adjust
 length/direction, Shift to constrain angle, with the other endpoint fixed. Endpoint
 and corner click jitter below 3 screen points never commits a geometry edit.
 Each completed creation/edit is one undo step. Shape erasing uses selection
-Delete/Cut; ink erasers retain their existing behavior. No embedded text,
-formatting panel, magnetic attachments, connector routing or shape PDF saving.
+Delete/Cut; ink erasers retain their existing behavior. No embedded text, magnetic attachments, connector routing or shape PDF saving.
 
 Shape body drags preserve the initial pointer offset and current multi-selection.
 Only visible local corners/endpoints resize a singleton shape; an invisible
@@ -328,3 +327,85 @@ restores the original geometry without history. View/layout changes cancel safel
 rather than changing the drag reference frame; navigation remains blocked during
 Whiteboard drags. Actual Page Note bounds still constrain movement independently
 of the viewport. No smoothing, animation or auto-pan is added.
+
+
+## M1.5 shape styling and formatting
+
+Selection retains the nearby contextual toolbar. Shape selections add Fill (closed
+forms), Border or Line, Width, Style, Opacity, Arrowheads (segments), and More.
+Fill provides RGB color, 0–100% opacity and an explicit enabled/no-fill choice;
+Border/Line provides independent RGB/opacity and enabled/no-border choice. Width
+is 0.1–24 logical document points. Solid, dashed and dotted patterns share the
+same width infrastructure. Dash/gap and dot dimensions are independent logical-point settings (see the
+border correction below). Placement and zoom scale these together;
+DPI affects tessellation only. Closed fills composite in canonical object order.
+
+Arrowheads offers None, Start, End and Both ends, also for straight lines.
+Filled heads remain solid when the shaft is dashed/dotted and follow directed
+endpoints through rotation, reflection, resizing and endpoint editing. More
+includes No fill, No border/line and rounded rectangles' Corner radius. Radius is
+nonnegative and clamps to half the shorter local side; later shrinking safely
+clamps the displayed radius without invalid geometry.
+
+Mixed compatible selections show “Mixed values”; the first compatible value seeds
+the editor, and changing a property applies just that property to all compatible
+shapes. Fill skips segments, radius skips other forms, arrowheads skip closed
+shapes, and ink is untouched. A batch is one undo operation; continuous pointer
+adjustments preview immediately and coalesce until release. New adjustments remain
+separate undo steps. Unselected objects and application defaults do not change.
+
+Right-click → Format exposes these same menus and commands. Interactive menus use
+CloseOnClickOutside; color selection expands inline to preserve the parent menu. Existing
+selection-group right-click and Transform behavior remains. Widgets retain native
+egui keyboard focus, picker interaction and light/dark styling.
+
+The toolbar uses Surface/Border tokens, six-point corners and existing compact
+spacing. FORMAT_TOOLBAR_WIDTH=480 is a maximum, clamped to available editor width;
+controls wrap in small editors. FORMAT_TOOLBAR_GAP=12 and the existing rotation
+clearance place it above the handles when possible, otherwise below the selection,
+constrained to the visible editor. Oversized selections may leave no completely
+unoccupied space; the editor constraint takes precedence. No drawing tools move
+from the top, and Explorer/tabs remain unchanged.
+
+Settings → Drawing → Default shape style configures new objects with these same
+widgets, including new-arrow heads and rounded radius. Defaults persist through
+the existing local application preferences backend. Unconfigured radius preserves
+adaptive min(12 pt, 20% of shorter side) creation behavior. A configured radius
+clamps to each new shape's bounds. Object edits never implicitly set defaults.
+
+
+### Shape border and color corrections
+
+Style → Dashed exposes Dash length and Gap length; Dotted exposes Dot spacing
+(center-to-center) and Dot size (diameter). Solid exposes neither. Values are
+0.25–256 logical document points, independent of the 0.1–24 pt border thickness.
+Defaults are dash 8, gap 4, spacing 5, diameter 2 pt. Each shape captures its own
+settings; defaults in Settings use the same controls. Placement/group scaling
+scales appearance uniformly, while camera zoom/DPI never rewrites properties.
+If spacing is reduced below diameter, diameter clamps; increasing diameter beyond
+spacing raises spacing. Thickness never changes any pattern setting.
+
+Closed dashed contours fit round(perimeter / requested period) equal periods
+(at least one), scaling all dash/gap lengths by the same factor to retain their
+ratio. The closing seam lies at the center of a full gap. Open strokes retain
+requested lengths, clipping only the final dash. Dashes crossing a corner remain
+one joined polyline. Closed dots use floor(perimeter / spacing) uniformly spaced
+centers; if chords at sharp corners/opposite sides would overlap circles, reduce
+the count globally while retaining even arclength distribution. No duplicate seam
+point. Pattern output is bounded to 8192 marks on extreme geometry; fitting that
+limit increases effective spacing rather than allocating unbounded geometry.
+
+Borders have explicit cyclic closure. Joins use a miter limit of two half-widths,
+then bounded bevels at sharper turns; they do not leave disconnected caps at
+corners. Curves use a stable 0.01-world-point contour tolerance (existing sample
+caps remain), so pattern phase/count does not depend on view zoom or pixel density.
+Head triangles remain solid, independent of shaft pattern.
+
+Fill and Border/Line show a transparency-aware color swatch, Color picker toggle,
+Hex RGB field, and separate opacity slider. Clicking either the swatch or toggle
+expands egui's RGB/HSV picker inline in the same menu, avoiding competing root
+popups. The preview includes the object's actual alpha; RGB edits preserve that
+alpha. Hex accepts #RRGGBB or RRGGBB and commits valid input on Enter/focus loss;
+invalid input never changes semantic color. Picking a fill color enables fill;
+editing a disabled border retains its disabled state. Mixed compatible selections
+reuse the same color commands and shared batch history.

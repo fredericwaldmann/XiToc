@@ -287,6 +287,8 @@ pub struct Canvas {
     cache: HashMap<Uuid, Cached>,
     eraser_index: crate::eraser_index::EraserIndex,
     object_index: crate::eraser_index::EraserIndex,
+    pub shape_defaults: crate::shape::ShapeDefaults,
+    style_gesture: Option<(egui::Id, u64)>,
     pub shape_kind: crate::shape::ShapeKind,
     shape_draft: Option<shapes_ui::ShapeDraft>,
     shape_cache: HashMap<Uuid, shapes_ui::ShapeCache>,
@@ -336,6 +338,8 @@ impl Canvas {
             cache: HashMap::new(),
             eraser_index: Default::default(),
             object_index: Default::default(),
+            shape_defaults: Default::default(),
+            style_gesture: None,
             shape_kind: crate::shape::ShapeKind::Rectangle,
             shape_draft: None,
             shape_cache: HashMap::new(),
@@ -476,6 +480,9 @@ impl Canvas {
     }
     pub fn end_frame(&mut self, ui: &egui::Ui) {
         if !ui.input(|i| i.pointer.primary_down()) {
+            // Sliders may emit their last value on release. Clear only after
+            // every surface/popup has had a chance to merge that final sample.
+            self.style_gesture = None;
             self.cancel_shape_draft();
             // Explicit releases have already committed on the owning surface.
             // A lost button state without a release safely cancels the preview.
