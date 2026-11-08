@@ -517,3 +517,28 @@ The actual #25 has no comments and additionally requires orthogonal routes. The
 current request explicitly starts with straight connectors and excludes advanced
 routing. Implement only Route::Straight and leave #25 open; no speculative routing
 controls, text, PDF saving or sidecar storage are introduced.
+
+## 2026-11-07 — Bounded routing on the existing connector model
+
+Extend Route rather than adding another object/store/controller. Orthogonal
+routing considers only attached source/target conservative AABBs, uses transformed
+exit directions and deterministic bounded candidates. This intentionally trades
+global clearance for predictable local cost; overlapping targets and manually
+placed rails may cross interiors. Future obstacle avoidance can replace candidate
+generation without replacing endpoints/manual parameters.
+
+Manual curves store endpoint-relative offsets; manual orthogonal rails store a
+midpoint-relative coordinate and axis. These choices preserve edits under endpoint
+movement and group translation. Curves transform offsets with a selected connector;
+orthogonal rails remain document-axis orthogonal (rotation does not rotate them
+into diagonal routes). Reset and mode changes are explicit undoable commands.
+
+Keep automatic-anchor Schmitt state through transient routing hints during a
+frozen drag; clear on commit/cancel/history. This avoids preview/release side
+oscillation without adding artificial pointer lag or mutating document snapshots.
+
+Use adaptive cubic vector flattening with exact tangent heads and the existing
+measured-pattern/mesh pipeline. Cache resolved paths to avoid repeated idle curve
+flattening. Semantic cubics and route parameters remain available for future PDF
+vector emission; the blank PDF codec is unchanged. Labels are explicitly out of
+scope in actual issue #25 and do not justify a premature full text system.

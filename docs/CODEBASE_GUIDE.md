@@ -24,7 +24,7 @@ formatting, mixed-selection batch changes and separate persistent creation defau
 The PDF codec creates and reopens **blank** native documents. It does not save or
 reload handwriting. Dirty drawing disables browser PDF export; Ctrl/Cmd+S explains
 the M2 limitation. Ordinary PDFs open as read-only with no PDF preview renderer.
-Orthogonal/curved routing, text, sticky notes, formulas, images, multipage creation,
+Text, sticky notes, formulas, images, multipage creation,
 browser directory handles, ink autosave and crash recovery remain planned.
 
 ## Crate and module map
@@ -46,7 +46,7 @@ egui/eframe 0.37.0, and eframe's Glow rendering and persistence features.
 | [canvas.rs](../src/canvas.rs) | `Canvas`, `Tool`, `Gesture`, `Erasing`, `Cached`, `PartialPreview`, `RotationPreview`; ordered input, previews, cached mesh rendering |
 | [canvas_selection.rs](../src/canvas_selection.rs) | Private `canvas::selection_ui` submodule via `#[path]`; `SelectionGesture` and additional `impl Canvas` methods for selection/clipboard/previews |
 | [selection.rs](../src/selection.rs) | UI-independent `Selection`, `SelectionCommand`, `Membership`, `LassoRegion`, `rectangle_matches`, `move_by`, `scale_about` |
-| [connector.rs](../src/connector.rs) | Connector, Endpoint, Port and Straight route semantics; border anchors, fallbacks, style and clipboard remapping |
+| [connector.rs](../src/connector.rs) | Connector, Endpoint, Port and route semantics; border anchors, fallbacks, style and clipboard remapping |
 | [canvas_connectors.rs](../src/canvas_connectors.rs) | Source-port and endpoint gestures, snap candidates/feedback and relationship-aware rendering previews |
 | [shape.rs](../src/shape.rs) | UI-independent `Shape`, `ShapeGeometry`, `ShapeKind`, `ShapeStyle`, vector contours, hits/regions and local handle edits |
 | [stroke_pattern.rs](../src/stroke_pattern.rs) | UI-independent PatternSettings and cumulative MeasuredPath; joined dash slices, closed fitting and evenly distributed dots |
@@ -526,7 +526,7 @@ is included by the private selection adapter via `#[path]`; it is not a second
 editor implementation. Tests assert cache Arc reuse, index pruning, exact history,
 legacy decoding, clip geometry, ownership, layout/focus and discard behavior.
 
-The current source has 185 Rust tests: 177 normally run and eight ignored
+The current source has 200 Rust tests: 192 normally run and eight ignored
 release benchmarks (whole erase, partial document, partial geometry, smoothing,
 indexed lasso, rectangle selection, multi-stroke rotation preview, and multi-shape movement preview). Historical recorded results are in TEST_PLAN, not proof of hardware
 latency or a fresh run of every platform. [scripts/test_release.py](../scripts/test_release.py)
@@ -747,3 +747,45 @@ adapters; formatting reuses the existing line widgets and property patches.
 Only straight routing ships. #25 also requires orthogonal routes, so this slice
 references it without closing it. A Route enum and shared polyline/pattern renderer
 prepare later routing without implementing obstacles/labels/text or PDF saving.
+
+## Advanced connector routing (M1.7 request, #25 completion)
+
+`connector_route.rs` extends the existing Connector with Straight, Orthogonal
+(optional manual Rail) and Curved (optional cubic control offsets) routes.
+`connector.rs` keeps the stable-ID object/endpoints/styles and shared display
+adapter. Free points and attached IDs/local ports remain authoritative. Attached
+ends capture automatic/fixed preference and last resolved normal/AABB alongside
+the existing point fallback; insertion/transform resolution refreshes these caches
+from actual target geometry. Older endpoints default to fixed.
+
+The local orthogonal router evaluates bounded L/Z and exterior-corridor candidates
+against the two endpoint AABBs, scoring length, bends, interior crossings and
+reversals. Exit stubs use transformed outward port directions. Aligned facing
+ports collapse to one segment. It does not inspect unrelated obstacles. Cubics
+use endpoint-relative controls, adaptive de Casteljau flattening at 0.01 logical
+point chord tolerance, bounded subdivision and exact derivative arrowhead tangents.
+One complete measured shaft feeds the existing dash/dot renderer; subdivisions
+and elbows do not reset phase. Derived `ShapeGeometry::Path` (excluded from serde variants) is a rendering/hit
+adapter, not a new connector storage system.
+
+Contextual/right-click Format → Routing edits compatible selected connectors in
+one Replace command. It exposes modes, separate automatic source/target anchors
+and Reset Route. Diamond handles adjust an orthogonal rail or Bézier control.
+Offsets are in document units: rail relative to endpoint midpoint, curve controls
+relative to their respective endpoints. Endpoint updates retain manual offsets.
+Reset clears the current mode's manual parameters. Clipboard/group transforms
+retain parameters and existing ID-remapping policy.
+
+Automatic ports minimize distance plus outward-facing penalty. A 20–40 point
+improvement dead band preserves the current port. Gesture-only routing hints
+retain that decision between frozen drag frames and final commit, then clear on
+commit/cancel/history. They are not document edits or saved data. Explicit port
+choices remain fixed; dropping onto a shape body away from a port chooses automatic
+attachment. Existing persistent drag sessions and incident-edge index are reused.
+
+Canvas caches derived route paths by resolved Connector equality, and existing
+mesh caches handle view/DPI/style. Unaffected curves are not reflattened every
+frame. Hit testing, rectangle/lasso and bounds consume the same derived paths.
+Full obstacle avoidance can later replace the bounded corridor generator while
+retaining endpoint/route/manual/style semantics. Labels are explicitly excluded
+by #25; the future text-object milestone is not pulled into routing.

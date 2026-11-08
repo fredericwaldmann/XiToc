@@ -290,6 +290,7 @@ pub struct Canvas {
     eraser_index: crate::eraser_index::EraserIndex,
     object_index: crate::eraser_index::EraserIndex,
     connection_gesture: Option<connectors_ui::ConnectionGesture>,
+    route_cache: HashMap<Uuid, (crate::connector::Connector, crate::shape::Shape)>,
     pub shape_defaults: crate::shape::ShapeDefaults,
     style_gesture: Option<(egui::Id, u64)>,
     pub shape_kind: crate::shape::ShapeKind,
@@ -342,6 +343,7 @@ impl Canvas {
             eraser_index: Default::default(),
             object_index: Default::default(),
             connection_gesture: None,
+            route_cache: Default::default(),
             shape_defaults: Default::default(),
             style_gesture: None,
             shape_kind: crate::shape::ShapeKind::Rectangle,
@@ -362,6 +364,7 @@ impl Canvas {
             || matches!(&self.gesture, Some(Gesture::Pen(stroke)) if !stroke.points.is_empty())
     }
     pub fn finish(&mut self) {
+        self.drawing.clear_routing_hints();
         self.connection_gesture = None;
         self.selection_gesture = None;
         self.cancel_shape_draft();
@@ -448,6 +451,7 @@ impl Canvas {
                 .map(ObjectSnapshot::id)
                 .collect();
             self.shape_cache.retain(|id, _| ids.contains(id));
+            self.route_cache.retain(|id, _| ids.contains(id));
         }
         self.selection.refresh(&self.drawing);
     }
@@ -492,6 +496,7 @@ impl Canvas {
             // every surface/popup has had a chance to merge that final sample.
             self.style_gesture = None;
             self.connection_gesture = None;
+            self.drawing.clear_routing_hints();
             self.cancel_shape_draft();
             // Explicit releases have already committed on the owning surface.
             // A lost button state without a release safely cancels the preview.
@@ -837,6 +842,10 @@ impl Canvas {
             Some(Gesture::Eraser(e)) => Some(e),
             _ => None,
         };
+        let routing_active = selection_preview.is_some() || endpoint_preview.is_some();
+        // End/cancel clears gesture-only anchor decisions before another gesture.
+        // Committed state is not changed by this cache.
+        let mut routing_hints = Vec::new();
         for object in self.drawing.items() {
             if object.as_object().surface() != surface {
                 continue;
@@ -844,18 +853,45 @@ impl Canvas {
             let stroke = match object {
                 ObjectSnapshot::Stroke(stroke) => stroke,
                 ObjectSnapshot::Connector(c) => {
-                    let preview = connectors_ui::preview_shape(
+                    if self
+                        .connection_gesture
+                        .as_ref()
+                        .is_some_and(|g| g.preview.id == c.id)
+                    {
+                        continue;
+                    }
+                    let connector = connectors_ui::preview_connector(
                         c,
                         &self.drawing,
                         preview_ids,
                         selection_preview,
                         endpoint_preview,
                     );
+                    if routing_active
+                        && (connector
+                            .ends()
+                            .iter()
+                            .any(|e| e.target().is_some_and(|id| preview_ids.contains(&id)))
+                            || endpoint_preview.is_some_and(|s| {
+                                connector.ends().iter().any(|e| e.target() == Some(s.id))
+                            }))
+                    {
+                        routing_hints.push(connector.clone());
+                    }
+                    if self
+                        .route_cache
+                        .get(&c.id)
+                        .is_none_or(|(source, _)| *source != connector)
+                    {
+                        self.route_cache
+                            .insert(c.id, (connector.clone(), connector.as_shape()));
+                    }
+                    let preview = &self.route_cache[&c.id].1;
                     shapes_ui::paint_shape(
                         ui,
                         &painter,
                         transform,
-                        &preview,
+                        preview,
                         crate::object::Placement::default(),
                         &mut self.shape_cache,
                     );
@@ -988,6 +1024,13 @@ impl Canvas {
                     .truncate(changed.saturating_sub(1) / MESH_SEGMENTS);
             }
             cached.paint(ui, &painter, transform, stroke);
+        }
+        if routing_active {
+            for c in routing_hints {
+                self.drawing.hint_routing(&c);
+            }
+        } else {
+            self.drawing.clear_routing_hints();
         }
     }
 }

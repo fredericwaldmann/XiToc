@@ -19,6 +19,89 @@ pub(super) struct ConnectionGesture {
     target: Option<Uuid>,
 }
 impl Canvas {
+    pub(super) fn connector_format_controls(&mut self, ui: &mut egui::Ui) {
+        use crate::connector::Route;
+        let selected: Vec<_> = self
+            .selection
+            .ids
+            .iter()
+            .filter_map(|id| match self.drawing.snapshot(*id) {
+                Some(ObjectSnapshot::Connector(c)) => Some(c.clone()),
+                _ => None,
+            })
+            .collect();
+        if selected.is_empty() {
+            return;
+        }
+        let mut route = None;
+        let mut anchors = None;
+        let mut reset = false;
+        crate::ui::shape_controls::menu(ui, "Routing", |ui| {
+            if selected.iter().skip(1).any(|c| {
+                std::mem::discriminant(&c.route) != std::mem::discriminant(&selected[0].route)
+            }) {
+                ui.weak("Mixed routing modes");
+            }
+            for (name, value) in [
+                ("Straight", Route::Straight),
+                ("Orthogonal", Route::Orthogonal { rail: None }),
+                ("Curved", Route::Curved { controls: None }),
+            ] {
+                if ui
+                    .selectable_label(
+                        selected.iter().all(|c| {
+                            std::mem::discriminant(&c.route) == std::mem::discriminant(&value)
+                        }),
+                        name,
+                    )
+                    .clicked()
+                {
+                    route = Some(value);
+                }
+            }
+            ui.separator();
+            for index in 0..2 {
+                let mut auto = selected.iter().all(|c| c.ends()[index].automatic());
+                if ui
+                    .checkbox(
+                        &mut auto,
+                        if index == 0 {
+                            "Automatic source anchor"
+                        } else {
+                            "Automatic target anchor"
+                        },
+                    )
+                    .changed()
+                {
+                    anchors = Some((index, auto));
+                }
+            }
+            if ui.button("Reset Route").clicked() {
+                reset = true;
+            }
+            ui.weak("Drag diamond handles to edit the route.");
+            ui.weak("Explicit shape ports stay fixed by default.");
+        });
+        if route.is_some() || anchors.is_some() || reset {
+            self.drawing.edit_connectors(&self.selection.ids, |c| {
+                if let Some(r) = route {
+                    c.route = r;
+                }
+                if let Some((i, auto)) = anchors {
+                    c.ends_mut()[i].set_automatic(auto);
+                }
+                if reset {
+                    c.route = match c.route {
+                        Route::Straight => Route::Straight,
+                        Route::Orthogonal { .. } => Route::Orthogonal { rail: None },
+                        Route::Curved { .. } => Route::Curved { controls: None },
+                    };
+                }
+            });
+            self.selection.refresh(&self.drawing);
+            ui.ctx().request_repaint();
+        }
+    }
     fn port_display(shape: &Shape, port: Port, scale: f64) -> Option<Point> {
         let point = port.point(shape)?;
         let center = shape.geometry_bounds().center();
@@ -41,6 +124,13 @@ impl Canvas {
             && let Some(ObjectSnapshot::Connector(c)) =
                 self.drawing.snapshot(*self.selection.ids.iter().next()?)
         {
+            for (index, p) in c.route_handles().into_iter().enumerate() {
+                if (p[0] - point[0]).hypot(p[1] - point[1]) * scale
+                    <= f64::from(style::CONNECTOR_HIT)
+                {
+                    return Some((Some(c.clone()), (**c).clone(), index + 2));
+                }
+            }
             for (index, e) in c.ends().into_iter().enumerate() {
                 let p = e.position();
                 if (p[0] - point[0]).hypot(p[1] - point[1]) * scale
@@ -112,7 +202,11 @@ impl Canvas {
                         best = Some((
                             distance,
                             index,
-                            Endpoint::attached(shape, port).unwrap(),
+                            {
+                                let mut end = Endpoint::attached(shape, port).unwrap();
+                                end.set_automatic(distance > tolerance);
+                                end
+                            },
                             shape.id,
                         ));
                     }
@@ -125,6 +219,18 @@ impl Canvas {
         let Some(g) = self.connection_gesture.as_ref() else {
             return;
         };
+        if g.moving >= 2 {
+            let mut preview = (**g.source.as_ref().unwrap()).clone();
+            let handle = preview.route_handles()[g.moving - 2];
+            let point = std::array::from_fn(|i| handle[i] + pointer[i] - g.start[i]);
+            preview.edit_route(g.moving - 2, point);
+            let moved =
+                (pointer[0] - g.start[0]).hypot(pointer[1] - g.start[1]) * g.view.scale >= 3.;
+            let g = self.connection_gesture.as_mut().unwrap();
+            g.preview = preview;
+            g.moved = moved;
+            return;
+        }
         let surface = g.preview.surface;
         let scale = g.view.scale;
         let source = g.source.as_ref().map(|c| c.ends()[g.moving].position());
@@ -151,6 +257,11 @@ impl Canvas {
         }
         g.target = target;
         g.moved = moved;
+        g.preview
+            .resolve_routes(|id| match self.drawing.snapshot(id) {
+                Some(ObjectSnapshot::Shape(s)) => Some(s.as_ref()),
+                _ => None,
+            });
     }
     pub(super) fn connector_surface(
         &mut self,
@@ -349,6 +460,36 @@ impl Canvas {
                     }
                 }
                 Some(ObjectSnapshot::Connector(c)) if self.selection.ids.len() == 1 => {
+                    let route_preview = self
+                        .connection_gesture
+                        .as_ref()
+                        .filter(|g| g.preview.id == c.id)
+                        .map(|g| &g.preview)
+                        .unwrap_or(c);
+                    let handles = route_preview.route_handles();
+                    if matches!(route_preview.route, crate::connector::Route::Curved { .. }) {
+                        for (p, e) in handles.iter().zip(route_preview.ends()) {
+                            painter.line_segment(
+                                [screen(*p), screen(e.position())],
+                                Line::new(1., palette.accent),
+                            );
+                        }
+                    }
+                    if self.selection_gesture.is_none() {
+                        for point in handles {
+                            let p = screen(point);
+                            painter.add(egui::Shape::convex_polygon(
+                                vec![
+                                    p + egui::vec2(0., -5.),
+                                    p + egui::vec2(5., 0.),
+                                    p + egui::vec2(0., 5.),
+                                    p + egui::vec2(-5., 0.),
+                                ],
+                                palette.surface,
+                                Line::new(1.5, palette.accent),
+                            ));
+                        }
+                    }
                     let points = self
                         .connection_gesture
                         .as_ref()
@@ -437,13 +578,13 @@ impl Canvas {
 }
 /// Derive just two endpoints from current preview transforms. Unrelated target
 /// geometry is never recalculated, and the canonical graph remains unchanged.
-pub(super) fn preview_shape(
+pub(super) fn preview_connector(
     c: &crate::connector::Connector,
     drawing: &crate::drawing::Drawing,
     ids: &HashSet<Uuid>,
     delta: Option<Placement>,
     edit: Option<&Shape>,
-) -> Shape {
+) -> Connector {
     let mut preview = if ids.contains(&c.id) {
         delta
             .map(|d| c.transformed(d, ids))
@@ -451,27 +592,33 @@ pub(super) fn preview_shape(
     } else {
         c.clone()
     };
-    for end in preview.ends_mut() {
-        if let Endpoint::Attached {
-            object_id, anchor, ..
-        } = end
-        {
-            let point = if let Some(shape) = edit.filter(|s| s.id == *object_id) {
-                anchor.point(shape)
-            } else if ids.contains(object_id)
-                && let Some(d) = delta
-                && let Some(ObjectSnapshot::Shape(shape)) = drawing.snapshot(*object_id)
-            {
-                let mut shape = (**shape).clone();
-                shape.placement = shape.placement.then(d, [0.; 2]);
-                anchor.point(&shape)
-            } else {
-                None
+    let targets: HashMap<_, _> = preview
+        .ends()
+        .iter()
+        .filter_map(|end| {
+            let id = end.target()?;
+            let ObjectSnapshot::Shape(source) = drawing.snapshot(id)? else {
+                return None;
             };
-            if let Some(point) = point {
-                end.set_position(point);
+            let mut shape = edit.filter(|s| s.id == id).unwrap_or(source).clone();
+            if ids.contains(&id)
+                && let Some(d) = delta
+            {
+                shape.placement = shape.placement.then(d, [0.; 2]);
             }
-        }
-    }
-    preview.as_shape()
+            Some((id, shape))
+        })
+        .collect();
+    drawing.apply_routing_hint(&mut preview);
+    preview.resolve_routes(|id| targets.get(&id));
+    preview
+}
+pub(super) fn preview_shape(
+    c: &Connector,
+    drawing: &crate::drawing::Drawing,
+    ids: &HashSet<Uuid>,
+    delta: Option<Placement>,
+    edit: Option<&Shape>,
+) -> Shape {
+    preview_connector(c, drawing, ids, delta, edit).as_shape()
 }

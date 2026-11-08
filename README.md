@@ -355,3 +355,8 @@ menus. Select two shapes and press Ctrl/Cmd+Shift+K for keyboard creation. Delet
 a node detaches surviving wires; Undo restores its attachments. Copied linked
 groups refer to the copied nodes. Connectors remain memory-only until M2; advanced
 routing, labels and editable PDF saving are not implemented.
+
+Connector Routing offers Straight, Orthogonal and Curved paths. Drag diamond
+handles to adjust rails or Bézier controls; Reset Route restores automatic geometry.
+Automatic anchor choices are optional per endpoint. These edits remain in memory
+until the future PDF persistence milestone.

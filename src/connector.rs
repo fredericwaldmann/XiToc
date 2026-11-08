@@ -1,4 +1,4 @@
-//! Semantic straight connectors. Attached IDs/ports are authoritative; stored
+//! Semantic magnetic connectors. Attached IDs/ports are authoritative; stored
 //! last positions are bounded fallbacks for selection, detachment and clipboard.
 use crate::{
     drawing::Surface,
@@ -18,6 +18,24 @@ pub enum Port {
 }
 impl Port {
     pub const ALL: [Self; 4] = [Self::Top, Self::Right, Self::Bottom, Self::Left];
+    pub fn normal(self, shape: &Shape) -> Point {
+        let v = match self {
+            Self::Top => [0., -1.],
+            Self::Right => [1., 0.],
+            Self::Bottom => [0., 1.],
+            Self::Left => [-1., 0.],
+        };
+        // Direction vectors must not subtract translated far-origin points.
+        let v: Point = std::array::from_fn(|i| {
+            if shape.placement.reflected[i] {
+                -v[i]
+            } else {
+                v[i]
+            }
+        });
+        let (sin, cos) = shape.placement.rotation.sin_cos();
+        [cos * v[0] - sin * v[1], sin * v[0] + cos * v[1]]
+    }
     pub fn point(self, shape: &Shape) -> Option<Point> {
         let ShapeGeometry::Box {
             kind, size: [w, h], ..
@@ -58,6 +76,12 @@ pub enum Endpoint {
         object_id: ObjectId,
         anchor: Port,
         last_position: Point,
+        #[serde(default)]
+        automatic: bool,
+        #[serde(default)]
+        normal: Point,
+        #[serde(default)]
+        bounds: [Point; 2],
     },
 }
 impl Endpoint {
@@ -78,6 +102,9 @@ impl Endpoint {
             object_id: shape.id,
             anchor,
             last_position: anchor.point(shape)?,
+            automatic: false,
+            normal: anchor.normal(shape),
+            bounds: [shape.geometry_bounds().min, shape.geometry_bounds().max],
         })
     }
     pub fn set_position(&mut self, p: Point) {
@@ -87,9 +114,19 @@ impl Endpoint {
         }
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Route {
     Straight,
+    Orthogonal { rail: Option<Rail> },
+    Curved { controls: Option<[Point; 2]> },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Rail {
+    /// 0: vertical middle segment, 1: horizontal middle segment.
+    pub axis: usize,
+    /// Offset from the endpoints' midpoint, in document points.
+    pub offset: f64,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -132,6 +169,7 @@ impl Connector {
         !self.id.is_nil()
             && !self.document_id.is_nil()
             && self.style.valid()
+            && self.route_valid()
             && !(self.source.target().is_some() && self.source.target() == self.target.target())
             && self.ends().iter().all(|e| {
                 e.position()
@@ -154,23 +192,36 @@ impl Connector {
         if zero {
             style.start_head = false;
         }
+        let geometry = if self.route == Route::Straight {
+            ShapeGeometry::Segment {
+                start,
+                end,
+                head: if zero { None } else { self.end_head },
+            }
+        } else {
+            let points = self.path(0.01);
+            let tangents = self.tangents(&points);
+            ShapeGeometry::Path {
+                points,
+                tangents,
+                head: if zero { None } else { self.end_head },
+            }
+        };
         Shape {
             id: self.id,
             document_id: self.document_id,
             surface: self.surface,
             placement: Placement::default(),
-            geometry: ShapeGeometry::Segment {
-                start,
-                end,
-                head: if zero { None } else { self.end_head },
-            },
+            geometry,
             style,
         }
     }
     /// Formatting retains canonical heads even when coincident endpoints have
     /// no drawable shaft/head. Rendering suppression must never edit the style.
     pub fn formatting_shape(&self) -> Shape {
-        let mut shape = self.as_shape();
+        let mut copy = self.clone();
+        copy.route = Route::Straight;
+        let mut shape = copy.as_shape();
         shape.style = self.style.clone();
         if let ShapeGeometry::Segment { head, .. } = &mut shape.geometry {
             *head = self.end_head;
@@ -189,6 +240,28 @@ impl Connector {
     /// own transform once; attached ends with unselected targets detach on move.
     pub fn transformed(&self, delta: Placement, selected: &HashSet<ObjectId>) -> Self {
         let mut out = self.clone();
+        if let Route::Curved {
+            controls: Some(ref mut controls),
+        } = out.route
+        {
+            for p in controls {
+                let origin = delta.apply([0.; 2]);
+                let moved = delta.apply(*p);
+                *p = std::array::from_fn(|i| moved[i] - origin[i]);
+            }
+        }
+        if let Route::Orthogonal {
+            rail: Some(ref mut rail),
+        } = out.route
+        {
+            let mut v = [0.; 2];
+            v[rail.axis] = rail.offset;
+            let origin = delta.apply([0.; 2]);
+            let moved = delta.apply(v);
+            let d: Point = std::array::from_fn(|i| moved[i] - origin[i]);
+            rail.axis = usize::from(d[1].abs() > d[0].abs());
+            rail.offset = d[rail.axis];
+        }
         for e in out.ends_mut() {
             let position = delta.apply(e.position());
             if e.target().is_some_and(|id| selected.contains(&id)) {
@@ -299,6 +372,7 @@ mod tests {
                 object_id,
                 anchor,
                 last_position,
+                ..
             } = e
             {
                 let Some(ObjectSnapshot::Shape(shape)) = d.snapshot(*object_id) else {
@@ -524,7 +598,7 @@ mod tests {
         invalid.surface = Surface::Page(0);
         assert!(!d.add_connector(invalid));
         let mut json = serde_json::to_value(&source).unwrap();
-        json["route"] = "Orthogonal".into();
+        json["route"] = "FutureRoute".into();
         assert!(serde_json::from_value::<Connector>(json).is_err());
         assert_eq!(d.links[&nodes[1]].len(), 2);
     }

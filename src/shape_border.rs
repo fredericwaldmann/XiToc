@@ -5,7 +5,7 @@ use crate::{
     shape::{BorderStyle, ShapeStyle},
     stroke_pattern::MeasuredPath,
 };
-use egui::{Color32, Pos2, Vec2};
+use egui::{Color32, Pos2};
 
 pub fn shapes(
     points: &[Point],
@@ -113,10 +113,12 @@ fn joined_stroke(
                 let bevel = (side + center) * 0.5;
                 path.add_point(
                     points[i],
-                    if bevel == Vec2::ZERO {
+                    if bevel.length_sq() < 1e-6 {
                         side
                     } else {
-                        bevel / bevel.length_sq()
+                        // Near reversals can lose the tiny bisector to f32
+                        // cancellation. Bound the bevel as well as the miter.
+                        bevel.normalized() * bevel.length().recip().min(2.)
                     },
                 );
             }
@@ -137,6 +139,7 @@ fn joined_stroke(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui::Vec2;
     fn covered(mesh: &egui::Mesh, p: Pos2) -> bool {
         mesh.indices.as_chunks::<3>().0.iter().any(|t| {
             let [a, b, c] = [
@@ -278,5 +281,90 @@ mod tests {
                 .iter()
                 .all(|v| v.pos.x >= -6. && v.pos.x <= 206. && v.pos.y >= -6. && v.pos.y <= 8.)
         );
+    }
+    #[test]
+    fn near_reversals_never_emit_unbounded_bevels() {
+        for epsilon in [0., 0.00001, 0.0001, 0.001, 0.01] {
+            let points = [
+                egui::pos2(10., 10.),
+                egui::pos2(200., 10.),
+                egui::pos2(10., 10. + epsilon),
+                egui::pos2(10., 100.),
+            ];
+            let egui::Shape::Mesh(mesh) = joined_stroke(&points, false, 8., Color32::BLACK, 1.)
+            else {
+                panic!()
+            };
+            for vertex in &mesh.vertices {
+                let p = vertex.pos;
+                assert!(
+                    p.x.is_finite()
+                        && p.y.is_finite()
+                        && p.x >= -8.
+                        && p.x <= 218.
+                        && p.y >= -8.
+                        && p.y <= 118.,
+                    "{p:?}"
+                );
+            }
+        }
+    }
+    #[test]
+    fn orthogonal_group_translation_never_fills_the_corridor() {
+        use crate::{
+            connector::{Connector, Endpoint, Port, Rail, Route},
+            drawing::Surface,
+            shape::{Shape, ShapeKind},
+        };
+        let owner = uuid::Uuid::new_v4();
+        let a = Shape::create(
+            owner,
+            Surface::Canvas,
+            ShapeKind::Rectangle,
+            [-71.5, -196.],
+            [48.5, -116.],
+            false,
+        )
+        .unwrap();
+        let b = Shape::create(
+            owner,
+            Surface::Canvas,
+            ShapeKind::Rectangle,
+            [-71.5, 94.],
+            [48.5, 174.],
+            false,
+        )
+        .unwrap();
+        let mut c = Connector::new(
+            owner,
+            Surface::Canvas,
+            Endpoint::attached(&a, Port::Bottom).unwrap(),
+            Endpoint::attached(&b, Port::Top).unwrap(),
+            Default::default(),
+        );
+        c.route = Route::Orthogonal {
+            rail: Some(Rail {
+                axis: 0,
+                offset: 90.,
+            }),
+        };
+        let view = Transform {
+            scale: 4.,
+            origin: [746., 44.],
+            center: [0.; 2],
+        };
+        for shape in shapes(&c.path(0.01), false, &c.style, 1., view, 1., false) {
+            let egui::Shape::Mesh(mesh) = shape else {
+                panic!()
+            };
+            for x in [740., 800., 900., 1000.] {
+                for y in [120., 200., 300.] {
+                    assert!(
+                        !covered(&mesh, egui::pos2(x, y)),
+                        "Corridor filled at {x},{y}"
+                    );
+                }
+            }
+        }
     }
 }

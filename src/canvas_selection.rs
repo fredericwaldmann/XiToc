@@ -1202,6 +1202,7 @@ impl Canvas {
         true
     }
     fn shape_format_controls(&mut self, ui: &mut egui::Ui) {
+        self.connector_format_controls(ui);
         let shapes = self.selected_shapes();
         for (patch, id) in crate::ui::shape_controls::controls(ui, &shapes) {
             if self.apply_shape_style(patch, id, ui.input(|i| i.pointer.primary_down())) {
@@ -1229,8 +1230,24 @@ impl Canvas {
             && let Some(group) = self.selection.bounds
         {
             let display = Self::display_bounds(group, transform.scale);
-            let top = transform.to_screen([display.center()[0], display.min[1]]);
-            let bottom = transform.to_screen([display.center()[0], display.max[1]]);
+            let mut top = transform.to_screen([display.center()[0], display.min[1]]);
+            let mut bottom = transform.to_screen([display.center()[0], display.max[1]]);
+            if self.selection.ids.len() == 1
+                && let Some(ObjectSnapshot::Connector(c)) = self
+                    .selection
+                    .ids
+                    .iter()
+                    .next()
+                    .and_then(|id| self.drawing.snapshot(*id))
+            {
+                // Bézier controls can lie beyond the visible curve bounds.
+                // Reserve their full interaction envelope when placing the popover.
+                for point in c.route_handles() {
+                    let p = transform.to_screen(point);
+                    top[1] = top[1].min(p[1] - f64::from(style::CONNECTOR_HIT));
+                    bottom[1] = bottom[1].max(p[1] + f64::from(style::CONNECTOR_HIT));
+                }
+            }
             let rect = Rect::from_min_max(
                 egui::pos2(transform.to_screen(group.min)[0] as f32, top[1] as f32),
                 egui::pos2(transform.to_screen(group.max)[0] as f32, bottom[1] as f32),
@@ -1238,12 +1255,25 @@ impl Canvas {
             if rect.intersects(viewport) {
                 let toolbar_width =
                     style::FORMAT_TOOLBAR_WIDTH.min((viewport.width() - 16.).max(100.));
-                let height = if !self.drawing.items().iter().any(|o| {
-                    self.selection.ids.contains(&o.id()) && matches!(o, ObjectSnapshot::Shape(_))
-                }) {
+                let has_connectors = self.drawing.items().iter().any(|o| {
+                    self.selection.ids.contains(&o.id())
+                        && matches!(o, ObjectSnapshot::Connector(_))
+                });
+                let height = if !has_connectors
+                    && !self.drawing.items().iter().any(|o| {
+                        self.selection.ids.contains(&o.id())
+                            && matches!(o, ObjectSnapshot::Shape(_))
+                    }) {
                     34.
                 } else {
-                    (style::FORMAT_TOOLBAR_WIDTH / toolbar_width).ceil() * 32. + 8.
+                    ((if has_connectors {
+                        style::CONNECTOR_FORMAT_CONTENT_WIDTH
+                    } else {
+                        style::FORMAT_TOOLBAR_WIDTH
+                    }) / toolbar_width)
+                        .ceil()
+                        * 32.
+                        + 8.
                 };
                 let clearance = style::ROTATION_OFFSET + height + style::FORMAT_TOOLBAR_GAP;
                 let y = if top[1] as f32 - clearance >= viewport.top() {

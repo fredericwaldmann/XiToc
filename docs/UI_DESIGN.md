@@ -454,3 +454,36 @@ and remain hidden. Edits/continuous sliders share the same batch undo policy.
 Deleting a connected node retains its wires as free ends at their last locations;
 Undo restores the node and attachments together. No routing/label/text/PDF-save
 controls appear. Explorer, tabs and the TOP drawing toolbar remain unchanged.
+
+## Advanced connector formatting and route handles
+
+Selected connectors add Routing to the existing contextual formatting controls
+and right-click Format menu. Choices are Straight, Orthogonal and Curved, with
+separate Automatic source/target anchor checkboxes and Reset Route. Mixed routing
+is explicit, and compatible multi-selections change in one transaction. Existing
+line/color/opacity/pattern/head controls remain shared. The main drawing toolbar
+stays directly below tabs; Explorer and tabs are unchanged.
+
+Explicitly dragged shape ports stay fixed. Snapping onto a shape body away from
+its ports enables automatic attachment; Routing can toggle either endpoint later.
+Automatic sides use a stable dead band; local ports follow rotation/reflection.
+Selected endpoints retain round rings. Route controls are outlined diamonds,
+visually distinct from round endpoints and resize corners. Curves show two control
+links and diamonds; orthogonal intermediate segments show draggable midpoint
+diamonds, with an aligned segment handle available before bends exist. Handles
+remain screen-sized using the existing 7-point hit radius.
+
+Dragging a diamond previews immediately, retains attachments and commits once on
+release. Escape/focus loss cancels. Curve edits store offsets relative to endpoints;
+orthogonal edits move a rail relative to the endpoint midpoint. Node movement
+preserves those edits; Reset Route returns the current mode to automatic geometry.
+Shape bodies still take selection priority over crossing connectors. Geometry-aware
+connector clicks, Shift/Alt membership, directional rectangle and lasso retain
+the same interaction rules across all modes.
+
+The connector formatting content budget is 640 points within the existing
+480-point toolbar viewport; wrapping reserves additional vertical clearance so
+Routing and shared style controls do not cover rotation handles.
+
+Popover placement includes route-control positions outside the curve envelope,
+so an off-curve Bézier diamond remains clickable when viewport space permits.
