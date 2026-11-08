@@ -360,3 +360,9 @@ Connector Routing offers Straight, Orthogonal and Curved paths. Drag diamond
 handles to adjust rails or Bézier controls; Reset Route restores automatic geometry.
 Automatic anchor choices are optional per endpoint. These edits remain in memory
 until the future PDF persistence milestone.
+
+The top **T** tool creates editable text boxes. Click and type immediately, or drag
+to choose width; double-click later to edit. A selected box's right-edge grip
+reflows text. Text controls provide bundled Sans/Mono faces, size, bold/italic/
+underline, color/opacity and alignment. Escape returns to object manipulation.
+Text, like other drawing objects, remains in memory until M2 PDF persistence.

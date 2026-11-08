@@ -18,6 +18,8 @@ use selection_ui::SelectionGesture;
 mod connectors_ui;
 #[path = "canvas_shapes.rs"]
 mod shapes_ui;
+#[path = "canvas_text.rs"]
+mod text_ui;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
@@ -27,6 +29,7 @@ pub enum Tool {
     Select,
     Lasso,
     Shape,
+    Text,
 }
 
 struct Erasing {
@@ -266,6 +269,11 @@ const MESH_SEGMENTS: usize = 128;
 
 pub struct Canvas {
     pub drawing: Drawing,
+    text_session: Option<text_ui::TextSession>,
+    text_creation: Option<text_ui::TextCreation>,
+    text_resize: Option<text_ui::TextResize>,
+    text_cache: HashMap<Uuid, text_ui::TextCache>,
+    text_font_state: Option<(f32, f32)>,
     pub tool: Tool,
     pub selection_mode: Tool,
     pub pen_type: crate::pen::PenType,
@@ -311,6 +319,11 @@ impl Canvas {
     pub fn new(data: &DocumentData) -> Self {
         Self {
             drawing: Drawing::new(data),
+            text_session: None,
+            text_creation: None,
+            text_resize: None,
+            text_cache: Default::default(),
+            text_font_state: None,
             tool: Tool::Pen,
             selection_mode: Tool::Select,
             pen_type: crate::pen::PenType::Pressure,
@@ -354,16 +367,24 @@ impl Canvas {
         }
     }
     pub fn interacting(&self) -> bool {
-        self.gesture.is_some()
+        self.text_creation.is_some()
+            || self.text_resize.is_some()
+            || self.gesture.is_some()
             || self.selection_gesture.is_some()
             || self.shape_draft.is_some()
             || self.connection_gesture.is_some()
     }
     pub fn dirty(&self) -> bool {
-        self.drawing.dirty()
+        self.text_session
+            .as_ref()
+            .is_some_and(|s| !s.value.content.text.is_empty())
+            || self.drawing.dirty()
             || matches!(&self.gesture, Some(Gesture::Pen(stroke)) if !stroke.points.is_empty())
     }
     pub fn finish(&mut self) {
+        self.finish_text();
+        self.text_creation = None;
+        self.text_resize = None;
         self.drawing.clear_routing_hints();
         self.connection_gesture = None;
         self.selection_gesture = None;
@@ -450,6 +471,7 @@ impl Canvas {
                 .iter()
                 .map(ObjectSnapshot::id)
                 .collect();
+            self.text_cache.retain(|id, _| ids.contains(id));
             self.shape_cache.retain(|id, _| ids.contains(id));
             self.route_cache.retain(|id, _| ids.contains(id));
         }
@@ -462,6 +484,17 @@ impl Canvas {
         }
         self.frame = Some(ui.ctx().cumulative_frame_nr());
         self.processed.clear();
+        let font_state = (
+            ui.ctx().pixels_per_point(),
+            ui.fonts(|f| f.font_atlas_fill_ratio()),
+        );
+        if self
+            .text_font_state
+            .is_some_and(|previous| previous.0 != font_state.0 || font_state.1 < previous.1)
+        {
+            self.text_cache.clear();
+        }
+
         if !ui.input(|i| i.focused) || !ui.is_enabled() {
             self.finish();
         }
@@ -469,7 +502,11 @@ impl Canvas {
             return;
         }
         self.selection.refresh(&self.drawing);
-        if !ui.ctx().text_edit_focused() {
+        if self.text_session.is_none()
+            && self.text_creation.is_none()
+            && self.text_resize.is_none()
+            && !ui.ctx().text_edit_focused()
+        {
             self.selection_keys(ui);
             let (undo, redo) = ui.input_mut(|i| {
                 let redo = i.consume_shortcut(&egui::KeyboardShortcut::new(
@@ -491,11 +528,17 @@ impl Canvas {
         }
     }
     pub fn end_frame(&mut self, ui: &egui::Ui) {
+        self.text_font_state = Some((
+            ui.ctx().pixels_per_point(),
+            ui.fonts(|f| f.font_atlas_fill_ratio()),
+        ));
         if !ui.input(|i| i.pointer.primary_down()) {
             // Sliders may emit their last value on release. Clear only after
             // every surface/popup has had a chance to merge that final sample.
             self.style_gesture = None;
             self.connection_gesture = None;
+            self.text_creation = None;
+            self.text_resize = None;
             self.drawing.clear_routing_hints();
             self.cancel_shape_draft();
             // Explicit releases have already committed on the owning surface.
@@ -522,9 +565,17 @@ impl Canvas {
         if !matches!(self.tool, Tool::Select | Tool::Lasso) && self.selection.surface == surface {
             self.selection_view = Some((surface, transform, bounds.intersect(ui.clip_rect())));
         }
+        if self.text_surface(ui, bounds, surface, transform) {
+            self.paint(ui, bounds, surface, transform);
+            self.paint_text_editor(ui, bounds, surface, transform);
+            self.paint_text_handles(ui, transform, surface);
+            self.selection_controls(ui, bounds, surface, transform);
+            return;
+        }
         if self.connector_surface(ui, bounds, surface, transform) {
             self.paint(ui, bounds, surface, transform);
             self.paint_selection(ui, bounds, surface, transform);
+            self.paint_text_handles(ui, transform, surface);
             self.paint_connection_controls(ui, bounds, surface, transform);
             return;
         }
@@ -539,6 +590,7 @@ impl Canvas {
             self.selection_surface(ui, bounds, surface, transform);
             self.paint(ui, bounds, surface, transform);
             self.paint_selection(ui, bounds, surface, transform);
+            self.paint_text_handles(ui, transform, surface);
             self.paint_connection_controls(ui, bounds, surface, transform);
             return;
         }
@@ -851,6 +903,27 @@ impl Canvas {
                 continue;
             }
             let stroke = match object {
+                ObjectSnapshot::Text(t) => {
+                    if self
+                        .text_session
+                        .as_ref()
+                        .is_some_and(|s| s.value.id == t.id)
+                    {
+                        continue;
+                    }
+                    let source = self
+                        .text_resize
+                        .as_ref()
+                        .filter(|r| r.preview.id == t.id)
+                        .map(|r| &r.preview)
+                        .unwrap_or(t);
+                    let text = selection_preview
+                        .filter(|_| preview_ids.contains(&t.id))
+                        .map(|d| source.transformed(d))
+                        .unwrap_or_else(|| source.clone());
+                    text_ui::paint_text(ui, &painter, transform, &text, &mut self.text_cache);
+                    continue;
+                }
                 ObjectSnapshot::Stroke(stroke) => stroke,
                 ObjectSnapshot::Connector(c) => {
                     if self

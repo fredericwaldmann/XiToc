@@ -58,8 +58,9 @@ pub fn show(
                 }
                 ui.weak("Drag to create · Shift constrains · Escape cancels");
             });
+            if icons::button(ui,Icon::Text,"Text · click to type, drag to set width",editor.canvas.tool==Tool::Text).clicked(){editor.canvas.select(Tool::Text);}
             let reserved = if width >= 1000.0 { 480.0 } else if width >= 800.0 { 380.0 } else if width >= 500.0 { 268.0 } else { 210.0 };
-            let reserved=reserved+30.0+if width>=400.0{30.0}else{0.0};
+            let reserved=reserved+60.0+if width>=400.0{30.0}else{0.0};
             let strip_width = (width - reserved).max(24.0);
             ui.allocate_ui(egui::vec2(strip_width, style::CONTROL), |ui| {
                 egui::ScrollArea::horizontal().id_salt("pen-presets").min_scrolled_width(24.0).auto_shrink([false, false])
@@ -133,13 +134,13 @@ fn history(ui: &mut egui::Ui, canvas: &mut Canvas) {
             false,
             Icon::Undo,
             "Undo · Ctrl/Cmd+Z",
-            canvas.drawing.can_undo(),
+            canvas.history_available().0,
         ),
         (
             true,
             Icon::Redo,
             "Redo · Ctrl/Cmd+Shift+Z",
-            canvas.drawing.can_redo(),
+            canvas.history_available().1,
         ),
     ] {
         if ui
@@ -148,9 +149,9 @@ fn history(ui: &mut egui::Ui, canvas: &mut Canvas) {
             .clicked()
         {
             if redo {
-                canvas.redo();
+                canvas.selection_action(crate::selection::SelectionCommand::Redo, ui.ctx());
             } else {
-                canvas.undo();
+                canvas.selection_action(crate::selection::SelectionCommand::Undo, ui.ctx());
             }
         }
     }

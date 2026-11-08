@@ -534,3 +534,26 @@ near-reversal bevels and a corridor mesh regression were added, then the rebuilt
 package was rechecked. Toolbar wrapping reserves extra clearance for Routing.
 Analytical direction transforms preserve normals independently of far-origin
 translation. Final checks and screenshots are recorded in TEST_PLAN.
+
+## 2026-11-08 — Standalone editable text boxes (#26 slice)
+
+Confirmed advanced routing PR #41 merged, then created feature/editable-text-boxes
+from main 58a80ad. Read complete #26 and #24 with empty comments. #26's embedded
+shape-text dependency is not implemented, and user scope excludes that host; this
+PR references #26 without claiming all broader acceptance criteria.
+
+Added TextObject to the shared canonical store/protocol/history/clipboard; portable
+TextContent/TextStyle, bundled fonts, reusable layout/editor APIs and a top T tool.
+Implemented immediate caret creation, double-click editing, natural width reflow,
+formatting, shared selection/transforms, readable flips, typed/source clipboard
+routing and bounded history. Raw text/style Arcs remain shared during transforms.
+
+Tests cover source/Unicode/IME, normalized zoom/DPI metrics, font fallback, styles,
+wrap/reflow, selection, copy/duplicate/history, focus, menu routing, cache reuse,
+page overflow, mixed offscreen dragging and source preservation. Browser review
+caught initial focus handoff and independent screen-font wrapping defects; both
+received fixes and focused regressions. See TEST_PLAN for performed checks and
+actual visual evidence. Native OS IME/hardware coverage remains unverified.
+
+No shape text, labels, sticky notes, rich spans, PDF persistence, sidecars or
+unrelated Explorer/tab redesign. Fonts are compiled resources with licenses.

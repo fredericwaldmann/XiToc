@@ -268,8 +268,8 @@ object positions around one shared center. Axes are document-aligned regardless
 of current rotation, zoom or pan. The whole operation is one undo step and keeps
 selection IDs. Bounds/handles refresh immediately. Page ownership stays fixed;
 if a centerline would leave the page, reject the operation and explain why.
-Stroke color, positive width/scale, smoothing and pressure are preserved. Text,
-when implemented, will mirror geometrically including its glyph appearance.
+Stroke color, positive width/scale, smoothing and pressure are preserved. Text
+boxes reflect their centers while keeping glyphs readable; see Editable text boxes.
 
 
 ## M1.5 basic Shapes picker and vector editing
@@ -487,3 +487,45 @@ Routing and shared style controls do not cover rotation handles.
 
 Popover placement includes route-control positions outside the curve envelope,
 so an off-curve Bézier diamond remains clickable when viewport space permits.
+
+## Editable text boxes
+
+A vector T insertion button follows Shapes in the top drawing toolbar. Its space
+is reserved from the scrollable preset strip; Explorer/tabs/tool placement is
+unchanged. Click blank canvas to focus a default 240-point-wide, 18-point text box;
+drag horizontally to set width, with a transient outline. The tool returns to
+Selection with editing active. Empty drafts are discarded without a document edit.
+New Page text uses dark ink; Whiteboard defaults use the current contrasting text
+color. Captured object colors remain independent of theme/default changes.
+
+Double-click an existing box to edit. Caret, character selection, line breaks and
+Unicode use egui TextEdit. Dragging inside editing selects text; outside editing it
+moves the object through the same persistent object controller. Escape finishes
+editing and keeps object selection; clicking canvas outside also finishes. Space
+remains a text character while editing and does not start canvas panning. Rotated
+text shows an unrotated editing overlay with an explicit rotation-on-exit hint.
+
+A selected singleton has a small right-edge width grip, distinct from group resize
+corners. Width reflows natural glyphs; height auto-fits. A wide glyph sets a minimum
+fit width. Group scaling is uniform, explicit rotation rotates text, and flips
+relocate boxes while keeping glyphs readable. Page geometry clips overflow without
+discarding source; the editor scrolls long text.
+
+The existing contextual toolbar and right-click Format expose Text: Sans/Mono,
+font size (4–128 pt controls), Bold, Italic, Underline, inline custom RGB/HSV/hex
+color, separate opacity, and Left/Center/Right alignment. The entire box uses one
+style. Mixed-property changes affect selected text boxes only; fixed header slots
+keep continuous sliders stable. Menus retain object membership and text selection.
+Existing shape and connector controls remain available for compatible selections.
+
+Editing shortcuts operate on text (A/C/V/X, arrows, Backspace/Delete, Undo/Redo).
+Object mode retains the same shortcuts for whole objects and nudges. Edit-menu
+commands and toolbar Undo/Redo follow the active editor. Browser keyboard paste
+uses eframe's DOM bridge; menu paste can use text copied in XiToc, otherwise it
+shows a keyboard-paste hint. No silent clipboard-read permission is implied.
+
+Fonts are bundled DejaVu Sans/Mono in four faces plus Droid CJK and egui emoji
+fallbacks; the browser does not require system fonts. Source/layout/caret positions
+remain document-based at 50/100/200/400% and DPI changes, while glyphs rasterize at
+the displayed size. Text remains memory-only until M2, with existing dirty/discard
+guards. Text inside shapes, sticky notes, labels and rich spans are not exposed.

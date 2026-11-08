@@ -99,6 +99,7 @@ fn rotate([x, y]: Point, angle: f64) -> Point {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(dead_code)] // Semantic dispatch tag; only implemented content variants belong here.
 pub enum ObjectType {
+    Text,
     Stroke,
     Shape,
     Connector,
@@ -109,6 +110,7 @@ pub enum ObjectType {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", deny_unknown_fields)]
 pub enum ObjectSnapshot {
+    Text(std::sync::Arc<crate::text::TextObject>),
     Stroke(std::sync::Arc<Stroke>),
     Shape(std::sync::Arc<crate::shape::Shape>),
     Connector(std::sync::Arc<crate::connector::Connector>),
@@ -669,6 +671,7 @@ impl From<crate::connector::Connector> for ObjectSnapshot {
 impl ObjectSnapshot {
     pub fn as_object(&self) -> &dyn CanvasObject {
         match self {
+            Self::Text(t) => t.as_ref(),
             Self::Stroke(s) => s.as_ref(),
             Self::Shape(s) => s.as_ref(),
             Self::Connector(c) => c.as_ref(),
@@ -676,6 +679,7 @@ impl ObjectSnapshot {
     }
     pub fn id(&self) -> ObjectId {
         match self {
+            Self::Text(t) => t.id,
             Self::Stroke(s) => s.id,
             Self::Shape(s) => s.id,
             Self::Connector(c) => c.id,
@@ -683,6 +687,7 @@ impl ObjectSnapshot {
     }
     pub fn transformed(&self, delta: Placement) -> Self {
         match self {
+            Self::Text(t) => t.transformed(delta).into(),
             Self::Connector(c) => c.transformed(delta, &Default::default()).into(),
             Self::Stroke(s) => {
                 let mut t = (**s).clone();
@@ -698,6 +703,13 @@ impl ObjectSnapshot {
     }
     pub fn relocated(&self, owner: Uuid, surface: crate::drawing::Surface) -> Self {
         match self {
+            Self::Text(t) => {
+                let mut t = (**t).clone();
+                t.id = Uuid::new_v4();
+                t.document_id = owner;
+                t.surface = surface;
+                t.into()
+            }
             Self::Connector(c) => {
                 let mut c = (**c).clone();
                 c.id = Uuid::new_v4();
@@ -720,5 +732,11 @@ impl ObjectSnapshot {
                 t.into()
             }
         }
+    }
+}
+
+impl From<crate::text::TextObject> for ObjectSnapshot {
+    fn from(t: crate::text::TextObject) -> Self {
+        Self::Text(std::sync::Arc::new(t))
     }
 }

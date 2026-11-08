@@ -16,7 +16,7 @@ move/proportional resize, clipboard operations and undo/redo are implemented.
 Rotation has a live group handle and 15-degree Shift snapping; explicit z-order
 changes remain domain APIs without Arrange controls. Cut and arrow-key nudges are
 implemented alongside the existing clipboard and manipulation commands.
-Stroke, Shape and Connector are implemented canvas-object content types. Shapes include
+Stroke, Shape, Connector and Text are implemented canvas-object content types. Shapes include
 rectangle, rounded rectangle, circle, ellipse, triangle, diamond, line and arrow.
 Selected shapes support contextual fill/border/opacity/pattern/radius/arrowhead
 formatting, mixed-selection batch changes and separate persistent creation defaults.
@@ -24,7 +24,7 @@ formatting, mixed-selection batch changes and separate persistent creation defau
 The PDF codec creates and reopens **blank** native documents. It does not save or
 reload handwriting. Dirty drawing disables browser PDF export; Ctrl/Cmd+S explains
 the M2 limitation. Ordinary PDFs open as read-only with no PDF preview renderer.
-Text, sticky notes, formulas, images, multipage creation,
+Sticky notes, formulas, images, multipage creation,
 browser directory handles, ink autosave and crash recovery remain planned.
 
 ## Crate and module map
@@ -446,8 +446,8 @@ Right-clicking empty canvas preserves membership/content. eframe 0.37's canvas-o
 or new drawing toolbar is introduced. Flip failures leave history/content intact
 and report page/coordinate limits; only affected cached objects are invalidated.
 
-Future text follows geometric mirroring, including glyph appearance (no implicit
-readable-text counter-transform). Future groups must apply the world delta once
+Implemented text instead uses readable-glyph reflection; see the text section
+below for the documented center/orientation policy. Future groups must apply the world delta once
 to each descendant; connector endpoints retain object IDs/local anchors and derive
 world positions via Placement. Routing/free endpoints and relation-aware group
 journals need future adapters; no such object types are currently implemented.
@@ -526,7 +526,7 @@ is included by the private selection adapter via `#[path]`; it is not a second
 editor implementation. Tests assert cache Arc reuse, index pruning, exact history,
 legacy decoding, clip geometry, ownership, layout/focus and discard behavior.
 
-The current source has 200 Rust tests: 192 normally run and eight ignored
+The current source has 224 Rust tests: 216 normally run and eight ignored
 release benchmarks (whole erase, partial document, partial geometry, smoothing,
 indexed lasso, rectangle selection, multi-stroke rotation preview, and multi-shape movement preview). Historical recorded results are in TEST_PLAN, not proof of hardware
 latency or a fresh run of every platform. [scripts/test_release.py](../scripts/test_release.py)
@@ -789,3 +789,64 @@ frame. Hit testing, rectangle/lasso and bounds consume the same derived paths.
 Full obstacle avoidance can later replace the bounded corridor generator while
 retaining endpoint/route/manual/style semantics. Labels are explicitly excluded
 by #25; the future text-object milestone is not pulled into routing.
+
+## Editable text boxes (#26 standalone slice)
+
+`text.rs` adds `TextObject` to the same stable-ID `ObjectSnapshot` store/protocol
+and journal. It owns document/surface, Placement, wrap width, fitted height and
+`Arc<TextContent>` (UTF-8 source plus whole-box TextStyle). Content/style are
+platform-neutral, immutable during transforms and shared by snapshots/clipboard;
+editing uses copy-on-write. There is no second document store. Source is bounded
+to 64 KiB, and unknown font/alignment variants or invalid geometry are rejected.
+
+`text_layout.rs` owns bundled font registration, the shared LayoutJob builder,
+normalized metrics, wrapping, display galleys and the reusable egui TextEdit
+component. Sans/Mono use unmodified DejaVu regular/bold/oblique/bold-oblique faces,
+with bundled Droid CJK and egui emoji fallbacks. Font data is compiled into the
+application; licenses are under assets/fonts. There are no runtime system-font
+assumptions or external note font links. Future PDF export must embed/subset the
+required faces and matching visible text; this feature does not change the codec.
+
+Document line breaks use the same egui/epaint engine with normalized unhinted
+1-pixel-per-point metrics, independent of camera/DPI. Display/editing rasterize
+glyphs at the actual screen size and map rows/glyph/caret positions to those same
+document metrics. Logical wraps and explicit newlines do not change at 50–400%.
+Screen galleys cache by source/style/width/scale, with DPI/atlas-reset invalidation.
+Unrelated drawing does not re-layout unchanged text. No text is stored as pixels.
+
+`canvas_text.rs` is an adapter inside Canvas. The top T tool starts a transient
+click/width-drag box, focuses its caret immediately and returns to Selection in
+editing mode. Blank drafts do not enter history. Double-click re-edits an existing
+ID; text drag selects characters, while object-mode drag uses the existing frozen
+drag session. Escape finishes editing and retains object selection; another Escape
+uses normal selection behavior. Canvas clicks outside finish editing. Rotated
+text uses a clearly indicated unrotated editing overlay, preserving its stored
+rotation and applying it again on exit.
+
+A selected singleton has one local right-edge width handle: it reflows text without
+changing font size. Height auto-fits; width cannot clip a single wide glyph. Group
+scaling scales type uniformly through Placement. Explicit rotation works normally.
+Flips transform box centers while retaining readable glyph orientation (superseding
+the older planned mirrored-text policy). Page fitting caps the visible footprint
+at the page boundary while retaining all source; the editing surface scrolls
+long content. Whiteboards retain full height and arbitrary positions.
+
+Text formatting reuses the contextual/right-click Format UI, corrected inline
+RGB/HSV/hex picker and shared sliders. Family, size, bold/italic/underline, RGBA
+and paragraph alignment patch only compatible selected text boxes. Mixed controls
+keep stable header/slider positions. Existing shape/connector formatting remains
+independent.
+
+Active text editing owns text shortcuts and IME via egui. Preedit stays transient;
+committed source uses `Drawing::replace_texts` in the same Replace journal. Typing
+coalesces for at most two seconds/32 changes; paste, cut and IME commits have
+explicit editing undo boundaries. Idle frames/caret changes do not write history.
+Edit-menu and toolbar history commands route to the active text editor. A transient
+cursor is retained across menu focus changes. Native Paste uses eframe's request;
+web uses DOM paste/keyboard input and an explicit in-app plain-text copy fallback,
+separate from object clipboard bundles. Unsupported menu paste prompts Ctrl/Cmd+V.
+
+Issue #26 assumes embedded shape text from #24, which is not implemented. This
+standalone task establishes reusable TextContent/TextStyle/layout/edit APIs but
+does not add text inside shapes, labels, sticky notes or rich spans. It references
+#26 without closing its broader acceptance criteria.

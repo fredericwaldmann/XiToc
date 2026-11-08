@@ -248,3 +248,11 @@ magnetic objects. Automatic/fixed local ports, stable live attachment, manual
 rail/control handles, Reset Route and shared formatting/history/selection operate
 on both layouts. Global obstacle avoidance and labels remain future work.
 This does not change the M2 PDF persistence gate.
+
+## Standalone editable text boxes (#26 slice, M1.8 user request)
+
+Text boxes now share object identity, selection, transforms, clipboard and history.
+The top T tool and egui editing/layout core support wrapping, portable fonts,
+whole-box formatting and Unicode source. Embedded shape text, labels and rich spans
+remain separate hosts; #26 stays open for its broader shape-text dependency.
+PDF text/font persistence and round trips remain M2.

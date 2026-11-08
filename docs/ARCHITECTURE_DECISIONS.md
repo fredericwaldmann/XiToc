@@ -542,3 +542,33 @@ measured-pattern/mesh pipeline. Cache resolved paths to avoid repeated idle curv
 flattening. Semantic cubics and route parameters remain available for future PDF
 vector emission; the blank PDF codec is unchanged. Labels are explicitly out of
 scope in actual issue #25 and do not justify a premature full text system.
+
+## 2026-11-08 — Standalone text with a reusable editing/layout boundary
+
+PR #41 was confirmed merged before branching from main 58a80ad. Actual issue #26
+assumes a #24 shape-text core that does not exist. The user explicitly excludes
+shape-contained text, so introduce reusable semantic TextContent/TextStyle and
+layout/edit functions now, with TextObject as their first host. Do not claim the
+shape-text acceptance criterion or close #26 automatically.
+
+Store source/style in immutable shared Arcs so transforms do not clone strings.
+Use the existing object store and delta journal rather than egui widgets as data.
+Source changes coalesce in bounded chunks; caret/IME/selection remain transient,
+and egui handles native/browser text editing and its active-session undoer.
+
+Bundle licensed, unmodified DejaVu faces and Droid CJK instead of relying on
+system fonts. Normalize document metrics with the same egui/epaint engine and
+unhinted unit-DPI fonts. Map scale-rasterized glyph rows back to those metrics for
+stable wraps, caret positions and high-DPI rendering. Future PDF output must embed
+fonts/subsets and match this layout; no persistence is added now.
+
+Singleton width edits reflow; group scaling uniformly scales type. Readable text
+reflection supersedes the older proposed mirrored-glyph policy: reflect centers,
+retain glyph orientation, and preserve explicit rotation. Editing a rotated box
+uses a labeled unrotated overlay because egui's interaction transforms lack
+rotation. Page fitting clips visible height but preserves all source/edit access.
+
+Actual browser verification caught missing initial IME/caret handoff; initialize
+the cursor and request focus after widget creation, with a real-editor separate
+press/release regression. Zoom testing caught font-size-dependent wraps; canonical
+row mapping fixes that instead of accepting different line breaks at each zoom.

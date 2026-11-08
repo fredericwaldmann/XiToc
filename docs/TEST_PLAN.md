@@ -1258,3 +1258,64 @@ Inspected captures: [orthogonal edit](screenshots/advanced-connectors/orthogonal
 [corrected 400% group move](screenshots/advanced-connectors/zoom400.png),
 [Page Note curve](screenshots/advanced-connectors/page-curve.png),
 [dark Page Note](screenshots/advanced-connectors/page-dark.png).
+
+
+## Editable text boxes — 2026-11-08
+
+Preparation confirmed advanced routing PR #41 merged into main at 58a80ad.
+Issue #26 has no comments and includes a shared shape-text dependency (#24);
+this slice implements standalone boxes and reusable text primitives, not embedded
+shape text, so it references #26 without closing it.
+
+Executed checks:
+
+- `cargo fmt --all -- --check`: passed.
+- `cargo clippy --all-targets -- -D warnings`: passed.
+- `cargo test --all-targets`: 216 passed, eight ignored performance tests.
+- `cargo test --release -- --ignored --nocapture`: all eight passed.
+- `cargo build --release`: passed; native application launched under an eight-second
+  smoke timeout without startup errors (timeout exit is expected).
+- `cargo check --target wasm32-unknown-unknown`: passed.
+- `trunk build --release`: passed.
+
+The 24 added tests cover semantic Unicode/style validation, clipboard preservation,
+shared immutable content, real TextEdit focus and IME events, source/page ownership,
+explicit newlines, wrapping/reflow, font faces, color/alpha/alignment, selection,
+rotation/readable flips, undo chunks, menu focus transfer, mixed offscreen dragging,
+50/100/200/400% views, monitor DPI independence and unchanged layout cache reuse.
+The existing ink, eraser, shapes, selection and advanced connector tests also pass.
+
+Actual Firefox GUI inspection used the packaged application, not a mock UI. Checked
+first-click typing, explicit Enter/newlines, Latin/Greek/CJK text, width reflow,
+24-point bold/italic/underline, custom hex blue, center alignment, double-click
+re-editing, text selection/plain-text copy versus object copy, paste menu and undo,
+object identity preservation, rotation, a mixed text/two-shape/connector drag and
+undo, 400% rendering/rapid dragging, Page Notes, light/dark themes and a 480px layout.
+The final packaged build was separately checked for Page Note creation, immediate
+focus, multiline Unicode text, contextual formatting and responsive layout.
+Screenshots are in [screenshots/text-boxes](screenshots/text-boxes).
+
+Browser clipboard commands were intercepted by the test harness to observe copied
+content and exercise the in-app text fallback; this does not verify OS clipboard
+permissions or interoperability with every browser. Native OS IME composition,
+physical keyboard/clipboard integration and Windows/macOS interactive behavior
+remain manual verification items. egui IME events are covered in controller tests.
+Rotated text edits in a labeled upright overlay and returns to its stored rotation.
+
+Manual reproduction:
+
+1. Create a Page Note or Whiteboard. Choose T in the top toolbar, click the canvas,
+   and type immediately. Use Enter for explicit paragraphs; test café, Greek and CJK.
+2. Escape to select the object. Drag its right-edge width handle: words reflow
+   without stretching letters. Double-click to edit; drag inside to select text.
+3. Open Text in the contextual toolbar. Change family, size, bold/italic/underline,
+   color/hex, opacity and alignment. Check undo/redo and mixed text formatting.
+4. While editing, use Ctrl/Cmd+A/C/X/V and arrow/delete keys. Escape, then use the
+   same copy/paste shortcuts to duplicate whole objects with new IDs.
+5. Rotate and flip the box; glyphs remain readable on flips. Select it together
+   with shapes/connectors, drag rapidly and partly offscreen, undo and redo.
+6. Repeat at 50%, 100%, 200%, 400%, after panning and on both document types.
+   Verify existing connector routes, pen and erasers still work.
+
+Text remains editable in memory. PDF saving/reopening editable content is outside
+this milestone and must not be inferred from the document’s .pdf filename.

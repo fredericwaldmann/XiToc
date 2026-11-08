@@ -499,8 +499,8 @@ the page is rejected without history mutation, with a visible explanation.
 Only affected placements/caches change; the shared spatial index rebuilds lazily
 on its revision key, as for movement/rotation. No new rendering engine is needed.
 
-Future text uses geometric mirroring, including glyphs, rather than silently
-keeping text readable. Future groups must transform descendants exactly once;
+Text boxes now reflect their box centers while preserving readable glyphs, as
+documented in the editable-text section below. Future groups must transform descendants exactly once;
 connectors keep stable target IDs/local anchors resolved through reflected
 Placement, with relation-aware routing/free-endpoint updates in the same command.
 These are extension policies, not implemented content types. M2 must serialize
@@ -551,7 +551,8 @@ Future styling edits can replace Shape snapshots in the same journal. Future
 connectors must add stable endpoint relationships and a perimeter-anchor/routing
 adapter; current lines/arrows contain no attachment IDs or routing state. Groups,
 text, resources and PDF graphics/embedded-data round trips remain separate work.
-The defaulted positive-scale reflection contract and mirrored-text policy remain.
+The defaulted positive-scale reflection contract remains; editable text uses the
+readable-glyph reflection policy documented below.
 
 
 ### Persistent drag ownership and visual clipping
@@ -695,3 +696,48 @@ commit, Escape/focus cancellation and viewport-independent pointer tracking.
 Future obstacle avoidance can extend the routing boundary without changing target
 references, clipboard remapping or history. No text labels (excluded by #25),
 PDF persistence, sidecars or unrelated canvas architecture changes.
+
+## Standalone editable text (#26 slice)
+
+Text is a fourth canonical CanvasObject variant, sharing stable identity, surface,
+z-order, selection/region tests, immutable snapshots, clipboard and Replace/Erase
+history with ink/shapes/connectors. TextObject stores Placement, logical wrap width,
+fitted height and an Arc<TextContent> with Unicode source and TextStyle. Caret,
+selection, focus, scroll and IME composition are transient. Transform snapshots
+share content Arcs; style/source edits use copy-on-write. No storage/codec changes.
+
+The shared text_layout boundary uses bundled portable faces and a single Job
+builder/egui text engine. A normalized unhinted metrics context establishes
+document wraps independent of monitor DPI. Scale-specific raster rows are mapped
+to the canonical row/glyph positions; the same galley drives display and TextEdit
+caret/navigation. Glyphs remain normal font-atlas rendering, never flattened
+TextObject bitmap content. Cache invalidation follows source/style/width/scale and
+DPI/atlas changes rather than unrelated pen input.
+
+Singleton resizing changes wrap width and recomputes fitted height. Group scaling
+uses uniform Placement scale and leaves source/style intact. Flips relocate the
+box center without mirroring glyphs; rotations remain explicit. Page clipping caps
+visible geometry while preserving full editable source, with scrolling during
+editing. Bounds and hit tests use the transformed box, including whitespace.
+Bodies take priority over crossing connectors, as shapes already do.
+
+Canvas routes editing before object gestures. Creation is transient until nonempty
+source; Escape/tool handoff removes accidental empty drafts. A frozen width-drag
+uses original pointer/placement and one release commit, sharing the persistent
+viewport-independent interaction rules. Existing text re-enters via double-click.
+Rotated boxes edit in an explicitly unrotated overlay because egui interaction
+layers do not support rotation; stored rotation is never reset.
+
+The framework editor owns Unicode/IME/text clipboard and local undo. Canonical
+source updates share the object delta journal with bounded two-second/32-change
+coalescing. Cut/paste/IME commits force sensible editing undo boundaries. Canvas
+shortcuts do not consume text editing input; menu/toolbar actions are forwarded
+back to the focused editor, preserving its selection across menus. Plain text and
+object session clipboards are distinct; browser menu paste has a local fallback
+and otherwise asks for the standard keyboard gesture.
+
+TextContent/TextStyle and layout/edit APIs do not depend on TextObject hosting.
+Future shape text, labels, notes and richer spans can reuse them with appropriate
+geometry/command adapters. Those hosts are not implemented here. #26's assumed
+shape-text integration remains an open dependency; native OS IME verification and
+M2 font-subset/visible-PDF round trips are separate gates.

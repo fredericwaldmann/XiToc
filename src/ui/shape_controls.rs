@@ -50,7 +50,7 @@ fn opacity(
     changed(edits, r, patch((percent * 255. / 100.).round() as u8));
 }
 /// Inline picker: nested root popups close the parent formatting menu in egui.
-fn color_control(ui: &mut egui::Ui, rgb: &mut [u8; 3], alpha: u8) -> Option<egui::Id> {
+pub(crate) fn color_control(ui: &mut egui::Ui, rgb: &mut [u8; 3], alpha: u8) -> Option<egui::Id> {
     let original = *rgb;
     let toggle = ui.make_persistent_id("color-expanded");
     let mut open = ui.data(|d| d.get_temp::<bool>(toggle).unwrap_or(false));
