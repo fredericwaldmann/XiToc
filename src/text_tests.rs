@@ -387,7 +387,13 @@ fn insert_delete_and_rich_clipboard_keep_runs_and_paragraphs() {
         p.alignment = Alignment::Right;
         p.spacing = 12.;
     });
+    c.format_paragraphs(0..4, |p| p.alignment = Alignment::Center);
     let pasted = c.slice(4..14);
+    let mut empty = TextContent::default();
+    empty.replace(0..0, &pasted);
+    assert_eq!(empty.paragraph(0).alignment, Alignment::Center);
+    assert_eq!(empty.paragraph(1).alignment, Alignment::Right);
+    assert_eq!(empty.style_at(0).family, TextFamily::Monospace);
     c.replace(
         4..4,
         &TextContent {

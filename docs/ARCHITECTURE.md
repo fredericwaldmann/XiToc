@@ -707,7 +707,9 @@ TextContent stores UTF-8 source, a fallback/typing-default style, sorted formatt
 runs with Unicode scalar ranges, and paragraph styles. Each run independently
 captures family, size, bold, italic, underline and RGBA. Adjacent equal runs merge;
 range operations expand to extended grapheme boundaries. Insert/delete/replace
-update runs and paragraph membership together. Inserting a combining character
+update runs and paragraph membership together. Full rich replacements adopt the
+clipboard’s first paragraph style; partial insertions retain the destination
+paragraph. Inserting a combining character
 inherits its resulting grapheme's first character style. Limits remain 64 KiB.
 
 The reusable text_layout editor supplies a custom egui TextBuffer. Its semantic

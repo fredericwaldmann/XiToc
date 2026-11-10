@@ -443,6 +443,14 @@ impl TextContent {
         let mut paragraphs: Vec<_> = (0..=self.text.matches('\n').count())
             .map(|i| self.paragraph(i))
             .collect();
+        // A complete rich replacement adopts its first paragraph. Partial
+        // insertion keeps the destination paragraph, as ordinary typing does.
+        if range.start == 0
+            && range.end == self.text.chars().count()
+            && let Some(first) = value.paragraphs.first()
+        {
+            paragraphs[0] = first.clone();
+        }
         paragraphs.splice(
             first + 1..first + 1 + removed,
             (0..value.text.matches('\n').count()).map(|i| {

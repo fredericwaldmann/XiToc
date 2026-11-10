@@ -680,13 +680,13 @@ impl Canvas {
             if next != s.cursor
                 && !output.response.changed()
                 && let Some(r) = next
-                && r.is_empty()
             {
-                s.typing = s
-                    .value
-                    .content
-                    .style_at(r.primary.index.0.saturating_sub(1))
-                    .clone();
+                let index = if r.is_empty() {
+                    r.primary.index.0.saturating_sub(1)
+                } else {
+                    r.sorted_cursors()[0].index.0
+                };
+                s.typing = s.value.content.style_at(index).clone();
             }
             s.cursor = next;
         }
@@ -857,6 +857,20 @@ impl Canvas {
         let mixed_color = selected_styles.iter().any(|s| s.color != style.color);
         let mut changed = false;
         let mut patch = crate::text::TextStylePatch::default();
+        let paragraph_offset = self
+            .text_session
+            .as_ref()
+            .and_then(|s| s.cursor)
+            .map(|r| r.sorted_cursors()[0].index.0)
+            .unwrap_or(0);
+        let paragraph_index = texts[0]
+            .content
+            .text
+            .chars()
+            .take(paragraph_offset)
+            .filter(|c| *c == '\n')
+            .count();
+        let mut paragraph_style = texts[0].content.paragraph(paragraph_index);
         let mut line_spacing = None;
         let mut paragraph_spacing = None;
         let mut control = ui.scope_id();
@@ -981,7 +995,7 @@ impl Canvas {
                     ("Right", Alignment::Right),
                 ] {
                     if ui
-                        .selectable_value(&mut style.alignment, a, label)
+                        .selectable_value(&mut paragraph_style.alignment, a, label)
                         .clicked()
                     {
                         patch.alignment = Some(a);
@@ -989,7 +1003,7 @@ impl Canvas {
                     }
                 }
             });
-            let mut p = texts[0].content.paragraph(0);
+            let p = &mut paragraph_style;
             if ui
                 .add(
                     egui::DragValue::new(&mut p.line_spacing)
@@ -1471,6 +1485,32 @@ mod rich_tests {
             true,
         );
         assert_eq!(c.drawing.snapshot(t.id), Some(&t.clone().into()));
+        selected(&ctx, &mut c, 0, 0);
+        let mut navigation = vec![key(egui::Key::ArrowRight, false); 6];
+        for _ in 0..9 {
+            let mut event = key(egui::Key::ArrowRight, false);
+            if let Event::Key { modifiers, .. } = &mut event {
+                modifiers.shift = true;
+            }
+            navigation.push(event);
+        }
+        frame(&ctx, &mut c, s, view, navigation, 0.5, true);
+        assert_eq!(c.text_session.as_ref().unwrap().typing.size, 32.);
+        frame(
+            &ctx,
+            &mut c,
+            s,
+            view,
+            vec![Event::Text("new".into())],
+            0.6,
+            true,
+        );
+        let Some(ObjectSnapshot::Text(replaced)) = c.drawing.snapshot(t.id) else {
+            panic!()
+        };
+        assert_eq!(replaced.content.text, "Hello new world");
+        assert_eq!(replaced.content.style_at(7).size, 32.);
+        assert_eq!(replaced.content.style_at(1).size, 18.);
     }
     #[test]
     fn all_local_handles_use_one_stable_release_transaction_across_zoom_and_rotation() {
@@ -1581,10 +1621,16 @@ mod rich_tests {
         let ctx = egui::Context::default();
         text_layout::install(&ctx);
         let mut t = TextObject::new(c.drawing.owner(), s, [200., 200.], 240.);
-        t.content_mut().text = "Hello beautiful world".into();
+        t.content_mut().text = "First\nHello beautiful world".into();
+        t.height = 70.;
+        t.content_mut().format_paragraphs(6..27, |p| {
+            p.alignment = Alignment::Center;
+            p.line_spacing = 1.75;
+            p.spacing = 12.;
+        });
         c.drawing.replace_texts(vec![t.clone()], false);
         start(&ctx, &mut c, t);
-        selected(&ctx, &mut c, 6, 15);
+        selected(&ctx, &mut c, 12, 21);
         let mut draw = |events| {
             render(&ctx, events, |ui| {
                 c.begin_frame(ui);
@@ -1604,6 +1650,15 @@ mod rich_tests {
         draw(ui_pointer(p, false));
         let labels = draw(vec![]);
         assert!(labels.contains_key("Bold"), "{labels:?}");
+        draw(ui_pointer(p, true));
+        draw(ui_pointer(p, false));
+        let labels = draw(vec![]);
+        let p = labels["Block"];
+        draw(ui_pointer(p, true));
+        draw(ui_pointer(p, false));
+        let labels = draw(vec![]);
+        assert!(labels.keys().any(|s| s.contains("1.75")), "{labels:?}");
+        assert!(labels.keys().any(|s| s == "12"), "{labels:?}");
     }
     #[test]
     fn caret_formatting_changes_only_subsequent_input() {

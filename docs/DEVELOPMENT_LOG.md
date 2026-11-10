@@ -586,3 +586,11 @@ style handoff, preview cancel/commit, Unicode/rich clipboard, padding-cache refl
 future resize defaults and rotated eight-handle sessions across four zoom levels.
 See TEST_PLAN for final executed checks and GUI evidence/limits. No shape-contained
 text, labels, PDF serialization or unrelated tools were introduced.
+
+Final review also covered rich replacement into an empty box: the first copied
+paragraph now retains its alignment, with the multi-paragraph paste regression
+extended to include this case. Partial insertion keeps destination block styling.
+
+The same final regression pass checks that Block controls display the caret's
+paragraph (including non-first-paragraph spacing), and replacement typing inherits
+the first selected character's style.
