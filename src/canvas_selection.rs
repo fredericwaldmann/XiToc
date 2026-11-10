@@ -159,6 +159,15 @@ impl Canvas {
                 }
             }
             Smaller | Larger => {
+                let text_only = !self.selection.ids.is_empty()
+                    && self.selection.ids.iter().all(|id| {
+                        matches!(self.drawing.snapshot(*id), Some(ObjectSnapshot::Text(_)))
+                    });
+                if text_only {
+                    let factor = if command == Smaller { 1.0 / 1.1 } else { 1.1 };
+                    self.scale_selected_text_sizes(factor, ctx);
+                    return;
+                }
                 self.finish();
                 if let (Some(bounds), Some(geometry)) =
                     (self.selection.bounds, self.selection.geometry)

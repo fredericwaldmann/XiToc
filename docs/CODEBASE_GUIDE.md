@@ -852,3 +852,11 @@ transactions and rotated eight-handle resizing at 50–400%. Existing text_contr
 and mixed object regression suites remain active. Future shape text/labels/sticky
 notes reuse these primitives; those hosts and PDF serialization remain outside
 this feature. See ARCHITECTURE.md and TEST_PLAN.md for platform/manual limits.
+
+For text-only selections, the contextual −/+ buttons scale `TextContent.style.size`
+and every `FormatRun.style.size` by reciprocal 0.9/1.1 factors. They do not change
+`Placement.scale`, object identity or other character/paragraph properties, and
+each action is one journal operation. Other selections keep geometric scaling.
+Mixed-size Text controls display an explicit `Mixed` entry without a representative
+font-size slider; entering a valid numeric size is an explicit uniform-size edit.
+Opening or switching formatting menus is read-only and does not add history.

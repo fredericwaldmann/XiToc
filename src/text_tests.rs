@@ -32,6 +32,60 @@ fn semantic_unicode_identity_style_and_validation_roundtrip() {
     t.content_mut().text.push('\0');
     assert!(!t.valid());
 }
+
+#[test]
+fn proportional_font_scaling_preserves_runs_and_reciprocal_sizes() {
+    let d = Drawing::new(&DocumentData::blank(DocumentKind::Whiteboard));
+    let mut t = text(&d, Surface::Canvas);
+    t.content_mut().text = "Small\nMedium\nLARGE".into();
+    for (range, size, family, bold, color) in [
+        (0..5, 12.0, TextFamily::Sans, false, [10, 20, 30, 255]),
+        (6..12, 18.0, TextFamily::Monospace, true, [40, 50, 60, 220]),
+        (13..18, 30.0, TextFamily::Sans, false, [70, 80, 90, 180]),
+    ] {
+        t.content_mut().format(
+            range,
+            &TextStylePatch {
+                size: Some(size),
+                family: Some(family),
+                bold: Some(bold),
+                italic: Some(!bold),
+                underline: Some(bold),
+                rgb: Some([color[0], color[1], color[2]]),
+                alpha: Some(color[3]),
+                ..Default::default()
+            },
+        );
+    }
+    let text_len = t.content.text.chars().count();
+    t.content_mut().format_paragraphs(0..text_len, |p| {
+        p.alignment = Alignment::Justify;
+        p.line_spacing = 1.5;
+    });
+    let before = t.content.clone();
+    assert!(t.content_mut().scale_font_sizes(1.1));
+    assert!((t.content.style_at(0).size - 13.2).abs() < 1e-12);
+    assert!((t.content.style_at(6).size - 19.8).abs() < 1e-12);
+    assert!((t.content.style_at(13).size - 33.0).abs() < 1e-12);
+    assert_eq!(t.content.style_at(6).family, TextFamily::Monospace);
+    assert!(t.content.style_at(6).bold);
+    assert!(!t.content.style_at(6).italic);
+    assert!(t.content.style_at(6).underline);
+    assert_eq!(t.content.style_at(6).color, [40, 50, 60, 220]);
+    assert!(t.content_mut().scale_font_sizes(1.0 / 1.1));
+    for (index, size) in [(0, 12.0), (6, 18.0), (13, 30.0)] {
+        assert!((t.content.style_at(index).size - size).abs() < 1e-12);
+    }
+    assert_eq!(t.content.text, before.text);
+    assert_eq!(t.content.paragraphs, before.paragraphs);
+    assert_eq!(t.content.style_at(6).italic, before.style_at(6).italic);
+    assert_eq!(
+        t.content.style_at(6).underline,
+        before.style_at(6).underline
+    );
+    assert_eq!(t.content.style_at(6).family, before.style_at(6).family);
+    assert_eq!(t.content.style_at(6).color, before.style_at(6).color);
+}
 #[test]
 fn portable_faces_wrapping_explicit_breaks_and_reflow_preserve_source() {
     with_fonts(|ctx| {

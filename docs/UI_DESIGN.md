@@ -525,6 +525,11 @@ the retained text range; Enter/mouse choice commits one operation, while Escape
 cancels without history changes. Preview arrows do not move the caret or objects.
 Visible font names use their own fonts with lazy cached loading. Native lists
 installed supported families; web lists bundled families and states the limitation.
+For text-only object selections, contextual −/+ scale every stored font run by
+reciprocal 0.9/1.1 factors instead of scaling object geometry. Other selections
+retain geometric scaling. Mixed-size Text controls show `Mixed` and omit the slider
+until the selection has one shared size; the mixed entry changes content only after
+the user enters a valid size. Opening or switching Text/Paragraph is read-only.
 
 Justify expands breakable word gaps on eligible wrapped rows to reach both margins.
 It does not stretch letters, single words or paragraph-final rows. Explicit newlines

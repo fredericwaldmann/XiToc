@@ -258,6 +258,108 @@ fn font_size_bold_color_and_tab_switches_keep_the_same_word_selected() {
     h.highlight();
     assert!(h.labels.contains_key("Bold"));
 }
+
+#[test]
+fn text_tab_is_read_only_for_mixed_sizes_and_selection_toolbar_scales_runs() {
+    use crate::{
+        selection::SelectionCommand,
+        text::{TextFamily, TextStylePatch},
+    };
+    let (mut canvas, surface) = setup(DocumentKind::Whiteboard);
+    let ctx = egui::Context::default();
+    text_layout::install(&ctx);
+    let mut text = TextObject::new(canvas.drawing.owner(), surface, [120., 120.], 300.);
+    text.content_mut().text = "Small\nMedium\nLARGE".into();
+    for (range, size, family) in [
+        (0..5, 12., TextFamily::Sans),
+        (6..12, 18., TextFamily::Monospace),
+        (13..18, 30., TextFamily::Sans),
+    ] {
+        text.content_mut().format(
+            range,
+            &TextStylePatch {
+                size: Some(size),
+                family: Some(family),
+                ..Default::default()
+            },
+        );
+    }
+    let id = text.id;
+    canvas.drawing.replace_texts(vec![text.clone()], false);
+    canvas.select(Tool::Select);
+    canvas
+        .selection
+        .change([id], Membership::Replace, &canvas.drawing);
+
+    let before_revision = canvas.drawing.revision();
+    let before_history = canvas.history_available();
+    use crate::ui::settings::tests::{pointer as ui_pointer, render};
+    let labels = render(&ctx, vec![], |ui| canvas.text_format_controls(ui));
+    let text_button = labels["Text"];
+    render(&ctx, ui_pointer(text_button, true), |ui| {
+        canvas.text_format_controls(ui)
+    });
+    render(&ctx, ui_pointer(text_button, false), |ui| {
+        canvas.text_format_controls(ui)
+    });
+    let labels = render(&ctx, vec![], |ui| canvas.text_format_controls(ui));
+    assert!(
+        labels.keys().any(|label| label.contains("Mixed")),
+        "{labels:?}"
+    );
+    let paragraph_button = labels["Paragraph"];
+    render(&ctx, ui_pointer(paragraph_button, true), |ui| {
+        canvas.text_format_controls(ui)
+    });
+    render(&ctx, ui_pointer(paragraph_button, false), |ui| {
+        canvas.text_format_controls(ui)
+    });
+    let labels = render(&ctx, vec![], |ui| canvas.text_format_controls(ui));
+    let text_button = labels["Text"];
+    render(&ctx, ui_pointer(text_button, true), |ui| {
+        canvas.text_format_controls(ui)
+    });
+    render(&ctx, ui_pointer(text_button, false), |ui| {
+        canvas.text_format_controls(ui)
+    });
+    assert_eq!(canvas.drawing.revision(), before_revision);
+    assert_eq!(canvas.history_available(), before_history);
+    let Some(ObjectSnapshot::Text(current)) = canvas.drawing.snapshot(id) else {
+        panic!("text object missing")
+    };
+    assert_eq!(current.content.style_at(0).size, 12.);
+    assert_eq!(current.content.style_at(6).size, 18.);
+    assert_eq!(current.content.style_at(13).size, 30.);
+
+    canvas.selection_action(SelectionCommand::Larger, &ctx);
+    let Some(ObjectSnapshot::Text(scaled)) = canvas.drawing.snapshot(id) else {
+        panic!("text object missing after scale")
+    };
+    assert_eq!(scaled.id, id);
+    for (index, expected) in [(0, 13.2), (6, 19.8), (13, 33.)] {
+        assert!((scaled.content.style_at(index).size - expected).abs() < 1e-12);
+    }
+    assert_eq!(scaled.placement.scale, text.placement.scale);
+    canvas.selection_action(SelectionCommand::Smaller, &ctx);
+    let Some(ObjectSnapshot::Text(restored)) = canvas.drawing.snapshot(id) else {
+        panic!("text object missing after inverse scale")
+    };
+    for (index, expected) in [(0, 12.0), (6, 18.0), (13, 30.0)] {
+        assert!((restored.content.style_at(index).size - expected).abs() < 1e-12);
+    }
+    canvas.undo();
+    let Some(ObjectSnapshot::Text(undone)) = canvas.drawing.snapshot(id) else {
+        panic!("text object missing after undo")
+    };
+    assert!((undone.content.style_at(0).size - 13.2).abs() < 1e-12);
+    assert!((undone.content.style_at(6).size - 19.8).abs() < 1e-12);
+    assert!((undone.content.style_at(13).size - 33.0).abs() < 1e-12);
+    canvas.redo();
+    let Some(ObjectSnapshot::Text(redone)) = canvas.drawing.snapshot(id) else {
+        panic!("text object missing after redo")
+    };
+    assert!((redone.content.style_at(6).size - 18.0).abs() < 1e-12);
+}
 #[test]
 fn paragraph_menu_scope_spacing_and_undo_preserve_unicode_selection_and_inline_styles() {
     let mut h = Harness::new("First café\nSecond Ω\nThird 中文");

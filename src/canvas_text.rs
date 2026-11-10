@@ -83,6 +83,28 @@ pub(super) fn paint_text(
     );
 }
 impl Canvas {
+    pub(super) fn scale_selected_text_sizes(&mut self, factor: f64, ctx: &egui::Context) -> bool {
+        self.finish_text();
+        let mut texts = Vec::new();
+        let mut any_changed = false;
+        for id in &self.selection.ids {
+            let Some(ObjectSnapshot::Text(snapshot)) = self.drawing.snapshot(*id) else {
+                return false;
+            };
+            let mut text = (**snapshot).clone();
+            any_changed |= text.content_mut().scale_font_sizes(factor);
+            text_layout::measure(ctx, &mut text);
+            self.drawing.fit_text(&mut text);
+            texts.push(text);
+        }
+        if texts.is_empty() || !any_changed || !self.drawing.replace_texts(texts, false) {
+            return false;
+        }
+        self.selection.refresh(&self.drawing);
+        self.prune_cache();
+        true
+    }
+
     pub(super) fn text_action(
         &mut self,
         command: crate::selection::SelectionCommand,
@@ -905,24 +927,48 @@ impl Canvas {
                 self.open_font_browser(&texts);
                 ui.close();
             }
-            if mixed_size {
-                ui.weak("Font size: Mixed");
-            }
             ui.horizontal(|ui| {
                 if ui.button("−").clicked() {
                     style.size = (style.size - 1.).max(4.);
                     patch.size = Some(style.size);
                     changed = true;
                 }
-                let r = ui.add(
-                    egui::DragValue::new(&mut style.size)
-                        .range(4.0..=512.)
-                        .suffix(" pt"),
-                );
-                if r.changed() {
-                    patch.size = Some(style.size);
-                    changed = true;
-                    control = r.id;
+                if mixed_size {
+                    let id = ui.make_persistent_id("mixed-font-size-entry");
+                    let mut entry = ui.data(|d| {
+                        d.get_temp::<String>(id)
+                            .unwrap_or_else(|| "Mixed".to_owned())
+                    });
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut entry)
+                            .desired_width(72.0)
+                            .hint_text("Mixed"),
+                    );
+                    if r.changed() {
+                        if let Ok(size) = entry.trim().parse::<f64>()
+                            && (4.0..=512.0).contains(&size)
+                        {
+                            style.size = size;
+                            patch.size = Some(size);
+                            changed = true;
+                            control = r.id;
+                        }
+                    } else if r.lost_focus() {
+                        entry = "Mixed".to_owned();
+                    }
+                    ui.data_mut(|d| d.insert_temp(id, entry));
+                    ui.label("pt");
+                } else {
+                    let r = ui.add(
+                        egui::DragValue::new(&mut style.size)
+                            .range(4.0..=512.)
+                            .suffix(" pt"),
+                    );
+                    if r.changed() {
+                        patch.size = Some(style.size);
+                        changed = true;
+                        control = r.id;
+                    }
                 }
                 if ui.button("+").clicked() {
                     style.size = (style.size + 1.).min(512.);
@@ -930,18 +976,20 @@ impl Canvas {
                     changed = true;
                 }
             });
-            let r = crate::ui::drawing_controls::styled_slider(
-                ui,
-                egui::Slider::new(&mut style.size, 4.0..=512.)
-                    .step_by(1.)
-                    .fixed_decimals(0)
-                    .text("Font size")
-                    .suffix(" pt"),
-            );
-            if r.changed() {
-                changed = true;
-                patch.size = Some(style.size);
-                control = r.id;
+            if !mixed_size {
+                let r = crate::ui::drawing_controls::styled_slider(
+                    ui,
+                    egui::Slider::new(&mut style.size, 4.0..=512.)
+                        .step_by(1.)
+                        .fixed_decimals(0)
+                        .text("Font size")
+                        .suffix(" pt"),
+                );
+                if r.changed() {
+                    changed = true;
+                    patch.size = Some(style.size);
+                    control = r.id;
+                }
             }
             ui.horizontal(|ui| {
                 if ui

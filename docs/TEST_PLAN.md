@@ -1462,3 +1462,18 @@ paste remains plain text. Native Windows/macOS hardware/IME interactions and an
 exhaustive GUI matrix of every tool/theme/device are unverified. Rotated text
 retains its labeled unrotated editing overlay. Editable text is still memory-only;
 no PDF persistence, Shape + Text or label host was implemented.
+
+## Mixed font-size scaling correction — 2026-11-10
+
+Automated checks: `proportional_font_scaling_preserves_runs_and_reciprocal_sizes`
+and `text_tab_is_read_only_for_mixed_sizes_and_selection_toolbar_scales_runs`.
+They cover 12/18/30 pt independent runs, proportional + and reciprocal − without
+geometric scaling, mixed-size panel initialization without document/history writes,
+and undo/redo. Run with `cargo test --all-targets`.
+
+Manual check: create one text object with 12 pt, 18 pt and 30 pt runs. Select the
+object and press + then −; verify all sizes return to their originals and the box
+geometry does not change. Open Text and Paragraph repeatedly; verify the size
+control says `Mixed`, all sizes stay unchanged, and history is unchanged. Select
+only the middle run, enter a size, verify the other two runs are unchanged, then
+undo and redo.

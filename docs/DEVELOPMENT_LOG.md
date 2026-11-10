@@ -624,3 +624,13 @@ verified the no-reselection formatting chain on new and double-clicked existing
 text, all four alignments, natural final lines, justified left-edge reflow and
 undo/redo. New captures are in screenshots/text-formatting-correction. Native
 physical IME/clipboard and full RTL remain explicit verification/engine limits.
+
+## Mixed font-size scaling correction — 2026-11-10
+
+The selected-object −/+ controls now scale every run's stored font size by
+reciprocal 0.9/1.1 factors for text-only selections; other selections retain
+geometric scaling. Character properties, paragraph styles, object identity and
+placement are preserved. Mixed-size Text controls display `Mixed` without a
+representative-value slider, and panel initialization adds no history operation.
+Regression tests cover proportional/reciprocal scaling, mixed-state UI rendering,
+panel read-only behavior, and one-step undo/redo.

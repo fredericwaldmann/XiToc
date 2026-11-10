@@ -241,6 +241,27 @@ impl Default for ParagraphStyle {
     }
 }
 impl TextContent {
+    /// Scale every stored character size without changing any other character
+    /// or paragraph property. A reciprocal factor can undo an unclamped scale.
+    pub fn scale_font_sizes(&mut self, factor: f64) -> bool {
+        if !factor.is_finite() || factor <= 0.0 {
+            return false;
+        }
+        let mut changed = false;
+        let scale = |size: &mut f64, changed: &mut bool| {
+            let next = (*size * factor).clamp(4.0, 512.0);
+            if next != *size {
+                *size = next;
+                *changed = true;
+            }
+        };
+        scale(&mut self.style.size, &mut changed);
+        for run in &mut self.runs {
+            scale(&mut run.style.size, &mut changed);
+        }
+        changed
+    }
+
     pub fn valid(&self) -> bool {
         let n = self.text.chars().count();
         self.style.valid()
