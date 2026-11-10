@@ -932,16 +932,6 @@ impl Canvas {
                         .filter(|_| preview_ids.contains(&t.id))
                         .map(|d| source.transformed(d))
                         .unwrap_or_else(|| source.clone());
-                    let mut box_painter = painter.clone();
-                    box_painter.multiply_opacity(f32::from(text.box_style.opacity) / 255.);
-                    shapes_ui::paint_shape(
-                        ui,
-                        &box_painter,
-                        transform,
-                        &text.box_shape(),
-                        Default::default(),
-                        &mut self.shape_cache,
-                    );
                     text_ui::paint_text(ui, &painter, transform, &text, &mut self.text_cache);
                     continue;
                 }

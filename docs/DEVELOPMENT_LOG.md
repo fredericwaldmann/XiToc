@@ -594,3 +594,33 @@ extended to include this case. Partial insertion keeps destination block styling
 The same final regression pass checks that Block controls display the caret's
 paragraph (including non-first-paragraph spacing), and replacement typing inherits
 the first selected character's style.
+
+
+## 2026-11-10 — Text/Paragraph correction and persistent text selection (PR #42)
+
+Continued the existing open feature/editable-text-boxes branch/PR. The user clarified
+that Box was a misunderstanding of Justify. Removed the Box UI, decorative model,
+shape proxy/renderer, padding and opacity handling. TextLayout now owns resize only;
+legacy clipboard/session objects keep source, styles, ID, geometry and resize through
+a compatibility reader that discards known decorations. Both layouts still have
+invisible bounds, selection outlines, eight grips and Reflow/Scale defaults/overrides.
+
+Renamed Block to Paragraph, added Justify and isolated paragraph patches from all
+character styles. Canonical word-gap expansion justifies eligible wrapped rows
+without letter stretching; final/single-word rows and explicit paragraph breaks
+remain natural. Scaled glyphs, underlines, caret positions and selection use the
+same geometry and update after width changes.
+
+Reproduced egui's collapse of its unfocused selection cache in full Canvas tests.
+The session retains the single exact directional range; the adapter synchronizes
+and rehydrates widget state, disables editor input during controls and paints an
+inactive selection. Font preview keys cannot move the caret; preview range comes
+from that same suspended session. Font/size/bold/color and paragraph/spacing controls
+can be chained without reselecting. See TEST_PLAN for checks and GUI evidence.
+
+Verification: 240 active tests, formatting, Clippy with warnings denied, native
+release/startup, WASM check and isolated Trunk release pass. Packaged Firefox
+verified the no-reselection formatting chain on new and double-clicked existing
+text, all four alignments, natural final lines, justified left-edge reflow and
+undo/redo. New captures are in screenshots/text-formatting-correction. Native
+physical IME/clipboard and full RTL remain explicit verification/engine limits.

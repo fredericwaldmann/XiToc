@@ -17,6 +17,7 @@ pub enum Alignment {
     Left,
     Center,
     Right,
+    Justify,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -68,7 +69,8 @@ pub struct TextObject {
     pub height: f64,
     pub content: std::sync::Arc<TextContent>,
     #[serde(default)]
-    pub box_style: TextBoxStyle,
+    #[serde(alias = "box_style")]
+    pub layout: TextLayout,
 }
 impl TextObject {
     pub fn content_mut(&mut self) -> &mut TextContent {
@@ -86,7 +88,7 @@ impl TextObject {
             width,
             height: 26.,
             content: Default::default(),
-            box_style: Default::default(),
+            layout: Default::default(),
         }
     }
     pub fn valid(&self) -> bool {
@@ -105,11 +107,6 @@ impl TextObject {
             && self.height.is_finite()
             && (1.0..=1e7).contains(&self.height)
             && self.content.valid()
-            && self.box_style.border.valid()
-            && self.box_style.padding.is_finite()
-            && (0.0..=128.).contains(&self.box_style.padding)
-            && self.box_style.radius.is_finite()
-            && (0.0..=512.).contains(&self.box_style.radius)
             && self.content.text.len() <= MAX_TEXT_BYTES
             && !self.content.text.contains('\0')
     }
@@ -179,7 +176,7 @@ impl CanvasObject for TextObject {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, PartialEq)]
 pub struct TextStylePatch {
     pub family: Option<TextFamily>,
     pub size: Option<f64>,
@@ -486,29 +483,35 @@ pub enum ResizeBehavior {
     Reflow,
     Scale,
 }
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct TextBoxStyle {
-    pub background: Option<[u8; 4]>,
-    pub border: crate::shape::ShapeStyle,
-    pub padding: f64,
-    pub radius: f64,
-    pub opacity: u8,
+/// Standalone text has invisible layout bounds, never a decorative container.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct TextLayout {
     pub resize: ResizeBehavior,
 }
-impl Default for TextBoxStyle {
-    fn default() -> Self {
-        Self {
-            background: None,
-            border: crate::shape::ShapeStyle {
-                border_enabled: false,
-                ..Default::default()
-            },
-            padding: 0.,
-            radius: 0.,
-            opacity: 255,
-            resize: Default::default(),
+impl<'de> Deserialize<'de> for TextLayout {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Accept the former session/clipboard box_style shape. Only resize is
+        // retained; known decorative properties are consumed without rendering
+        // or re-serializing them. Future unfamiliar fields still fail explicitly.
+        #[derive(Default, Deserialize)]
+        #[serde(default, deny_unknown_fields)]
+        struct CompatibleLayout {
+            resize: ResizeBehavior,
+            #[serde(rename = "background")]
+            _background: Option<serde::de::IgnoredAny>,
+            #[serde(rename = "border")]
+            _border: Option<serde::de::IgnoredAny>,
+            #[serde(rename = "padding")]
+            _padding: Option<serde::de::IgnoredAny>,
+            #[serde(rename = "radius")]
+            _radius: Option<serde::de::IgnoredAny>,
+            #[serde(rename = "opacity")]
+            _opacity: Option<serde::de::IgnoredAny>,
         }
+        let value = CompatibleLayout::deserialize(deserializer)?;
+        Ok(Self {
+            resize: value.resize,
+        })
     }
 }
 
@@ -541,7 +544,7 @@ impl TextObject {
         } else {
             self.height + delta[1] * if h[1] == 0. { -1. } else { 1. }
         };
-        if self.box_style.resize == ResizeBehavior::Scale && handle < 4 {
+        if self.layout.resize == ResizeBehavior::Scale && handle < 4 {
             let diagonal = [
                 self.width * (2. * h[0] - 1.),
                 self.height * (2. * h[1] - 1.),
@@ -582,32 +585,6 @@ impl TextObject {
             self.placement.position[i] + out.placement.position[i] - zero[i]
         });
         out
-    }
-}
-
-impl TextObject {
-    pub fn box_shape(&self) -> crate::shape::Shape {
-        let mut style = self.box_style.border.clone();
-        style.fill = self
-            .box_style
-            .background
-            .map(|rgba| rgba[..3].try_into().unwrap());
-        style.fill_opacity = self.box_style.background.map(|c| c[3]).unwrap_or(255);
-        crate::shape::Shape {
-            id: self.id,
-            document_id: self.document_id,
-            surface: self.surface,
-            placement: self.placement,
-            style,
-            geometry: crate::shape::ShapeGeometry::Box {
-                kind: crate::shape::ShapeKind::RoundedRectangle,
-                size: [self.width, self.height],
-                corner_radius: self.box_style.radius,
-            },
-        }
-    }
-    pub fn wrap_width(&self) -> f64 {
-        (self.width - 2. * self.box_style.padding).max(1.)
     }
 }
 

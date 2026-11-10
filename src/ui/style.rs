@@ -12,6 +12,7 @@ pub const FORMAT_TOOLBAR_GAP: f32 = 12.0;
 pub const SHAPE_PICKER_ICON: f32 = 30.0;
 pub const ROTATION_OFFSET: f32 = 24.0;
 pub const SELECTION_HANDLE: f32 = 7.0;
+pub const INACTIVE_TEXT_SELECTION_OPACITY: f32 = 0.65;
 pub const SELECTION_HIT: f32 = 5.0;
 pub const SELECTION_MIN: f32 = 22.0;
 pub const PRESET_WIDTH: f32 = 40.0;

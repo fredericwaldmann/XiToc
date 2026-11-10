@@ -84,7 +84,7 @@ pub fn font(content: &TextContent) -> FontId {
 }
 pub fn alignment(content: &TextContent) -> egui::Align {
     match content.style.alignment {
-        Alignment::Left => egui::Align::LEFT,
+        Alignment::Left | Alignment::Justify => egui::Align::LEFT,
         Alignment::Center => egui::Align::Center,
         Alignment::Right => egui::Align::RIGHT,
     }
@@ -133,6 +133,57 @@ pub fn job(content: &TextContent, width: f64) -> egui::text::LayoutJob {
     job.halign = alignment(content);
     job
 }
+/// Expand breakable word separators in eligible wrapped rows. Glyph advances
+/// within words never change. Paragraph-final and single-word rows stay natural.
+fn justify_words(galley: &mut egui::Galley, width: f32) {
+    let count = galley.rows.len();
+    for placed in galley.rows.iter_mut().take(count.saturating_sub(1)) {
+        if placed.ends_with_newline {
+            continue;
+        }
+        let row = Arc::make_mut(&mut placed.row);
+        let Some(last) = row.glyphs.iter().rposition(|g| !g.chr.is_whitespace()) else {
+            continue;
+        };
+        let first = row
+            .glyphs
+            .iter()
+            .position(|g| !g.chr.is_whitespace())
+            .unwrap();
+        let gaps: Vec<_> = (first..last)
+            .filter(|i| {
+                let c = row.glyphs[*i].chr;
+                c.is_whitespace() && !matches!(c, '\t' | '\u{a0}' | '\u{202f}')
+            })
+            .collect();
+        if gaps.is_empty() {
+            continue;
+        }
+        let extra = (width - row.glyphs[last].max_x()) / gaps.len() as f32;
+        if extra <= 0. || !extra.is_finite() {
+            continue;
+        }
+        let mut shift = 0.;
+        for (index, glyph) in row.glyphs.iter_mut().enumerate() {
+            glyph.pos.x += shift;
+            if gaps.binary_search(&index).is_ok() {
+                glyph.advance_width += extra;
+                shift += extra;
+            }
+            if index > last {
+                glyph.pos.x = width;
+                glyph.advance_width = 0.;
+            }
+        }
+        row.size.x = width;
+    }
+    galley.rect.max.x = galley
+        .rows
+        .iter()
+        .map(|r| r.pos.x + r.size.x)
+        .fold(0., f32::max);
+}
+
 struct Metrics {
     fonts: egui::epaint::text::Fonts,
     frame: Option<u64>,
@@ -180,22 +231,27 @@ pub fn layout(ctx: &egui::Context, content: &TextContent, width: f64) -> Arc<egu
                 Some(section.format.font_id.size * 1.3 * style.line_spacing as f32);
         }
         let mut galley = (*service.fonts.with_pixels_per_point(1.).layout_job(job)).clone();
+        if style.alignment == Alignment::Justify {
+            justify_words(&mut galley, width as f32);
+        }
         if index < content.text.matches('\n').count()
             && let Some(row) = galley.rows.last_mut()
         {
             row.ends_with_newline = true;
         }
-        let left = match style.alignment {
-            Alignment::Left => 0.,
-            Alignment::Center => (width as f32 - galley.size().x) * 0.5,
-            Alignment::Right => width as f32 - galley.size().x,
-        };
-        let dx = left - galley.rect.min.x;
+        galley.rect.min.x = 0.;
+        galley.rect.max.x = 0.;
+        galley.mesh_bounds = egui::Rect::NOTHING;
         for row in &mut galley.rows {
-            row.pos.x += dx;
+            row.pos.x = match style.alignment {
+                Alignment::Left | Alignment::Justify => 0.,
+                Alignment::Center => (width as f32 - row.size.x) * 0.5,
+                Alignment::Right => width as f32 - row.size.x,
+            };
+            galley.rect.min.x = galley.rect.min.x.min(row.pos.x);
+            galley.rect.max.x = galley.rect.max.x.max(row.pos.x + row.size.x);
+            galley.mesh_bounds |= row.visuals.mesh_bounds.translate(row.pos.to_vec2());
         }
-        galley.rect = galley.rect.translate(egui::vec2(dx, 0.));
-        galley.mesh_bounds = galley.mesh_bounds.translate(egui::vec2(dx, 0.));
         spacings.push(style.spacing as f32);
         parts.push(Arc::new(galley));
         offset += count + 1;
@@ -219,16 +275,16 @@ pub fn layout(ctx: &egui::Context, content: &TextContent, width: f64) -> Arc<egu
     Arc::new(merged)
 }
 pub fn measure(ctx: &egui::Context, text: &mut TextObject) {
-    let mut galley = layout(ctx, &text.content, text.wrap_width());
+    let mut galley = layout(ctx, &text.content, text.width);
     // A single wide glyph cannot wrap. Keep the box at least as wide as that
     // glyph rather than clipping it or distorting the font.
-    if f64::from(galley.size().x) > text.wrap_width() + 0.001 {
-        text.width = f64::from(galley.size().x) + 2. * text.box_style.padding;
-        galley = layout(ctx, &text.content, text.wrap_width());
+    if f64::from(galley.size().x) > text.width + 0.001 {
+        text.width = f64::from(galley.size().x);
+        galley = layout(ctx, &text.content, text.width);
     }
-    text.height = text.height.max(
-        f64::from(galley.size().y).max(text.content.style.size * 1.3) + 2. * text.box_style.padding,
-    );
+    text.height = text
+        .height
+        .max(f64::from(galley.size().y).max(text.content.style.size * 1.3));
 }
 
 /// Rich semantic buffer and mixed layout; egui owns caret/selection and IME.
@@ -239,13 +295,37 @@ pub fn edit(
     content: &mut TextContent,
     width: f64,
     scale: f64,
+    selection: Option<egui::text::CCursorRange>,
+    interactive: bool,
 ) -> egui::text_edit::TextEditOutput {
     let mut template = content.clone();
     template.style.size = (template.style.size * scale).clamp(1., 1024.);
     let mirror = std::rc::Rc::new(std::cell::RefCell::new(content.clone()));
     let layout_content = mirror.clone();
+    // The session is the sole selection owner; widget state is its adapter.
+    if let Some(selection) = selection {
+        let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+        state.cursor.set_char_range(Some(selection));
+        state.store(ui.ctx(), id);
+    }
     let mut layouter = move |ui: &egui::Ui, _: &dyn egui::TextBuffer, _: f32| {
-        layout_scaled(ui.ctx(), &layout_content.borrow(), width, scale)
+        let mut galley = layout_scaled(ui.ctx(), &layout_content.borrow(), width, scale);
+        if (!interactive || !ui.memory(|m| m.has_focus(id)))
+            && let Some(selection) = selection
+        {
+            let mut visuals = ui.visuals().clone();
+            visuals.selection.bg_fill = visuals
+                .selection
+                .bg_fill
+                .gamma_multiply(crate::ui::style::INACTIVE_TEXT_SELECTION_OPACITY);
+            egui::text_selection::visuals::paint_text_selection(
+                &mut galley,
+                &visuals,
+                &selection,
+                None,
+            );
+        }
+        galley
     };
     let typing = ui
         .ctx()
@@ -262,6 +342,7 @@ pub fn edit(
     };
     let mut output = egui::TextEdit::multiline(&mut buffer)
         .id(id)
+        .interactive(interactive)
         .font(font(&template))
         .align(egui::Align2::LEFT_TOP)
         .desired_width((width * scale) as f32)
@@ -272,6 +353,15 @@ pub fn edit(
         .show(ui);
     // The framework undoer stores plain strings. Never retain a second history
     // capable of restoring source without its formatting/paragraphs.
+    // egui deliberately collapses an unfocused editor's widget selection.
+    // Rehydrate that cache from the session; the painted inactive selection
+    // above and the next focused editing pass must use the very same range.
+    if (!interactive || !output.response.has_focus())
+        && let Some(selection) = selection
+    {
+        output.state.cursor.set_char_range(Some(selection));
+        output.cursor_range = Some(selection);
+    }
     output.state.clear_undoer();
     output.state.clone().store(ui.ctx(), id);
     output
@@ -329,8 +419,19 @@ pub fn layout_scaled(
             row.size = canonical.row.size * factor;
             for (i, v) in row.visuals.mesh.vertices.iter_mut().enumerate() {
                 if !row.visuals.glyph_vertex_range.contains(&i) {
-                    v.pos.x *= row.size.x / old_width.max(0.001);
-                    v.pos.y *= row.size.y / old_height.max(0.001);
+                    let glyph = old_glyphs
+                        .partition_point(|g| g.pos.x <= v.pos.x)
+                        .saturating_sub(1);
+                    if let (Some(old), Some(new)) =
+                        (old_glyphs.get(glyph), canonical.glyphs.get(glyph))
+                    {
+                        let fraction = (v.pos.x - old.pos.x) / old.advance_width.max(0.001);
+                        v.pos.x = (new.pos.x + fraction * new.advance_width) * factor;
+                        v.pos.y += new.pos.y * factor - old.pos.y;
+                    } else {
+                        v.pos.x *= row.size.x / old_width.max(0.001);
+                        v.pos.y *= row.size.y / old_height.max(0.001);
+                    }
                 }
             }
             row.visuals.mesh_bounds = egui::Rect::NOTHING;

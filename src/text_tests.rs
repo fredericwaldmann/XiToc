@@ -456,7 +456,7 @@ fn eight_handles_anchor_rotated_boxes_and_scaling_preserves_mixed_sizes() {
             let stationary = t.resized(i, start, start);
             assert_eq!(stationary, t);
         }
-        t.box_style.resize = ResizeBehavior::Scale;
+        t.layout.resize = ResizeBehavior::Scale;
         let start = t.placement.apply([t.width, t.height]);
         let target = t.placement.apply([t.width * 1.5, t.height * 1.5]);
         let scaled = t.resized(3, start, target);
@@ -533,7 +533,7 @@ fn installed_font_catalog_is_unique_and_missing_fonts_fall_back() {
     });
 }
 #[test]
-fn rich_journal_restores_full_content_and_box_styles() {
+fn rich_journal_restores_full_content_paragraphs_and_resize_mode() {
     let mut d = Drawing::new(&DocumentData::blank(DocumentKind::Whiteboard));
     let t = text(&d, Surface::Canvas);
     let id = t.id;
@@ -550,12 +550,226 @@ fn rich_journal_restores_full_content_and_box_styles() {
     changed
         .content_mut()
         .format_paragraphs(0..5, |p| p.alignment = Alignment::Center);
-    changed.box_style.background = Some([200, 100, 0, 123]);
-    changed.box_style.padding = 12.;
-    changed.box_style.resize = ResizeBehavior::Scale;
+    changed.layout.resize = ResizeBehavior::Scale;
     assert!(d.replace_texts(vec![changed.clone()], false));
     d.undo();
     assert_eq!(d.snapshot(id), Some(&t.clone().into()));
     d.redo();
     assert_eq!(d.snapshot(id), Some(&changed.into()));
+}
+
+#[test]
+fn paragraph_alignment_moves_real_glyphs_and_justifies_only_word_gaps() {
+    with_fonts(|ctx| {
+        let source = "alpha beta gamma delta epsilon zeta eta theta iota kappa";
+        let mut c = TextContent {
+            text: source.into(),
+            ..Default::default()
+        };
+        let natural = text_layout::layout(ctx, &c, 170.);
+        for alignment in [
+            Alignment::Left,
+            Alignment::Center,
+            Alignment::Right,
+            Alignment::Justify,
+        ] {
+            c.format_paragraphs(0..source.len(), |p| p.alignment = alignment);
+            let galley = text_layout::layout(ctx, &c, 170.);
+            assert_eq!(galley.rows.len(), natural.rows.len());
+            for (i, (row, original)) in galley.rows.iter().zip(&natural.rows).enumerate() {
+                let last = row
+                    .glyphs
+                    .iter()
+                    .rposition(|g| !g.chr.is_whitespace())
+                    .unwrap();
+                let right = row.pos.x + row.glyphs[last].max_x();
+                match alignment {
+                    Alignment::Left => assert!(row.pos.x.abs() < 0.01),
+                    Alignment::Center => {
+                        assert!(
+                            (row.pos.x - (170. - row.size.x) * 0.5).abs() < 0.01,
+                            "row {i}: pos {} width {}",
+                            row.pos.x,
+                            row.size.x
+                        )
+                    }
+                    Alignment::Right => assert!((row.pos.x + row.size.x - 170.).abs() < 0.01),
+                    Alignment::Justify => {
+                        assert!(row.pos.x.abs() < 0.01);
+                        if i + 1 < galley.rows.len() && row.text().trim().contains(' ') {
+                            assert!((right - 170.).abs() < 0.01);
+                        } else {
+                            assert_eq!(row.glyphs, original.glyphs);
+                        }
+                        for (g, before) in row.glyphs.iter().zip(&original.glyphs) {
+                            if !g.chr.is_whitespace() {
+                                assert_eq!(g.advance_width, before.advance_width);
+                            }
+                        }
+                        for pair in row.glyphs.windows(2).zip(original.glyphs.windows(2)) {
+                            if !pair.0[0].chr.is_whitespace() && !pair.0[1].chr.is_whitespace() {
+                                assert!(
+                                    ((pair.0[1].pos.x - pair.0[0].pos.x)
+                                        - (pair.1[1].pos.x - pair.1[0].pos.x))
+                                        .abs()
+                                        < 0.001
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+#[test]
+fn justified_last_lines_explicit_breaks_single_words_and_unicode_keep_natural_spacing() {
+    with_fonts(|ctx| {
+        for text in [
+            "one\ntwo\n",
+            "supercalifragilisticexpialidocious",
+            "中文漢字日本語",
+            "café Ελληνικά Ωmega more words for wrapping\nexplicit final line",
+        ] {
+            let mut c = TextContent {
+                text: text.into(),
+                ..Default::default()
+            };
+            let natural = text_layout::layout(ctx, &c, 140.);
+            c.format_paragraphs(0..text.chars().count(), |p| {
+                p.alignment = Alignment::Justify
+            });
+            let justified = text_layout::layout(ctx, &c, 140.);
+            assert_eq!(natural.rows.len(), justified.rows.len());
+            for (i, row) in justified.rows.iter().enumerate() {
+                assert_eq!(row.text(), natural.rows[i].text());
+                if row.ends_with_newline
+                    || i + 1 == justified.rows.len()
+                    || !row.text().trim().contains(' ')
+                {
+                    assert_eq!(row.glyphs, natural.rows[i].glyphs);
+                }
+            }
+            assert_eq!(c.text, text);
+        }
+    });
+}
+#[test]
+fn justified_mixed_fonts_reflow_and_scaled_caret_geometry_share_the_same_layout() {
+    with_fonts(|ctx| {
+        let mut c=TextContent {text:"Hello beautiful world with café Ελληνικά and more words on several lines for justified layout".into(),..Default::default()};
+        c.format(
+            6..15,
+            &TextStylePatch {
+                family: Some(TextFamily::Monospace),
+                size: Some(30.),
+                underline: Some(true),
+                ..Default::default()
+            },
+        );
+        let runs = c.runs.clone();
+        c.format_paragraphs(0..c.text.chars().count(), |p| {
+            p.alignment = Alignment::Justify
+        });
+        for width in [140., 220., 330.] {
+            let logical = text_layout::layout(ctx, &c, width);
+            for scale in [0.5, 1., 2., 4.] {
+                let screen = text_layout::layout_scaled(ctx, &c, width, scale);
+                for (a, b) in screen.rows.iter().zip(&logical.rows) {
+                    assert_eq!(a.glyphs.len(), b.glyphs.len());
+                    for (g, source) in a.glyphs.iter().zip(&b.glyphs) {
+                        assert!((g.pos.x - source.pos.x * scale as f32).abs() < 0.001);
+                        assert!(
+                            (g.advance_width - source.advance_width * scale as f32).abs() < 0.001
+                        );
+                    }
+                }
+                let mut offset = 0;
+                for row in &screen.rows {
+                    if let Some((index, gap)) = row.glyphs.iter().enumerate().find(|(i, g)| {
+                        g.chr == ' ' && g.advance_width > 0. && *i + 1 < row.glyphs.len()
+                    }) {
+                        for (fraction, expected) in
+                            [(0.25, offset + index), (0.75, offset + index + 1)]
+                        {
+                            let point = row.pos.to_vec2()
+                                + egui::vec2(
+                                    gap.pos.x + gap.advance_width * fraction,
+                                    row.size.y * 0.5,
+                                );
+                            assert_eq!(screen.cursor_from_pos(point).index.0, expected);
+                        }
+                    }
+                    offset += row.text().chars().count() + usize::from(row.ends_with_newline);
+                }
+                for i in 0..=c.text.chars().count() {
+                    let caret = egui::text::CCursor::new(i);
+                    let a = screen.pos_from_cursor(caret);
+                    let b = logical.pos_from_cursor(caret);
+                    assert!((a.min.x - b.min.x * scale as f32).abs() < 0.02);
+                    assert!((a.min.y - b.min.y * scale as f32).abs() < 0.02);
+                }
+            }
+        }
+        assert_eq!(c.runs, runs);
+    });
+}
+#[test]
+fn paragraph_range_scope_preserves_every_character_property_and_history() {
+    let mut d = Drawing::new(&DocumentData::blank(DocumentKind::Whiteboard));
+    let mut t = text(&d, Surface::Canvas);
+    t.content_mut().text = "First café\nSecond Ω\nThird 中文".into();
+    t.content_mut().format(
+        4..17,
+        &TextStylePatch {
+            family: Some(TextFamily::Monospace),
+            size: Some(27.),
+            bold: Some(true),
+            italic: Some(true),
+            underline: Some(true),
+            rgb: Some([80, 120, 180]),
+            ..Default::default()
+        },
+    );
+    d.replace_texts(vec![t.clone()], false);
+    let original = t.clone();
+    let runs = t.content.runs.clone();
+    let style = t.content.style.clone();
+    t.content_mut()
+        .format_paragraphs(12..12, |p| p.alignment = Alignment::Justify);
+    assert_eq!(t.content.paragraph(0).alignment, Alignment::Left);
+    assert_eq!(t.content.paragraph(1).alignment, Alignment::Justify);
+    assert_eq!(t.content.paragraph(2).alignment, Alignment::Left);
+    t.content_mut().format_paragraphs(3..18, |p| {
+        p.alignment = Alignment::Right;
+        p.line_spacing = 1.6;
+    });
+    assert_eq!(t.content.paragraph(0).alignment, Alignment::Right);
+    assert_eq!(t.content.paragraph(1).alignment, Alignment::Right);
+    assert_eq!(t.content.paragraph(2).alignment, Alignment::Left);
+    assert_eq!(t.content.runs, runs);
+    assert_eq!(t.content.style, style);
+    d.replace_texts(vec![t.clone()], false);
+    d.undo();
+    assert_eq!(d.snapshot(t.id), Some(&original.into()));
+    d.redo();
+    assert_eq!(d.snapshot(t.id), Some(&t.into()));
+}
+#[test]
+fn legacy_decorated_text_import_keeps_text_identity_geometry_and_resize_without_styling() {
+    let d = Drawing::new(&DocumentData::blank(DocumentKind::Whiteboard));
+    let t = text(&d, Surface::Canvas);
+    let mut json = serde_json::to_value(&t).unwrap();
+    json.as_object_mut().unwrap().remove("layout");
+    json["box_style"] = serde_json::json!({"background":[200,100,30,255],"border":{"border_enabled":true},"padding":20.,"radius":8.,"opacity":70,"resize":"Scale"});
+    let imported: TextObject = serde_json::from_value(json).unwrap();
+    assert_eq!(imported.id, t.id);
+    assert_eq!(imported.content, t.content);
+    assert_eq!(imported.placement, t.placement);
+    assert_eq!(imported.width, t.width);
+    assert_eq!(imported.height, t.height);
+    assert_eq!(imported.layout.resize, ResizeBehavior::Scale);
+    let encoded = serde_json::to_value(&imported).unwrap();
+    assert!(encoded.get("box_style").is_none());
+    assert_eq!(encoded["layout"], serde_json::json!({"resize":"Scale"}));
 }

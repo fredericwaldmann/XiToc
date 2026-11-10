@@ -718,16 +718,27 @@ IME composition; editing never switches to a plain-text presentation. egui retai
 caret/navigation/selection/IME responsibilities. Preedit stays transient. Canonical
 edits and formatting use the shared rich object journal with bounded typing
 coalescing; the framework's string-only undo history is cleared. Active keyboard
-and menu undo/redo restore full content/paragraph/container snapshots.
+and menu undo/redo restore full content/paragraph/layout snapshots.
+
+The TextSession CCursorRange is the sole editing selection owner, retaining both
+endpoints, direction and row affinity. Widget state is synchronized before editing;
+unfocused egui cursor collapse is discarded by rehydrating that cache afterward.
+Popup/browser interaction disables editor input and paints the retained range with
+the same mixed-style galley as an inactive selection. Focus returns after controls
+close; only actual editor input updates the session selection. FontBrowser freezes
+sources but derives its range from that same suspended session, without a second
+selection snapshot. Preview keys cannot reach TextEdit.
 
 Character controls operate on the retained selection, snapping outward to grapheme
 boundaries; an empty selection updates transient typing style only. Property
 patches leave all unrelated run attributes intact. Controls expose mixed family,
 size, bold, italic, underline and color. Paragraph controls target paragraphs
 intersecting the selection (or caret paragraph); newline insertion inherits the
-paragraph's alignment/line spacing/spacing. TextBoxStyle separately owns background,
-shared ShapeStyle border/pattern, radius, padding, opacity and resize behavior.
-Box painting reuses the cached shape renderer; the box is not a second object.
+paragraph's alignment/line spacing/spacing. Standalone text has only TextLayout
+resize metadata and invisible width/height bounds. Decorative background/border/
+padding/radius/opacity data is no longer modeled or rendered; its legacy reader
+retains text/IDs/geometry/resize and consumes known old styling fields. The writer
+emits only layout.resize. Future Shape + Text owns shape styling separately.
 
 Bundled DejaVu Sans/Mono (four faces), Droid CJK and egui fallback fonts remain.
 Native text_fonts uses fontdb's platform font discovery (Linux fontconfig and
@@ -752,7 +763,15 @@ all semantic content. No HTML/RTF clipboard interoperability is claimed.
 
 Unhinted unit-DPI metrics establish canonical paragraph wraps and row positions;
 actual-size font raster rows map to those glyph/caret positions at 50–400% and
-across DPI changes. Paragraph alignment and spacing share those metrics. All eight
+across DPI changes. Paragraph alignment and spacing share those metrics. Justify
+expands only breakable word-gap advances on non-final wrapped rows and shifts
+following glyphs, preserving all letter advances. It skips single-word rows and
+paragraph endings; explicit newlines terminate paragraphs. Unspaced scripts retain
+natural spacing. Full bidirectional/RTL layout remains an egui engine limitation.
+The screen raster/decoration mapping, caret and hit-testing all
+consume this geometry. This deliberately avoids egui's default justification,
+which can also distribute space between letters. Width changes reflow and justify
+again. Paragraph patches never alter inline formatting. All eight
 local handles use frozen source, original pointer displacement, view/revision,
 viewport-independent ownership and one release transaction. Reflow changes wrap
 width/container height without changing type size; content establishes minimum

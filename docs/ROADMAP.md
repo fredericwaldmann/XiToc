@@ -253,7 +253,8 @@ This does not change the M2 PDF persistence gate.
 
 Text boxes now share object identity, selection, transforms, clipboard and history.
 The top T tool and egui editing/layout core support wrapping, portable fonts,
-rich character runs, paragraph/container formatting, installed native fonts,
+rich character runs, paragraph alignment including Justify, retained formatting
+selection, installed native fonts,
 reversible live font previews, eight local resize handles and Unicode source.
 Embedded shape text and labels remain separate hosts; #26 stays open for its broader shape-text dependency.
 PDF text/font persistence and round trips remain M2.

@@ -20,7 +20,6 @@ pub(super) struct TextSession {
     limit_notice: bool,
     history: (bool, bool),
     cursor: Option<egui::text::CCursorRange>,
-    restore_cursor: bool,
     typing: crate::text::TextStyle,
 }
 pub(super) struct TextCreation {
@@ -62,26 +61,25 @@ pub(super) fn paint_text(
     let scale = view.scale * text.placement.scale;
     if cache.get(&text.id).is_none_or(|c| {
         (!Arc::ptr_eq(&c.content, &text.content) && c.content != text.content)
-            || c.width != text.wrap_width()
+            || c.width != text.width
             || c.scale != scale
     }) {
-        let galley = text_layout::layout_scaled(ui.ctx(), &text.content, text.wrap_width(), scale);
+        let galley = text_layout::layout_scaled(ui.ctx(), &text.content, text.width, scale);
         cache.insert(
             text.id,
             TextCache {
                 content: text.content.clone(),
-                width: text.wrap_width(),
+                width: text.width,
                 scale,
                 galley,
             },
         );
     }
     let galley = cache[&text.id].galley.clone();
-    let pos = screen(text.placement.apply([text.box_style.padding; 2]));
+    let pos = screen(text.placement.apply([0.; 2]));
     painter.add(
         egui::epaint::TextShape::new(pos, galley, Color32::BLACK)
-            .with_angle(text.placement.rotation as f32)
-            .with_opacity_factor(f32::from(text.box_style.opacity) / 255.),
+            .with_angle(text.placement.rotation as f32),
     );
 }
 impl Canvas {
@@ -136,7 +134,6 @@ impl Canvas {
             _ => return false,
         }
         s.focus = true;
-        s.restore_cursor = true;
         ctx.request_repaint();
         true
     }
@@ -165,12 +162,11 @@ impl Canvas {
         self.selection_gesture = None;
         self.connection_gesture = None;
         let id = egui::Id::unique(("text-editor", text.id));
+        let cursor = egui::text::CCursorRange::one(egui::text::CCursor::new(
+            text.content.text.chars().count(),
+        ));
         let mut state = egui::text_edit::TextEditState::default();
-        state
-            .cursor
-            .set_char_range(Some(egui::text::CCursorRange::one(
-                egui::text::CCursor::new(text.content.text.chars().count()),
-            )));
+        state.cursor.set_char_range(Some(cursor));
         state.store(ui.ctx(), id);
         self.tool = self.selection_mode;
         if new {
@@ -195,8 +191,7 @@ impl Canvas {
             clipboard_notice: false,
             limit_notice: false,
             history: (false, false),
-            cursor: None,
-            restore_cursor: false,
+            cursor: Some(cursor),
         });
     }
     fn editor_rect(text: &TextObject, view: Transform) -> Rect {
@@ -424,7 +419,7 @@ impl Canvas {
                         point[1] = point[1].min(page[1] - 26.);
                     }
                     let mut text = TextObject::new(self.drawing.owner(), surface, point, width);
-                    text.box_style.resize = self.text_resize_default;
+                    text.layout.resize = self.text_resize_default;
                     if surface == Surface::Canvas {
                         text.content_mut().style.color =
                             crate::ui::style::palette(ui).text.to_array();
@@ -491,7 +486,7 @@ impl Canvas {
             s.value.height = current.height;
             if !s.composing {
                 s.value.content = current.content.clone();
-                s.value.box_style = current.box_style.clone();
+                s.value.layout = current.layout.clone();
             }
         }
         if let Some(preview) = self
@@ -501,20 +496,7 @@ impl Canvas {
         {
             s.value.content = preview.content.clone();
         }
-        let mut box_painter = ui
-            .painter()
-            .with_clip_rect(bounds.intersect(ui.clip_rect()));
-        box_painter.multiply_opacity(f32::from(s.value.box_style.opacity) / 255.);
-        shapes_ui::paint_shape(
-            ui,
-            &box_painter,
-            view,
-            &s.value.box_shape(),
-            Default::default(),
-            &mut self.shape_cache,
-        );
-        let rect = Self::editor_rect(&s.value, view)
-            .shrink((s.value.box_style.padding * view.scale * s.value.placement.scale) as f32);
+        let rect = Self::editor_rect(&s.value, view);
         let scale = view.scale * s.value.placement.scale;
         let id = egui::Id::unique(("text-editor", s.value.id));
         let layer = egui::LayerId::new(ui.layer_id().order, id.with("layer"));
@@ -525,7 +507,7 @@ impl Canvas {
             egui::UiBuilder::new().layer_id(layer).max_rect(rect),
         );
         child.set_clip_rect(bounds.intersect(ui.clip_rect()));
-        child.multiply_opacity(f32::from(s.value.box_style.opacity) / 255.);
+
         let palette = crate::ui::style::palette(ui);
         child.painter().rect_stroke(
             rect,
@@ -542,15 +524,40 @@ impl Canvas {
                 palette.text,
             );
         }
-        if s.restore_cursor {
-            if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), id) {
-                state.cursor.set_char_range(s.cursor);
-                state.store(ui.ctx(), id);
-            }
-            s.restore_cursor = false;
+        let editor_pointer = ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| {
+            rect.contains(p)
+                && ui
+                    .ctx()
+                    .layer_id_at(p)
+                    .is_some_and(|l| l == layer || l == ui.layer_id())
+        });
+        let outside_press = ui.input(|i| i.pointer.any_pressed()) && !editor_pointer;
+        let locked = self.font_browser.is_some()
+            || outside_press
+            || (egui::Popup::is_any_open(ui.ctx()) && !editor_pointer);
+        if locked {
+            s.focus = true;
+            ui.memory_mut(|m| m.surrender_focus(id));
         }
-        let request_focus =
-            s.focus && !egui::Popup::is_any_open(ui.ctx()) && self.font_browser.is_none();
+        let editor_input = !s.pending.is_empty()
+            || ui.input(|i| {
+                i.events.iter().any(|e| {
+                    matches!(
+                        e,
+                        Event::Key { .. }
+                            | Event::Text(_)
+                            | Event::Paste(_)
+                            | Event::Cut
+                            | Event::Ime(_)
+                    )
+                })
+            })
+            || (editor_pointer
+                && ui.input(|i| i.pointer.primary_down() || i.pointer.any_released()));
+        let request_focus = s.focus
+            && !locked
+            && !egui::Popup::is_any_open(ui.ctx())
+            && self.font_browser.is_none();
         if request_focus {
             ui.memory_mut(|m| m.request_focus(id));
         }
@@ -561,7 +568,7 @@ impl Canvas {
                 _ => (),
             }
         }
-        if !s.pending.is_empty() {
+        if !locked && !s.pending.is_empty() {
             ui.input_mut(|i| i.events.append(&mut s.pending));
         }
         if s.clipboard_notice {
@@ -646,11 +653,10 @@ impl Canvas {
                 s.value.content_mut().runs.clear();
             }
             s.merge = false;
-            s.restore_cursor = true;
         }
         ui.ctx()
             .data_mut(|d| d.insert_temp(id.with("typing"), s.typing.clone()));
-        let wrap_width = s.value.wrap_width();
+        let wrap_width = s.value.width;
         let before = s.value.content.clone();
         let selected_before = s.cursor.map(|r| {
             let [a, b] = r.sorted_cursors();
@@ -667,6 +673,8 @@ impl Canvas {
                     Arc::make_mut(&mut s.value.content),
                     wrap_width,
                     scale,
+                    s.cursor,
+                    !locked,
                 )
             })
             .inner;
@@ -675,7 +683,7 @@ impl Canvas {
             s.focus = false;
             ui.ctx().request_repaint();
         }
-        if output.response.has_focus() {
+        if !locked && output.response.has_focus() && (editor_input || output.response.changed()) {
             let next = output.state.cursor.char_range();
             if next != s.cursor
                 && !output.response.changed()
@@ -871,6 +879,8 @@ impl Canvas {
             .filter(|c| *c == '\n')
             .count();
         let mut paragraph_style = texts[0].content.paragraph(paragraph_index);
+        let mut alignment_patch = None;
+        let mut resize_patch = None;
         let mut line_spacing = None;
         let mut paragraph_spacing = None;
         let mut control = ui.scope_id();
@@ -987,18 +997,19 @@ impl Canvas {
                 control = r.id;
             }
         });
-        crate::ui::shape_controls::menu(ui, "Block", |ui| {
+        crate::ui::shape_controls::menu(ui, "Paragraph", |ui| {
             ui.horizontal(|ui| {
                 for (label, a) in [
                     ("Left", Alignment::Left),
                     ("Center", Alignment::Center),
                     ("Right", Alignment::Right),
+                    ("Justify", Alignment::Justify),
                 ] {
                     if ui
                         .selectable_value(&mut paragraph_style.alignment, a, label)
                         .clicked()
                     {
-                        patch.alignment = Some(a);
+                        alignment_patch = Some(a);
                         changed = true;
                     }
                 }
@@ -1027,84 +1038,27 @@ impl Canvas {
                 paragraph_spacing = Some(p.spacing);
                 changed = true;
             }
-        });
-        let mut boxes = Vec::new();
-        crate::ui::shape_controls::menu(ui, "Box", |ui| {
-            let shapes: Vec<_> = texts.iter().map(TextObject::box_shape).collect();
-            let edits = crate::ui::shape_controls::controls(ui, &shapes);
-            let mut padding = texts[0].box_style.padding;
-            let padding_change = ui
-                .add(
-                    egui::DragValue::new(&mut padding)
-                        .range(0.0..=128.)
-                        .prefix("Padding "),
-                )
-                .changed();
-            let mut opacity = f32::from(texts[0].box_style.opacity) * 100. / 255.;
-            let opacity_change = ui
-                .add(
-                    egui::DragValue::new(&mut opacity)
-                        .range(0.0..=100.)
-                        .prefix("Container opacity ")
-                        .suffix("%"),
-                )
-                .changed();
-            let mut mode = texts[0].box_style.resize;
-            ui.selectable_value(
-                &mut mode,
-                crate::text::ResizeBehavior::Reflow,
-                "Reflow Text",
-            );
-            ui.selectable_value(
-                &mut mode,
-                crate::text::ResizeBehavior::Scale,
-                "Scale Text (corners)",
-            );
-            ui.weak("Edge handles always reflow text.");
-            if !edits.is_empty()
-                || padding_change
-                || opacity_change
-                || mode != texts[0].box_style.resize
-            {
-                for t in &texts {
-                    let mut t = t.clone();
-                    let mut proxy = t.box_shape();
-                    for (patch, _) in &edits {
-                        patch.apply(&mut proxy);
-                    }
-                    t.box_style.border = proxy.style.clone();
-                    t.box_style.background = proxy
-                        .style
-                        .fill
-                        .map(|rgb| [rgb[0], rgb[1], rgb[2], proxy.style.fill_opacity]);
-                    if let crate::shape::ShapeGeometry::Box { corner_radius, .. } = proxy.geometry {
-                        t.box_style.radius = corner_radius;
-                    }
-                    if padding_change {
-                        t.box_style.padding = padding;
-                    }
-                    if opacity_change {
-                        t.box_style.opacity = (opacity * 255. / 100.).round() as u8;
-                    }
-                    t.box_style.resize = mode;
-                    text_layout::measure(ui.ctx(), &mut t);
-                    self.drawing.fit_text(&mut t);
-                    boxes.push(t);
+            ui.separator();
+            ui.label("Text layout · resize behavior");
+            let mut mode = texts[0].layout.resize;
+            for (label, value) in [
+                ("Reflow Text", crate::text::ResizeBehavior::Reflow),
+                ("Scale Text (corners)", crate::text::ResizeBehavior::Scale),
+            ] {
+                if ui.selectable_value(&mut mode, value, label).clicked() {
+                    resize_patch = Some(value);
+                    changed = true;
                 }
             }
+            ui.weak("Edge handles always reflow text.");
         });
-        if !boxes.is_empty() {
-            if let Some(s) = &mut self.text_session {
-                s.focus = true;
-                s.restore_cursor = true;
-                s.merge = false;
-            }
-            self.drawing.replace_texts(boxes, false);
-            self.selection.refresh(&self.drawing);
-        }
         if changed {
+            let character_changed = patch != crate::text::TextStylePatch::default();
             let mut values = Vec::new();
             for mut t in texts {
+                if let Some(mode) = resize_patch {
+                    t.layout.resize = mode;
+                }
                 if let Some(s) = &mut self.text_session
                     && s.value.id == t.id
                 {
@@ -1115,15 +1069,17 @@ impl Canvas {
                             a.index.0..b.index.0
                         })
                         .unwrap_or(0..0);
-                    if let Some(a) = patch.alignment {
+                    if let Some(a) = alignment_patch {
                         t.content_mut()
                             .format_paragraphs(range.clone(), |p| p.alignment = a);
                     }
-                    if range.is_empty() {
-                        patch.apply(&mut s.typing);
-                    } else {
-                        t.content_mut().format(range.clone(), &patch);
-                        s.typing = t.content.style_at(range.start).clone();
+                    if character_changed {
+                        if range.is_empty() {
+                            patch.apply(&mut s.typing);
+                        } else {
+                            t.content_mut().format(range.clone(), &patch);
+                            s.typing = t.content.style_at(range.start).clone();
+                        }
                     }
                     if line_spacing.is_some() || paragraph_spacing.is_some() {
                         t.content_mut().format_paragraphs(range.clone(), |p| {
@@ -1135,15 +1091,18 @@ impl Canvas {
                             }
                         });
                     }
-                    s.restore_cursor = true;
                     s.focus = true;
                 } else {
                     let n = t.content.text.chars().count();
-                    t.content_mut().format(0..n, &patch);
-                    if let Some(a) = patch.alignment {
+                    if character_changed {
+                        t.content_mut().format(0..n, &patch);
+                    }
+                    if let Some(a) = alignment_patch {
                         t.content_mut().format_paragraphs(0..n, |p| p.alignment = a);
                     }
-                    patch.apply(&mut t.content_mut().style);
+                    if character_changed {
+                        patch.apply(&mut t.content_mut().style);
+                    }
                     if line_spacing.is_some() || paragraph_spacing.is_some() {
                         t.content_mut().format_paragraphs(0..n, |p| {
                             if let Some(v) = line_spacing {
@@ -1161,6 +1120,7 @@ impl Canvas {
             }
             let merge = self.style_gesture == Some((control, self.drawing.revision()));
             if self.drawing.replace_texts(values, merge) {
+                ui.ctx().request_repaint();
                 if let Some(s) = &mut self.text_session {
                     s.merge = false;
                 }
@@ -1176,13 +1136,12 @@ impl Canvas {
 pub(super) struct FontBrowser {
     sources: Vec<TextObject>,
     pub(super) previews: Vec<TextObject>,
-    range: Option<std::ops::Range<usize>>,
     families: Vec<(String, crate::text::TextFamily)>,
     search: String,
     index: usize,
 }
 impl FontBrowser {
-    fn preview(&mut self) {
+    fn preview(&mut self, range: Option<std::ops::Range<usize>>) {
         self.previews = self.sources.clone();
         if let Some((_, family)) = self.families.get(self.index) {
             let patch = crate::text::TextStylePatch {
@@ -1190,10 +1149,7 @@ impl FontBrowser {
                 ..Default::default()
             };
             for t in &mut self.previews {
-                let range = self
-                    .range
-                    .clone()
-                    .unwrap_or(0..t.content.text.chars().count());
+                let range = range.clone().unwrap_or(0..t.content.text.chars().count());
                 t.content_mut().format(range, &patch);
             }
         }
@@ -1219,18 +1175,9 @@ impl Canvas {
             })
             .unwrap_or(&texts[0].content.style.family);
         let index = families.iter().position(|(_, f)| f == family).unwrap_or(0);
-        let range = self.text_session.as_ref().map(|s| {
-            s.cursor
-                .map(|r| {
-                    let [a, b] = r.sorted_cursors();
-                    a.index.0..b.index.0
-                })
-                .unwrap_or(0..0)
-        });
         self.font_browser = Some(FontBrowser {
             sources: texts.to_vec(),
             previews: texts.to_vec(),
-            range,
             families,
             search: String::new(),
             index,
@@ -1253,6 +1200,14 @@ impl Canvas {
             .filter(|(_, (n, _))| n.to_lowercase().contains(&browser.search.to_lowercase()))
             .map(|(i, _)| i)
             .collect();
+        let range = self.text_session.as_ref().map(|s| {
+            s.cursor
+                .map(|r| {
+                    let [a, b] = r.sorted_cursors();
+                    a.index.0..b.index.0
+                })
+                .unwrap_or(0..0)
+        });
         let previous = browser.index;
         if (up || down) && !visible.is_empty() {
             let current = visible
@@ -1309,20 +1264,19 @@ impl Canvas {
                 });
             });
         if previous != browser.index {
-            browser.preview();
+            browser.preview(range.clone());
+            ui.ctx().request_repaint();
         }
         if cancel || !open {
             if let Some(s) = &mut self.text_session {
                 s.focus = true;
-                s.restore_cursor = true;
             }
         } else if commit {
-            browser.preview();
+            browser.preview(range.clone());
             if let Some(s) = &mut self.text_session {
                 if let Some((_, family)) = browser.families.get(browser.index) {
                     s.typing.family = family.clone();
                 }
-                s.restore_cursor = true;
                 s.focus = true;
                 s.merge = false;
             }
@@ -1351,7 +1305,7 @@ mod rich_tests {
         document::DocumentKind,
         text::{TEXT_HANDLES, TextFamily, TextStylePatch},
     };
-    fn key(k: egui::Key, command: bool) -> Event {
+    pub(super) fn key(k: egui::Key, command: bool) -> Event {
         Event::Key {
             key: k,
             physical_key: None,
@@ -1364,19 +1318,18 @@ mod rich_tests {
             },
         }
     }
-    fn selected(ctx: &egui::Context, c: &mut Canvas, a: usize, b: usize) {
+    pub(super) fn selected(ctx: &egui::Context, c: &mut Canvas, a: usize, b: usize) {
         let s = c.text_session.as_mut().unwrap();
         let range =
             egui::text::CCursorRange::two(egui::text::CCursor::new(a), egui::text::CCursor::new(b));
         s.cursor = Some(range);
-        s.restore_cursor = true;
         s.focus = true;
         let id = egui::Id::unique(("text-editor", s.value.id));
         let mut state = egui::text_edit::TextEditState::load(ctx, id).unwrap_or_default();
         state.cursor.set_char_range(Some(range));
         state.store(ctx, id);
     }
-    fn start(ctx: &egui::Context, c: &mut Canvas, t: TextObject) {
+    pub(super) fn start(ctx: &egui::Context, c: &mut Canvas, t: TextObject) {
         let mut output = ctx.run_ui(Default::default(), |ui| c.start_text(ui, t.clone(), false));
         output.textures_delta.clear();
     }
@@ -1653,7 +1606,7 @@ mod rich_tests {
         draw(ui_pointer(p, true));
         draw(ui_pointer(p, false));
         let labels = draw(vec![]);
-        let p = labels["Block"];
+        let p = labels["Paragraph"];
         draw(ui_pointer(p, true));
         draw(ui_pointer(p, false));
         let labels = draw(vec![]);
@@ -1710,7 +1663,7 @@ mod rich_tests {
         assert!(!v.content.style_at(0).bold && !v.content.style_at(12).bold);
     }
     #[test]
-    fn changing_padding_reflows_cached_display_without_changing_runs() {
+    fn changing_width_reflows_cached_display_without_changing_runs() {
         let (mut c, s) = setup(DocumentKind::Whiteboard);
         let ctx = egui::Context::default();
         text_layout::install(&ctx);
@@ -1722,7 +1675,7 @@ mod rich_tests {
         let view = crate::canvas::selection_ui::tests::t();
         frame(&ctx, &mut c, s, view, vec![], 0., true);
         let before = c.text_cache[&t.id].galley.clone();
-        t.box_style.padding = 40.;
+        t.width = 160.;
         text_layout::measure(&ctx, &mut t);
         c.drawing.replace_texts(vec![t.clone()], false);
         frame(&ctx, &mut c, s, view, vec![], 0.1, true);
@@ -1761,8 +1714,12 @@ mod rich_tests {
             true,
         );
         assert_eq!(
-            c.text_session.as_ref().unwrap().value.box_style.resize,
+            c.text_session.as_ref().unwrap().value.layout.resize,
             crate::text::ResizeBehavior::Scale
         );
     }
 }
+
+#[cfg(test)]
+#[path = "text_format_tests.rs"]
+mod formatting_tests;

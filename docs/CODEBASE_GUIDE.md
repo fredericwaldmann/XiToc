@@ -797,15 +797,21 @@ TextObject host. UTF-8 source uses Unicode scalar ranges matching egui; operatio
 snap to extended grapheme boundaries with unicode-segmentation. Sorted runs capture
 independent family/size/bold/italic/underline/RGBA, preserve unrelated properties,
 merge equal neighbors, and update on insert/delete/rich paste. Paragraph metadata
-survives newline edits. TextBoxStyle independently captures background, shared
-shape border/pattern, radius, padding, container opacity and Reflow/Scale behavior.
+survives newline edits. TextLayout contains only Reflow/Scale behavior; width and
+height remain invisible wrapping/manipulation bounds. Its compatibility reader
+accepts the former box_style field, retains resize, and consumes known decorative
+properties without painting or re-serializing them. Unknown layout fields fail.
 Stable IDs/Placement/surface and Arc content retain the shared object protocol.
 
 `text_layout.rs` builds mixed LayoutJob sections for display and the editable
 custom TextBuffer. The buffer mutates semantic runs before every re-layout; egui
 continues handling selection, caret, keyboard and IME. Normalized unit-DPI metrics
 and scaled raster glyph mapping keep paragraph wraps/caret coordinates stable.
-Paragraph alignment/spacing and padding use document coordinates. The host clears
+Paragraph alignment/spacing use document coordinates. Word-only justification
+expands breakable space advances and moves subsequent glyph positions on eligible
+wrapped rows. Last rows, single-word rows and unspaced scripts retain natural
+spacing. Scaled glyph meshes, decorations, caret positions and hit-testing consume
+the same canonical geometry; width changes recompute it. The host clears
 egui's string-only undoer and routes rich undo through the existing object journal.
 
 `text_fonts.rs` separates native fontdb discovery from portable family names.
@@ -817,11 +823,17 @@ queryLocalFonts permission bridge. Font assets/licenses remain under assets/font
 M2 must embed/subset resources inside the canonical PDF before saved text is offered.
 
 `canvas_text.rs` adapts selection/typing state, rich clipboard, IME, formatting,
-font-browser previews and eight-handle resize sessions to Canvas. Text controls
-patch the retained selected character range; no selection changes future typing
-style only. Block controls patch selected paragraphs. Box controls reuse shared
-shape/color/border widgets and cached shape rendering. Mixed attributes remain
-visible. Font browsing freezes original sources/ranges, previews without writes,
+font-browser previews and eight-handle resize sessions to Canvas. The session's
+CCursorRange is the single retained selection, including direction and row affinity.
+Before each edit pass the widget cursor is synchronized from it. Popup/browser
+interaction uses a noninteractive editor with an inactive selection highlight;
+egui's collapsed unfocused cursor cache is rehydrated afterward. Only genuine editor
+input can update the session range. Focus is deferred until popups close.
+Text controls patch the retained selected character range; no selection changes future typing
+style only. Paragraph controls patch only paragraph metadata, including Justify;
+they expose the individual resize mode as a layout choice. There is no decorative
+Box UI/model/renderer; shape styling stays on shapes. Mixed attributes remain
+visible. Font browsing freezes sources and the session range, previews without writes,
 cancels exactly, and commits one operation. The virtual list loads visible font
 names only; keyboard arrows do not reach the editor/canvas while it is active.
 

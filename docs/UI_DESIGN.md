@@ -488,42 +488,57 @@ Routing and shared style controls do not cover rotation handles.
 Popover placement includes route-control positions outside the curve envelope,
 so an off-curve Bézier diamond remains clickable when viewport space permits.
 
-## Editable rich text boxes
+## Standalone rich text: Text | Paragraph
 
 The T tool stays directly below document tabs in the TOP drawing toolbar. Click
-or width-drag creates and focuses a box. Escape finishes editing and preserves
-object selection; double-click re-enters the same object. Rotated boxes use the
+or width-drag creates and focuses text. Escape finishes editing and preserves
+object selection; double-click re-enters the same object. Rotated objects keep the
 existing labeled unrotated editing overlay. Empty drafts are discarded.
 
-Contextual/right-click formatting separates **Text | Block | Box**. Text shows
-family, directly editable numeric size with −/+, size slider, bold/italic/underline,
-shared RGB/HSV/hex color and independent text opacity. Controls preserve the retained
-character selection; a range patches only those characters, while a caret changes
-future typing style. Mixed family/size/color labels and indeterminate style toggles
-communicate mixed attributes. Property changes preserve unrelated run formatting.
-Block controls expose Left/Center/Right, line spacing and paragraph spacing for
-selected/caret paragraphs. Box exposes shared Fill/Border/Width/Style/Radius
-controls, padding, container opacity and Reflow/Scale. Fill and text color are
-independent; no drawing toolbar is moved or added at the bottom.
+Contextual/right-click formatting contains exactly **Text | Paragraph**. There is
+no Box section, background, border, corner radius, padding or container opacity.
+Standalone text has invisible wrapping/resizing bounds; only editing/selection
+outlines and eight resize handles expose those bounds. Decorative shape styling
+belongs to future Shape + Text, separate from this tool.
 
-The searchable Font browser highlights the current family. Up/Down preview the
-highlighted font on the frozen text range without closing; Enter or a mouse choice
-confirms one undoable change; Escape/Cancel restores the original. Selection and
-caret stay fixed; font arrows do not move text or objects. Its scrollable virtual
-list renders visible family names in their own font, loading resources as needed.
-Native lists installed supported families. Web lists bundled families and states
-the limitation; no unrestricted browser font enumeration is implied.
+Text shows family, directly editable numeric size with −/+, a size slider,
+bold/italic/underline, and the shared RGB/HSV/hex text color with text opacity.
+Selected characters retain their exact range and direction while using controls.
+Property patches preserve unrelated mixed formatting. With a caret only, changes
+set future typing style and leave existing characters unchanged. Mixed indicators
+remain visible. Paragraph exposes Left/Center/Right/Justify, line spacing and
+paragraph spacing for the caret paragraph or all intersecting selected paragraphs;
+these controls never patch character styles. A separate layout choice inside
+Paragraph selects Reflow or Scale for the individual text object, without creating
+a third tab. Settings → Text still sets defaults captured by new objects.
 
-Object mode displays eight local corner/edge grips. Each uses the original drag
-snapshot and pointer offset at every zoom and after rotation. Reflow (default)
-changes container dimensions/wrapping without stretching glyphs or changing sizes;
-the container grows to retain text. Scale corners preserve aspect ratio and scale
-all inline sizes proportionally. Edge grips always reflow. Settings → Text →
-Default Text Box Resize Behavior initializes future boxes; Box allows an individual
-mode override. Changing either mode does not itself resize existing content.
+A text session owns its retained Unicode character selection; egui's widget cursor
+is an adapter. Formatting focus never discards or collapses that range. During
+popups/font browsing, editing input is suspended and an inactive selection highlight
+uses the same laid-out glyph geometry and the Selection token at 65% opacity
+(`INACTIVE_TEXT_SELECTION_OPACITY`). Closing controls restores editor focus and
+the same selection, allowing font → size → bold → color without reselecting.
+The highlight is transient; it is never canonical text content or object selection.
 
-Text edits, range/paragraph/container formatting and completed resize gestures use
-the shared undo journal. Native/browser IME and clipboard continue through egui;
-XiToc session copies retain rich runs, while external text paste is plain text.
-Both layouts retain current dirty/discard protections and page overflow scrolling.
-PDF saving, text inside shapes, sticky notes, labels and formulas are not added.
+The searchable Font browser highlights the current family. Up/Down preview only
+the retained text range; Enter/mouse choice commits one operation, while Escape
+cancels without history changes. Preview arrows do not move the caret or objects.
+Visible font names use their own fonts with lazy cached loading. Native lists
+installed supported families; web lists bundled families and states the limitation.
+
+Justify expands breakable word gaps on eligible wrapped rows to reach both margins.
+It does not stretch letters, single words or paragraph-final rows. Explicit newlines
+end paragraphs. Mixed fonts/sizes remain editable, with matching caret/selection
+geometry after width changes and zoom. Scripts without inter-word gaps retain
+natural spacing; no extra CJK inter-character justification is claimed. Full RTL/
+bidirectional layout remains an egui text-engine limitation.
+
+All eight local corner/edge grips retain captured-source drag behavior, rotation,
+zoom independence and one release transaction. Reflow changes wrapping/container
+bounds while preserving font sizes; Scale corners preserve aspect ratio and mixed
+size proportions, while edge grips always reflow. Changing a default/mode does not
+itself resize existing content. No bottom drawing toolbar is introduced.
+
+Native/browser IME and clipboard continue through egui; XiToc session copies retain
+rich runs, while external text paste is plain text. Both layouts retain dirty/discard
+protections and page overflow scrolling. No Shape + Text or PDF persistence is added.

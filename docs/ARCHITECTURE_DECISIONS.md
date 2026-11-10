@@ -597,3 +597,22 @@ Reflow defaults to natural text; corner Scale preserves proportions, while edges
 reflow. Separate run, paragraph and container styles for future reuse in shapes.
 Rich session paste is supported; HTML/RTF clipboard interchange is not implemented.
 No PDF persistence/schema changes or new text hosts are part of this decision.
+
+
+## 2026-11-10 — Correct standalone text scope and retain formatting selection
+
+The user clarified that “Block/Box” meant justified alignment. Standalone formatting
+is now exactly Text | Paragraph. Remove decorative text-box styling; retain only
+invisible layout bounds, eight grips and Reflow/Scale. A strict compatibility reader
+consumes the known legacy box_style decoration fields and keeps resize; new data
+writes TextLayout only. No PDF format change or Shape + Text implementation.
+
+Source inspection of egui 0.37 found two relevant contracts: unfocused TextEdit
+collapses its widget selection, and default justify may distribute per-letter
+spacing. Keep one authoritative TextSession CCursorRange, synchronize/rehydrate
+the widget adapter, suspend editor input during controls, and paint inactive
+selection from that same galley. Font previews derive the range from the suspended
+session instead of a second snapshot. Use word-gap-only canonical glyph expansion
+for justification, with final/single-word rows left natural. Caret, decoration and
+screen geometry share the result. These choices supersede the decorative Box scope
+in the preceding entry; future shape text remains a distinct host.

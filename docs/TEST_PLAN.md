@@ -1320,7 +1320,10 @@ Manual reproduction:
 Text remains editable in memory. PDF saving/reopening editable content is outside
 this milestone and must not be inferred from the document’s .pdf filename.
 
-## Rich text upgrade — 2026-11-10, continued PR #42
+## Rich text upgrade — 2026-11-10, continued PR #42 (historical)
+
+This records the prior decorative Box iteration. The Text/Paragraph correction
+below supersedes its styling UI and manual steps; those features are removed.
 
 Regression coverage extends the existing 216 active tests with 15 tests (231
 active, eight separately runnable performance tests). Coverage includes mixed
@@ -1392,3 +1395,70 @@ rotation, both-layout and zoom matrix is automated; the GUI matrix is a subset.
 The final isolated release package was served separately and rechecked for
 first-click creation, retained selected-word formatting, virtual font-name preview,
 arrow preview and Enter commit. The final preview/commit captures are included.
+
+
+## Text/Paragraph correction — 2026-11-10, PR #42
+
+Executed final checks:
+
+- `cargo fmt --all -- --check`: passed.
+- `cargo clippy --all-targets -- -D warnings`: passed.
+- `cargo test --all-targets`: 240 passed, eight ignored performance benchmarks.
+- `cargo build --release`: passed. Native release startup ran without errors under
+  an eight-second smoke timeout (expected exit 124); native interactive input was
+  not verified.
+- `cargo check --target wasm32-unknown-unknown`: passed.
+- `trunk build --release --dist target/format-dist`: passed.
+
+New tests cover Left/Center/Right/Justify, word-gap geometry without letter
+stretching, natural final/single-word rows, explicit breaks, Unicode, mixed fonts
+and sizes, reflow at several widths, caret positions and gap hit-testing at
+50/100/200/400%, single/multi-paragraph scope, exact inline-style preservation,
+undo/redo and legacy decorated-object import without decoration output.
+Full Canvas/widget tests preserve range endpoints and direction through font
+opening, previews, cancel/commit, font size, bold/italic/underline, color entry,
+Text/Paragraph switching, numeric line spacing and Unicode grapheme selection.
+They inspect the actual selection backgrounds in rendered text meshes, prevent
+preview keyboard input from moving the caret, and assert absence of Box controls.
+Existing eight-handle rotated/zoomed Reflow/Scale, mixed-object drag, shape styling,
+connector/routing, ink/eraser, clipboard and both-layout regressions also pass.
+
+Actual GUI verification used the packaged Firefox application with real pointer
+and keyboard input. Created “Hello beautiful world”, selected “beautiful” once,
+previewed fonts with Down/Escape, then confirmed a font with Enter. Without
+reselecting, entered 32 pt, applied bold and #D02A40. The word stayed highlighted;
+Hello/world retained their styles. Repeated the sequence after double-clicking an
+existing object (font change, 30 pt, bold toggle and #154DB0) with the same result.
+Verified the UI contains Text and Paragraph only and has no decorative container.
+
+Created a separate multi-line paragraph with an explicit final paragraph. Applied
+Left, Center, Right and Justify, observing actual row changes. Justified eligible
+rows reached both margins; the last line and separate final paragraph stayed
+natural and left-aligned. Dragged the left grip outward: the left edge moved,
+the right stayed anchored, and wrapping/justification updated. Actual undo/redo
+restored alignment and width. Evidence: [screenshots/text-formatting-correction](screenshots/text-formatting-correction/).
+
+Manual repeat:
+
+1. Use T to create “Hello beautiful world”, finish, and double-click to edit.
+2. Select only “beautiful”. Open Text → Font, navigate with arrows and cancel
+   with Escape; reopen, navigate and confirm with Enter. Keep the word selected.
+3. Without reselecting, change numeric size, bold/italic/underline and hex color.
+   Confirm the exact same range stays highlighted and surrounding words keep their
+   original properties. Switch between Text and Paragraph and change line spacing.
+4. With a caret only, change a font property and type: existing characters stay
+   unchanged. Paragraph alignment affects the caret paragraph. With a multi-line
+   selection, alignment/spacing affect all intersecting paragraphs only.
+5. Type enough words to wrap and a separate paragraph using Enter. Apply each
+   alignment. Justify expands word gaps on eligible rows; paragraph-final and
+   single-word rows retain natural spacing. Resize from the left and undo/redo.
+6. Check all eight grips, rotation, zoom and Paragraph → Reflow/Scale. Edges reflow;
+   Scale corners preserve aspect and mixed-size proportions. Settings → Text still
+   sets future defaults. Inspect shapes separately: their styling is unchanged.
+
+Limits: unspaced scripts retain natural spacing; full RTL/bidirectional layout
+remains an egui limitation. Web fonts remain bundled-only and external HTML/RTF
+paste remains plain text. Native Windows/macOS hardware/IME interactions and an
+exhaustive GUI matrix of every tool/theme/device are unverified. Rotated text
+retains its labeled unrotated editing overlay. Editable text is still memory-only;
+no PDF persistence, Shape + Text or label host was implemented.
