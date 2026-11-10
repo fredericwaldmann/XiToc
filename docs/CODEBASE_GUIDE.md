@@ -860,3 +860,23 @@ each action is one journal operation. Other selections keep geometric scaling.
 Mixed-size Text controls display an explicit `Mixed` entry without a representative
 font-size slider; entering a valid numeric size is an explicit uniform-size edit.
 Opening or switching formatting menus is read-only and does not add history.
+
+### M1.9 shape text host
+
+`Shape.text: Option<ShapeText>` stores rich content and vertical alignment on the
+canonical Shape snapshot. It retains the shape's ID, placement, styling, and
+connector relationships; there is no canonical child TextObject. `canvas_text.rs`
+creates a transient TextObject adapter with that same ID while the shared
+TextSession is active. The existing editor, range formatting, font previews,
+clipboard, and undo journal therefore serve both standalone text and shapes.
+Shape content updates route through `Drawing::replace_text_adapters`, which
+replaces only embedded content and keeps shape geometry/style intact.
+
+Supported closed shapes derive a conservative text region from local geometry.
+The renderer uses the shared cached rich-text layout, applies paragraph
+alignment, shape vertical alignment, and shape rotation, and clips to the text
+region. A small overflow marker leaves the full editable content untouched.
+Reflection relocates the region while rendered glyphs remain readable. Editing
+uses the existing unrotated text overlay. Connectors continue to reference the
+unchanged canonical shape ID. Text inside shapes is memory-only, like the rest
+of current drawing content; no PDF persistence is introduced.

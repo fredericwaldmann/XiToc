@@ -574,6 +574,7 @@ impl Canvas {
         if self.text_surface(ui, bounds, surface, transform) {
             self.paint(ui, bounds, surface, transform);
             self.paint_text_editor(ui, bounds, surface, transform);
+            self.paint_selection(ui, bounds, surface, transform);
             self.paint_text_handles(ui, transform, surface);
             self.selection_controls(ui, bounds, surface, transform);
             return;
@@ -1009,6 +1010,18 @@ impl Canvas {
                             crate::object::Placement::default(),
                             &mut self.shape_cache,
                         );
+                        if !self.text_session.as_ref().is_some_and(|s| {
+                            s.target == text_ui::TextTarget::Shape && s.value.id == shape.id
+                        }) {
+                            text_ui::paint_shape_text(
+                                ui,
+                                &selected,
+                                transform,
+                                preview,
+                                crate::object::Placement::default(),
+                                &mut self.text_cache,
+                            );
+                        }
                     } else {
                         shapes_ui::paint_shape(
                             ui,
@@ -1018,6 +1031,18 @@ impl Canvas {
                             delta,
                             &mut self.shape_cache,
                         );
+                        if !self.text_session.as_ref().is_some_and(|s| {
+                            s.target == text_ui::TextTarget::Shape && s.value.id == shape.id
+                        }) {
+                            text_ui::paint_shape_text(
+                                ui,
+                                &painter,
+                                transform,
+                                preview,
+                                delta,
+                                &mut self.text_cache,
+                            );
+                        }
                     }
                     continue;
                 }

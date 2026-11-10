@@ -547,3 +547,16 @@ itself resize existing content. No bottom drawing toolbar is introduced.
 Native/browser IME and clipboard continue through egui; XiToc session copies retain
 rich runs, while external text paste is plain text. Both layouts retain dirty/discard
 protections and page overflow scrolling. No Shape + Text or PDF persistence is added.
+
+## M1.9 Shape + Text
+
+Double-clicking a supported closed shape enters the shared rich-text editor;
+single click and drag remain object selection/manipulation. The same top
+contextual Text | Paragraph controls format retained character selections and
+paragraphs. Shape styling remains in its existing shape controls, clearly
+separate from text color and paragraph alignment. Paragraph offers horizontal
+alignment; a shape-text-only vertical alignment control offers Top, Middle, and
+Bottom, with centered/middle defaults. Text uses a conservative geometry-aware
+interior region; overflow is clipped with a visible marker while all content
+remains editable. The existing text editing overlay stays unrotated while the
+shape's rendered text follows rotation and remains readable when flipped.

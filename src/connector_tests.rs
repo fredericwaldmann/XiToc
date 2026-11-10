@@ -407,6 +407,84 @@ fn page_margin_ports_remain_clickable_and_zero_length_formatting_keeps_heads() {
 }
 
 #[test]
+fn labeled_shapes_keep_magnetic_connector_identity_and_routing_after_move() {
+    use crate::{object::Placement, shape::ShapeText, text::TextStylePatch};
+    let (mut c, surface) = setup(DocumentKind::Whiteboard);
+    let a = add_shape(
+        &mut c,
+        surface,
+        ShapeKind::Rectangle,
+        [40., 70.],
+        [160., 150.],
+    );
+    let b = add_shape(
+        &mut c,
+        surface,
+        ShapeKind::Diamond,
+        [290., 70.],
+        [410., 150.],
+    );
+    let mut labeled = a.clone();
+    let mut text = ShapeText::default();
+    std::sync::Arc::make_mut(&mut text.content).text = "Source label".into();
+    std::sync::Arc::make_mut(&mut text.content).format(
+        0..6,
+        &TextStylePatch {
+            size: Some(24.),
+            bold: Some(true),
+            ..Default::default()
+        },
+    );
+    labeled.text = Some(text);
+    assert!(c.drawing.replace_shape(labeled.clone()));
+    let connector = Connector::new(
+        c.drawing.owner(),
+        surface,
+        Endpoint::attached(&labeled, Port::Right).unwrap(),
+        Endpoint::attached(&b, Port::Left).unwrap(),
+        Default::default(),
+    );
+    let connector_id = connector.id;
+    assert!(c.drawing.add_connector(connector));
+    let before = c.drawing.snapshot(connector_id).unwrap().clone();
+    let ids = std::collections::HashSet::from([a.id]);
+    assert!(c.drawing.transform_objects(
+        &ids,
+        Placement {
+            origin: [100., 110.],
+            position: [150., 160.],
+            ..Default::default()
+        }
+    ));
+    let Some(ObjectSnapshot::Shape(moved)) = c.drawing.snapshot(a.id) else {
+        panic!("moving labeled shape must preserve its object")
+    };
+    assert_eq!(moved.text.as_ref().unwrap().content.text, "Source label");
+    assert_eq!(moved.text.as_ref().unwrap().content.style_at(1).size, 24.);
+    let Some(ObjectSnapshot::Connector(edge)) = c.drawing.snapshot(connector_id) else {
+        panic!("connector disappeared")
+    };
+    assert_eq!(edge.source.target(), Some(a.id));
+    assert_eq!(edge.target.target(), Some(b.id));
+    assert_ne!(
+        edge.source.position(),
+        match before {
+            ObjectSnapshot::Connector(ref c) => c.source.position(),
+            _ => unreachable!(),
+        }
+    );
+    c.drawing.undo();
+    let Some(ObjectSnapshot::Shape(restored)) = c.drawing.snapshot(a.id) else {
+        panic!()
+    };
+    assert_eq!(restored.text.as_ref().unwrap().content.text, "Source label");
+    let Some(ObjectSnapshot::Connector(restored_edge)) = c.drawing.snapshot(connector_id) else {
+        panic!()
+    };
+    assert_eq!(restored_edge.source.target(), Some(a.id));
+}
+
+#[test]
 fn advanced_route_handle_drags_preview_commit_cancel_and_undo_once_across_views() {
     use crate::connector::Route;
     for kind in [DocumentKind::Page, DocumentKind::Whiteboard] {

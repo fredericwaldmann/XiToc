@@ -634,3 +634,15 @@ placement are preserved. Mixed-size Text controls display `Mixed` without a
 representative-value slider, and panel initialization adds no history operation.
 Regression tests cover proportional/reciprocal scaling, mixed-state UI rendering,
 panel read-only behavior, and one-step undo/redo.
+
+## M1.9 — Editable rich text inside shapes
+
+Shapes now optionally own `ShapeText` with the existing rich `TextContent` and
+vertical alignment. Double-click starts the same TextSession using a transient
+adapter with the shape's ID; semantic edits patch the one Shape snapshot. Closed
+shape geometry supplies a conservative wrapping region, cached layout follows
+shape transforms, and overflow is visibly indicated without discarding text.
+Shape styling and connectors retain their existing model and ID relationships.
+Coverage includes shape text-region geometry, formatting scope, stable identity,
+clipboard/history, transforms, and magnetic connector behavior. Text remains
+memory-only pending the PDF persistence milestone.

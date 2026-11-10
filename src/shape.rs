@@ -2,6 +2,7 @@
 use crate::{
     drawing::Surface,
     object::{CanvasObject, ObjectBounds, ObjectId, ObjectType, Placement, Point},
+    text::TextContent,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -176,6 +177,42 @@ pub struct Shape {
     pub placement: Placement,
     pub geometry: ShapeGeometry,
     pub style: ShapeStyle,
+    #[serde(default)]
+    pub text: Option<ShapeText>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VerticalAlignment {
+    Top,
+    #[default]
+    Middle,
+    Bottom,
+}
+
+/// Rich text belongs to the shape snapshot and shares the standalone text model.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShapeText {
+    pub content: std::sync::Arc<TextContent>,
+    #[serde(default)]
+    pub vertical_alignment: VerticalAlignment,
+}
+impl Default for ShapeText {
+    fn default() -> Self {
+        let mut content = TextContent::default();
+        content.style.alignment = crate::text::Alignment::Center;
+        Self {
+            content: std::sync::Arc::new(content),
+            vertical_alignment: VerticalAlignment::Middle,
+        }
+    }
+}
+impl ShapeText {
+    pub fn valid(&self) -> bool {
+        self.content.valid()
+            && self.content.text.len() <= crate::text::MAX_TEXT_BYTES
+            && !self.content.text.contains('\0')
+    }
 }
 impl Shape {
     pub fn create(
@@ -229,6 +266,7 @@ impl Shape {
             },
             geometry,
             style: ShapeStyle::default(),
+            text: None,
         };
         shape.valid().then_some(shape)
     }
@@ -255,6 +293,7 @@ impl Shape {
                 .chain(&self.placement.position)
                 .all(|v| v.abs() <= 1e15)
             && self.style.valid()
+            && self.text.as_ref().is_none_or(ShapeText::valid)
             && match self.geometry {
                 ShapeGeometry::Path {
                     ref points,
@@ -302,6 +341,51 @@ impl Shape {
                         })
                 }
             }
+    }
+    /// Conservative interior rectangle, inscribed within each supported form.
+    /// Sloped/curved forms use their narrowest horizontal chord across the text
+    /// region so every wrapped row remains safely inside the visible contour.
+    pub fn text_region(&self) -> Option<ObjectBounds> {
+        let ShapeGeometry::Box {
+            kind,
+            size: [w, h],
+            corner_radius,
+        } = self.geometry
+        else {
+            return None;
+        };
+        let pad = 8.0_f64.min(w * 0.1).min(h * 0.1);
+        let (x, y, width, height) = match kind {
+            ShapeKind::Rectangle => (pad, pad, w - 2. * pad, h - 2. * pad),
+            ShapeKind::RoundedRectangle => {
+                let inset = pad.max(corner_radius.min(w.min(h) * 0.5) * 0.45);
+                (inset, inset, w - 2. * inset, h - 2. * inset)
+            }
+            ShapeKind::Circle | ShapeKind::Ellipse => {
+                let y = h * 0.2;
+                let height = h * 0.6;
+                let chord = w * 0.8;
+                let width = chord - 2. * pad;
+                ((w - width) * 0.5, y, width, height)
+            }
+            ShapeKind::Diamond => {
+                let y = h * 0.25;
+                let height = h * 0.5;
+                let width = w * 0.5 - 2. * pad;
+                ((w - width) * 0.5, y, width, height)
+            }
+            ShapeKind::Triangle => {
+                let y = h * 0.3;
+                let height = h * 0.55;
+                let width = w * 0.3 - 2. * pad;
+                ((w - width) * 0.5, y, width, height)
+            }
+            ShapeKind::Line | ShapeKind::Arrow => return None,
+        };
+        Some(ObjectBounds {
+            min: [x.max(0.), y.max(0.)],
+            max: [(x + width).max(x.max(0.)), (y + height).max(y.max(0.))],
+        })
     }
     /// Closed convex boundaries or independent shaft/head paths. Curves use a
     /// bounded chord-error tolerance, shared by hits/regions and display caches.

@@ -5,6 +5,32 @@ For the current source map and data flow, see [CODEBASE_GUIDE.md](CODEBASE_GUIDE
 [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) distinguishes historical milestones.
 Sections below retain milestone contracts; later sections supersede earlier scope.
 
+## M1.9 shape text host
+
+Rich text is owned by the shape: `Shape.text` optionally stores `ShapeText`,
+which contains shared `TextContent` runs/paragraphs and vertical alignment.
+This keeps a labeled shape one canonical canvas object with the same stable ID,
+geometry, style, transform, and magnetic connector references. There is no
+independently selectable text overlay object.
+
+The existing `TextSession` and rich-text engine are reused through an ephemeral
+TextObject adapter carrying the shape's ID and a geometry-derived local text
+region. Input and formatting are shared with standalone text, while semantic
+updates route back into embedded `ShapeText`. Supported closed shapes use
+conservative interior regions for wrapping; layout is clipped and overflow is
+visibly marked without deleting or changing content. Horizontal alignment is
+paragraph metadata; vertical alignment is shape text metadata (Top/Middle/
+Bottom, default Middle). Rotation transforms the rendered text with the shape;
+reflection relocates it but does not mirror glyphs. Resizing recalculates layout
+from the new available width and leaves each run's font size unchanged.
+
+Shape selection/manipulation remains on the shape object and its connector-aware
+transform pipeline. Double-click enters text editing; the adapter's retained
+range routes text shortcuts and formatting without changing the canonical ID.
+Shape fill/border controls stay separate from Text/Paragraph character controls.
+This in-memory model is reusable for future shape-like text hosts. It does not
+change the PDF payload or claim text persistence across restart.
+
 ## Start simple
 The implementation is one binary crate with flat source modules (no `lib.rs` or
 `domain/` directory). The following tree is an original proposed organization,

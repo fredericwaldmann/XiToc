@@ -39,7 +39,47 @@ impl Harness {
         h.frame(vec![]);
         h
     }
+    fn with_shape_text() -> Self {
+        let (mut canvas, surface) = setup(DocumentKind::Whiteboard);
+        let ctx = egui::Context::default();
+        text_layout::install(&ctx);
+        let shape = crate::shape::Shape::create(
+            canvas.drawing.owner(),
+            surface,
+            crate::shape::ShapeKind::Rectangle,
+            [220., 220.],
+            [540., 420.],
+            false,
+        )
+        .unwrap();
+        let id = shape.id;
+        canvas.drawing.add_shape(shape.clone());
+        canvas.select(Tool::Select);
+        canvas
+            .selection
+            .change([id], Membership::Replace, &canvas.drawing);
+        let mut output = ctx.run_ui(Default::default(), |ui| canvas.start_shape_text(ui, &shape));
+        output.textures_delta.clear();
+        let mut harness = Self {
+            ctx,
+            canvas,
+            surface,
+            id,
+            labels: HashMap::new(),
+            galleys: Vec::new(),
+        };
+        harness.frame(vec![]);
+        harness
+    }
     fn value(&self) -> &TextObject {
+        if let Some(session) = self
+            .canvas
+            .text_session
+            .as_ref()
+            .filter(|s| s.target == TextTarget::Shape)
+        {
+            return &session.value;
+        }
         let Some(ObjectSnapshot::Text(t)) = self.canvas.drawing.snapshot(self.id) else {
             panic!("text disappeared")
         };
@@ -164,6 +204,40 @@ impl Harness {
         self.frame(vec![]);
         self.check(expected);
     }
+}
+
+#[test]
+fn shape_text_is_one_shape_and_reuses_the_rich_editor_and_formatting_scope() {
+    let mut h = Harness::with_shape_text();
+    let session = h.canvas.text_session.as_ref().unwrap();
+    assert_eq!(session.target, TextTarget::Shape);
+    assert_eq!(session.value.id, h.id);
+    assert!(h.canvas.text_editing());
+
+    h.frame(vec![Event::Text("Hello beautiful world".into())]);
+    let Some(ObjectSnapshot::Shape(shape)) = h.canvas.drawing.snapshot(h.id) else {
+        panic!("editing must keep the canonical shape object")
+    };
+    assert_eq!(h.canvas.drawing.items().len(), 1);
+    let text = shape
+        .text
+        .as_ref()
+        .expect("typed text is embedded in the shape");
+    assert_eq!(text.content.text, "Hello beautiful world");
+    assert_eq!(text.content.style.alignment, Alignment::Center);
+
+    let selection = h.select(6, 15);
+    h.click("Text", selection);
+    h.click("+", selection);
+    h.highlight();
+    let Some(ObjectSnapshot::Shape(shape)) = h.canvas.drawing.snapshot(h.id) else {
+        panic!("shape identity must remain stable")
+    };
+    let content = &shape.text.as_ref().unwrap().content;
+    assert_eq!(content.style_at(0).size, 18.);
+    assert_eq!(content.style_at(8).size, 19.);
+    assert_eq!(content.style_at(18).size, 18.);
+    assert_eq!(h.canvas.text_session.as_ref().unwrap().value.id, h.id);
 }
 #[test]
 fn font_preview_real_canvas_freezes_direction_and_highlights_cancel_and_commit() {
