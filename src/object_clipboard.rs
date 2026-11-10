@@ -46,6 +46,16 @@ impl ObjectBundle {
                 return Err("Duplicate object clipboard ID.".into());
             }
             let s = match object {
+                ClipboardObject::Text(t) => {
+                    if !t.valid() {
+                        return Err("Invalid text clipboard.".into());
+                    }
+                    count += t.content.text.len();
+                    if count > MAX_POINTS {
+                        return Err("Text clipboard limit exceeded.".into());
+                    }
+                    continue;
+                }
                 ClipboardObject::Connector(c) => {
                     if !c.valid() || c.ends().iter().any(|e| e.target().is_some_and(|id| self.objects.iter().find(|o|o.id()==id).is_some_and(|target| !matches!(target,ClipboardObject::Shape(s) if !s.kind().segment() && s.surface==c.surface && s.document_id==c.document_id)))) {return Err("Invalid connector clipboard relationship.".into());}
                     continue;

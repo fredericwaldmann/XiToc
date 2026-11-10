@@ -542,3 +542,77 @@ measured-pattern/mesh pipeline. Cache resolved paths to avoid repeated idle curv
 flattening. Semantic cubics and route parameters remain available for future PDF
 vector emission; the blank PDF codec is unchanged. Labels are explicitly out of
 scope in actual issue #25 and do not justify a premature full text system.
+
+## 2026-11-08 — Standalone text with a reusable editing/layout boundary
+
+PR #41 was confirmed merged before branching from main 58a80ad. Actual issue #26
+assumes a #24 shape-text core that does not exist. The user explicitly excludes
+shape-contained text, so introduce reusable semantic TextContent/TextStyle and
+layout/edit functions now, with TextObject as their first host. Do not claim the
+shape-text acceptance criterion or close #26 automatically.
+
+Store source/style in immutable shared Arcs so transforms do not clone strings.
+Use the existing object store and delta journal rather than egui widgets as data.
+Source changes coalesce in bounded chunks; caret/IME/selection remain transient,
+and egui handles native/browser text editing and its active-session undoer.
+
+Bundle licensed, unmodified DejaVu faces and Droid CJK instead of relying on
+system fonts. Normalize document metrics with the same egui/epaint engine and
+unhinted unit-DPI fonts. Map scale-rasterized glyph rows back to those metrics for
+stable wraps, caret positions and high-DPI rendering. Future PDF output must embed
+fonts/subsets and match this layout; no persistence is added now.
+
+Singleton width edits reflow; group scaling uniformly scales type. Readable text
+reflection supersedes the older proposed mirrored-glyph policy: reflect centers,
+retain glyph orientation, and preserve explicit rotation. Editing a rotated box
+uses a labeled unrotated overlay because egui's interaction transforms lack
+rotation. Page fitting clips visible height but preserves all source/edit access.
+
+Actual browser verification caught missing initial IME/caret handoff; initialize
+the cursor and request focus after widget creation, with a real-editor separate
+press/release regression. Zoom testing caught font-size-dependent wraps; canonical
+row mapping fixes that instead of accepting different line breaks at each zoom.
+
+
+## 2026-11-10 — Rich text extends the existing editor (#26, PR #42)
+
+Continue the still-open feature/editable-text-boxes branch/PR. Retain egui 0.37
+TextEdit's caret/IME engine, using its custom TextBuffer and mixed LayoutJob API
+rather than replacing the entire editor or switching to plain text while focused.
+Source and normalized grapheme-safe runs/paragraphs remain portable semantic data.
+Use the canonical Replace journal for rich undo; the framework undoer holds strings
+and therefore cannot restore inline formatting safely. Clear that duplicate history.
+
+Fontdb supplies native catalog/weight/style discovery; an egui FontProvider and a
+shared face-byte cache serve both normalized and screen fonts without atlas resets
+on browser navigation. Keep bundled fallbacks. Browser Local Font Access is limited,
+permission-gated and experimental: retain bundled-only web behavior without claiming
+cross-browser enumeration. See [MDN Local Font Access](https://developer.mozilla.org/en-US/docs/Web/API/Local_Font_Access_API)
+and [fontdb API](https://docs.rs/fontdb/0.24.0/fontdb/struct.Database.html).
+Actual native Windows/macOS font and physical IME behavior remain unverified here.
+
+Freeze sources/ranges for reversible font previews; commit only on confirmation.
+Reuse the persistent captured-source resize protocol for eight local handles.
+Reflow defaults to natural text; corner Scale preserves proportions, while edges
+reflow. Separate run, paragraph and container styles for future reuse in shapes.
+Rich session paste is supported; HTML/RTF clipboard interchange is not implemented.
+No PDF persistence/schema changes or new text hosts are part of this decision.
+
+
+## 2026-11-10 — Correct standalone text scope and retain formatting selection
+
+The user clarified that “Block/Box” meant justified alignment. Standalone formatting
+is now exactly Text | Paragraph. Remove decorative text-box styling; retain only
+invisible layout bounds, eight grips and Reflow/Scale. A strict compatibility reader
+consumes the known legacy box_style decoration fields and keeps resize; new data
+writes TextLayout only. No PDF format change or Shape + Text implementation.
+
+Source inspection of egui 0.37 found two relevant contracts: unfocused TextEdit
+collapses its widget selection, and default justify may distribute per-letter
+spacing. Keep one authoritative TextSession CCursorRange, synchronize/rehydrate
+the widget adapter, suspend editor input during controls, and paint inactive
+selection from that same galley. Font previews derive the range from the suspended
+session instead of a second snapshot. Use word-gap-only canonical glyph expansion
+for justification, with final/single-word rows left natural. Caret, decoration and
+screen geometry share the result. These choices supersede the decorative Box scope
+in the preceding entry; future shape text remains a distinct host.

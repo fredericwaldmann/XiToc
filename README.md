@@ -360,3 +360,16 @@ Connector Routing offers Straight, Orthogonal and Curved paths. Drag diamond
 handles to adjust rails or Bézier controls; Reset Route restores automatic geometry.
 Automatic anchor choices are optional per endpoint. These edits remain in memory
 until the future PDF persistence milestone.
+
+The top **T** tool creates editable text boxes. Click and type immediately, or drag
+to choose width; double-click later to edit. Text controls format selected Unicode
+characters, or the caret's future typing style, with mixed fonts/sizes, bold/italic/
+underline and color. The two formatting sections are Text and Paragraph, with
+Left/Center/Right/Justify and spacing. The exact character selection stays highlighted
+while formatting. Text has no decorative background/border/padding. Paragraph also
+exposes the individual resize mode. Eight local grips support Reflow (default) or
+proportional corner Scale. Settings → Text sets defaults for new boxes. Native
+font browsing lists installed families; web uses bundled faces. Arrow keys preview
+fonts live, Enter commits once, Escape cancels. XiToc session paste preserves rich
+runs; external clipboard text enters as plain text. Escape returns to object manipulation.
+Text, like other drawing objects, remains in memory until M2 PDF persistence.

@@ -74,6 +74,9 @@ fn clipboard_id() -> egui::Id {
 impl Canvas {
     pub fn selection_action(&mut self, command: SelectionCommand, ctx: &egui::Context) {
         use SelectionCommand::*;
+        if self.text_action(command, ctx) {
+            return;
+        }
         match command {
             Undo => self.undo(),
             Redo => self.redo(),
@@ -156,6 +159,15 @@ impl Canvas {
                 }
             }
             Smaller | Larger => {
+                let text_only = !self.selection.ids.is_empty()
+                    && self.selection.ids.iter().all(|id| {
+                        matches!(self.drawing.snapshot(*id), Some(ObjectSnapshot::Text(_)))
+                    });
+                if text_only {
+                    let factor = if command == Smaller { 1.0 / 1.1 } else { 1.1 };
+                    self.scale_selected_text_sizes(factor, ctx);
+                    return;
+                }
                 self.finish();
                 if let (Some(bounds), Some(geometry)) =
                     (self.selection.bounds, self.selection.geometry)
@@ -409,7 +421,7 @@ impl Canvas {
             _ => None,
         }
     }
-    fn pick(&mut self, surface: Surface, point: Point, tolerance: f64) -> Option<Uuid> {
+    pub(super) fn pick(&mut self, surface: Surface, point: Point, tolerance: f64) -> Option<Uuid> {
         self.object_index
             .sync_objects(self.drawing.revision(), self.drawing.items());
         let mut top = None;
@@ -418,16 +430,20 @@ impl Canvas {
                 if top.is_some_and(|(old, _)| {
                     let previous = &self.drawing.items()[old];
                     let current = &self.drawing.items()[index];
-                    (matches!(previous, ObjectSnapshot::Shape(_))
+                    (matches!(previous, ObjectSnapshot::Shape(_) | ObjectSnapshot::Text(_))
                         && matches!(current, ObjectSnapshot::Connector(_)))
                         || (old > index
                             && !(matches!(previous, ObjectSnapshot::Connector(_))
-                                && matches!(current, ObjectSnapshot::Shape(_))))
+                                && matches!(
+                                    current,
+                                    ObjectSnapshot::Shape(_) | ObjectSnapshot::Text(_)
+                                )))
                 }) {
                     return;
                 }
                 let object = &self.drawing.items()[index];
                 let hit = match object {
+                    ObjectSnapshot::Text(t) => t.hit_test(point, tolerance),
                     ObjectSnapshot::Stroke(stroke) => {
                         let cache = self
                             .cache
@@ -613,6 +629,9 @@ impl Canvas {
                         .query_rect(surface, bounds.min, bounds.max, |index| {
                             let object = &self.drawing.items()[index];
                             let hit = match object {
+                                ObjectSnapshot::Text(t) => {
+                                    t.rectangle_matches(bounds, point[0] < start[0])
+                                }
                                 ObjectSnapshot::Stroke(stroke) => {
                                     let cached = self
                                         .cache
@@ -814,6 +833,7 @@ impl Canvas {
                                     stroke.pressure_style,
                                 )
                             }
+                            ObjectSnapshot::Text(t) => t.lasso_matches(&region),
                             ObjectSnapshot::Shape(shape) => shape.lasso_matches(&region),
                             ObjectSnapshot::Connector(c) => c.as_shape().lasso_matches(&region),
                         };
@@ -1202,6 +1222,7 @@ impl Canvas {
         true
     }
     fn shape_format_controls(&mut self, ui: &mut egui::Ui) {
+        self.text_format_controls(ui);
         self.connector_format_controls(ui);
         let shapes = self.selected_shapes();
         for (patch, id) in crate::ui::shape_controls::controls(ui, &shapes) {
@@ -1366,7 +1387,13 @@ impl Canvas {
                 self.connect_selected_shapes();
                 ui.close();
             }
-            if !self.selected_shapes().is_empty() {
+            if !self.selected_shapes().is_empty()
+                || self
+                    .selection
+                    .ids
+                    .iter()
+                    .any(|id| matches!(self.drawing.snapshot(*id), Some(ObjectSnapshot::Text(_))))
+            {
                 egui::containers::menu::SubMenuButton::new("Format")
                     .config(
                         egui::containers::menu::MenuConfig::new()
@@ -1386,7 +1413,7 @@ impl Canvas {
 
 #[cfg(test)]
 #[path = "selection_tests.rs"]
-mod tests;
+pub(super) mod tests;
 
 #[cfg(test)]
 #[path = "manipulation_tests.rs"]
@@ -1407,3 +1434,7 @@ mod shape_drag_tests;
 #[cfg(test)]
 #[path = "connector_tests.rs"]
 mod connector_tests;
+
+#[cfg(test)]
+#[path = "text_controller_tests.rs"]
+mod text_tests;

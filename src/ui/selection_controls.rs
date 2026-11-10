@@ -13,8 +13,8 @@ impl MenuState {
         Self {
             editable: true,
             selected: !canvas.selection.ids.is_empty(),
-            can_undo: canvas.drawing.can_undo(),
-            can_redo: canvas.drawing.can_redo(),
+            can_undo: canvas.history_available().0,
+            can_redo: canvas.history_available().1,
             has_objects: !canvas.drawing.items().is_empty(),
         }
     }

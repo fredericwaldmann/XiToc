@@ -2,7 +2,7 @@ use super::*;
 use crate::document::DocumentKind;
 use crate::object::CanvasObject;
 
-pub(super) fn pointer(point: Point, pressed: bool, modifiers: egui::Modifiers) -> Event {
+pub(crate) fn pointer(point: Point, pressed: bool, modifiers: egui::Modifiers) -> Event {
     Event::PointerButton {
         pos: egui::pos2(point[0] as f32, point[1] as f32),
         button: PointerButton::Primary,
@@ -10,14 +10,14 @@ pub(super) fn pointer(point: Point, pressed: bool, modifiers: egui::Modifiers) -
         modifiers,
     }
 }
-pub(super) fn screen(t: Transform, p: Point) -> Point {
+pub(crate) fn screen(t: Transform, p: Point) -> Point {
     t.to_screen(p)
 }
-pub(super) fn moved(t: Transform, p: Point) -> Event {
+pub(crate) fn moved(t: Transform, p: Point) -> Event {
     let p = t.to_screen(p);
     Event::PointerMoved(egui::pos2(p[0] as f32, p[1] as f32))
 }
-pub(super) fn frame(
+pub(crate) fn frame(
     ctx: &egui::Context,
     canvas: &mut Canvas,
     surface: Surface,
@@ -74,7 +74,7 @@ pub(super) fn click(
         true,
     );
 }
-pub(super) fn t() -> Transform {
+pub(crate) fn t() -> Transform {
     Transform {
         origin: [0.; 2],
         center: [0.; 2],
@@ -90,7 +90,7 @@ pub(super) fn stroke(c: &mut Canvas, s: Surface, a: Point, b: Point) -> Uuid {
     assert!(c.drawing.add(stroke));
     id
 }
-pub(super) fn setup(kind: DocumentKind) -> (Canvas, Surface) {
+pub(crate) fn setup(kind: DocumentKind) -> (Canvas, Surface) {
     let data = DocumentData::blank(kind);
     let s = if kind == DocumentKind::Page {
         Surface::Page(0)

@@ -534,3 +534,103 @@ near-reversal bevels and a corridor mesh regression were added, then the rebuilt
 package was rechecked. Toolbar wrapping reserves extra clearance for Routing.
 Analytical direction transforms preserve normals independently of far-origin
 translation. Final checks and screenshots are recorded in TEST_PLAN.
+
+## 2026-11-08 — Standalone editable text boxes (#26 slice)
+
+Confirmed advanced routing PR #41 merged, then created feature/editable-text-boxes
+from main 58a80ad. Read complete #26 and #24 with empty comments. #26's embedded
+shape-text dependency is not implemented, and user scope excludes that host; this
+PR references #26 without claiming all broader acceptance criteria.
+
+Added TextObject to the shared canonical store/protocol/history/clipboard; portable
+TextContent/TextStyle, bundled fonts, reusable layout/editor APIs and a top T tool.
+Implemented immediate caret creation, double-click editing, natural width reflow,
+formatting, shared selection/transforms, readable flips, typed/source clipboard
+routing and bounded history. Raw text/style Arcs remain shared during transforms.
+
+Tests cover source/Unicode/IME, normalized zoom/DPI metrics, font fallback, styles,
+wrap/reflow, selection, copy/duplicate/history, focus, menu routing, cache reuse,
+page overflow, mixed offscreen dragging and source preservation. Browser review
+caught initial focus handoff and independent screen-font wrapping defects; both
+received fixes and focused regressions. See TEST_PLAN for performed checks and
+actual visual evidence. Native OS IME/hardware coverage remains unverified.
+
+No shape text, labels, sticky notes, rich spans, PDF persistence, sidecars or
+unrelated Explorer/tab redesign. Fonts are compiled resources with licenses.
+
+## 2026-11-10 — Rich text upgrade on open text-box PR #42
+
+Confirmed feature/editable-text-boxes and PR #42 are still open and continued that
+branch. Read actual #26 and its shape-host/platform acceptance criteria; reference
+it without closing it. The existing egui engine supports a semantic TextBuffer and
+mixed LayoutJob sections, so no replacement editor or unfocused-only rich rendering
+was needed. Added grapheme-safe character runs, paragraph metadata, a transient
+caret typing style, mixed controls and rich session paste. Full semantic edits use
+the shared journal; the plain-string framework undoer is cleared.
+
+Fontdb catalogs native families and lazily resolves/caches faces through a shared
+font provider for display/normalized metrics. WASM retains bundled fonts; the
+experimental permission-gated Local Font Access API is documented, not implemented.
+A reversible font session retains source/range, previews without writes, and commits
+one operation. A virtual font list renders only visible family-name previews.
+Eight local resize handles reuse captured source/pointer/view/revision ownership.
+Reflow preserves glyph sizes; corner Scale preserves aspect and mixed proportions.
+Per-box and persisted new-box defaults remain independent. Text/Block/Box controls
+separate character, paragraph and container patches; borders reuse shape rendering.
+
+Actual browser testing reproduced an existing egui lock failure when clicking
+outside active text: a nested layer query ran inside an input read. Added a real
+canvas/widget regression, moved the query outside that lock, rebuilt and verified
+selected-word formatting. Also tested focus-preserving controls, immediate typing
+style handoff, preview cancel/commit, Unicode/rich clipboard, padding-cache reflow,
+future resize defaults and rotated eight-handle sessions across four zoom levels.
+See TEST_PLAN for final executed checks and GUI evidence/limits. No shape-contained
+text, labels, PDF serialization or unrelated tools were introduced.
+
+Final review also covered rich replacement into an empty box: the first copied
+paragraph now retains its alignment, with the multi-paragraph paste regression
+extended to include this case. Partial insertion keeps destination block styling.
+
+The same final regression pass checks that Block controls display the caret's
+paragraph (including non-first-paragraph spacing), and replacement typing inherits
+the first selected character's style.
+
+
+## 2026-11-10 — Text/Paragraph correction and persistent text selection (PR #42)
+
+Continued the existing open feature/editable-text-boxes branch/PR. The user clarified
+that Box was a misunderstanding of Justify. Removed the Box UI, decorative model,
+shape proxy/renderer, padding and opacity handling. TextLayout now owns resize only;
+legacy clipboard/session objects keep source, styles, ID, geometry and resize through
+a compatibility reader that discards known decorations. Both layouts still have
+invisible bounds, selection outlines, eight grips and Reflow/Scale defaults/overrides.
+
+Renamed Block to Paragraph, added Justify and isolated paragraph patches from all
+character styles. Canonical word-gap expansion justifies eligible wrapped rows
+without letter stretching; final/single-word rows and explicit paragraph breaks
+remain natural. Scaled glyphs, underlines, caret positions and selection use the
+same geometry and update after width changes.
+
+Reproduced egui's collapse of its unfocused selection cache in full Canvas tests.
+The session retains the single exact directional range; the adapter synchronizes
+and rehydrates widget state, disables editor input during controls and paints an
+inactive selection. Font preview keys cannot move the caret; preview range comes
+from that same suspended session. Font/size/bold/color and paragraph/spacing controls
+can be chained without reselecting. See TEST_PLAN for checks and GUI evidence.
+
+Verification: 240 active tests, formatting, Clippy with warnings denied, native
+release/startup, WASM check and isolated Trunk release pass. Packaged Firefox
+verified the no-reselection formatting chain on new and double-clicked existing
+text, all four alignments, natural final lines, justified left-edge reflow and
+undo/redo. New captures are in screenshots/text-formatting-correction. Native
+physical IME/clipboard and full RTL remain explicit verification/engine limits.
+
+## Mixed font-size scaling correction — 2026-11-10
+
+The selected-object −/+ controls now scale every run's stored font size by
+reciprocal 0.9/1.1 factors for text-only selections; other selections retain
+geometric scaling. Character properties, paragraph styles, object identity and
+placement are preserved. Mixed-size Text controls display `Mixed` without a
+representative-value slider, and panel initialization adds no history operation.
+Regression tests cover proportional/reciprocal scaling, mixed-state UI rendering,
+panel read-only behavior, and one-step undo/redo.

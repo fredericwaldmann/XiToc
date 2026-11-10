@@ -14,9 +14,9 @@ fn mixed<T: PartialEq>(ui: &mut egui::Ui, shapes: &[Shape], value: impl Fn(&Shap
     ui.weak(if mixed {
         "Mixed values"
     } else {
-        "Selected shapes"
+        "Selected objects"
     })
-    .on_hover_text("Changes apply to all compatible selected shapes.");
+    .on_hover_text("Changes apply to all compatible selected objects.");
 }
 pub(crate) fn menu(ui: &mut egui::Ui, name: &str, content: impl FnOnce(&mut egui::Ui)) {
     let config = egui::containers::menu::MenuConfig::new()
@@ -50,7 +50,7 @@ fn opacity(
     changed(edits, r, patch((percent * 255. / 100.).round() as u8));
 }
 /// Inline picker: nested root popups close the parent formatting menu in egui.
-fn color_control(ui: &mut egui::Ui, rgb: &mut [u8; 3], alpha: u8) -> Option<egui::Id> {
+pub(crate) fn color_control(ui: &mut egui::Ui, rgb: &mut [u8; 3], alpha: u8) -> Option<egui::Id> {
     let original = *rgb;
     let toggle = ui.make_persistent_id("color-expanded");
     let mut open = ui.data(|d| d.get_temp::<bool>(toggle).unwrap_or(false));

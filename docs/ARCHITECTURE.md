@@ -499,8 +499,8 @@ the page is rejected without history mutation, with a visible explanation.
 Only affected placements/caches change; the shared spatial index rebuilds lazily
 on its revision key, as for movement/rotation. No new rendering engine is needed.
 
-Future text uses geometric mirroring, including glyphs, rather than silently
-keeping text readable. Future groups must transform descendants exactly once;
+Text boxes now reflect their box centers while preserving readable glyphs, as
+documented in the editable-text section below. Future groups must transform descendants exactly once;
 connectors keep stable target IDs/local anchors resolved through reflected
 Placement, with relation-aware routing/free-endpoint updates in the same command.
 These are extension policies, not implemented content types. M2 must serialize
@@ -551,7 +551,8 @@ Future styling edits can replace Shape snapshots in the same journal. Future
 connectors must add stable endpoint relationships and a perimeter-anchor/routing
 adapter; current lines/arrows contain no attachment IDs or routing state. Groups,
 text, resources and PDF graphics/embedded-data round trips remain separate work.
-The defaulted positive-scale reflection contract and mirrored-text policy remain.
+The defaulted positive-scale reflection contract remains; editable text uses the
+readable-glyph reflection policy documented below.
 
 
 ### Persistent drag ownership and visual clipping
@@ -695,3 +696,100 @@ commit, Escape/focus cancellation and viewport-independent pointer tracking.
 Future obstacle avoidance can extend the routing boundary without changing target
 references, clipboard remapping or history. No text labels (excluded by #25),
 PDF persistence, sidecars or unrelated canvas architecture changes.
+
+## Editable rich text (#26, M1.7)
+
+TextObject is the fourth canonical CanvasObject variant. Stable IDs, surface,
+Placement, ordered snapshots, selection, clipboard and Replace/Erase history use
+the same store as ink, shapes and connectors. TextContent/TextStyle are portable
+serde types independent of widgets, filesystem, font handles and their host.
+TextContent stores UTF-8 source, a fallback/typing-default style, sorted formatting
+runs with Unicode scalar ranges, and paragraph styles. Each run independently
+captures family, size, bold, italic, underline and RGBA. Adjacent equal runs merge;
+range operations expand to extended grapheme boundaries. Insert/delete/replace
+update runs and paragraph membership together. Full rich replacements adopt the
+clipboard’s first paragraph style; partial insertions retain the destination
+paragraph. Inserting a combining character
+inherits its resulting grapheme's first character style. Limits remain 64 KiB.
+
+The reusable text_layout editor supplies a custom egui TextBuffer. Its semantic
+operations update runs before egui requests mixed-style layout, including during
+IME composition; editing never switches to a plain-text presentation. egui retains
+caret/navigation/selection/IME responsibilities. Preedit stays transient. Canonical
+edits and formatting use the shared rich object journal with bounded typing
+coalescing; the framework's string-only undo history is cleared. Active keyboard
+and menu undo/redo restore full content/paragraph/layout snapshots.
+
+The TextSession CCursorRange is the sole editing selection owner, retaining both
+endpoints, direction and row affinity. Widget state is synchronized before editing;
+unfocused egui cursor collapse is discarded by rehydrating that cache afterward.
+Popup/browser interaction disables editor input and paints the retained range with
+the same mixed-style galley as an inactive selection. Focus returns after controls
+close; only actual editor input updates the session selection. FontBrowser freezes
+sources but derives its range from that same suspended session, without a second
+selection snapshot. Preview keys cannot reach TextEdit.
+
+Character controls operate on the retained selection, snapping outward to grapheme
+boundaries; an empty selection updates transient typing style only. Property
+patches leave all unrelated run attributes intact. Controls expose mixed family,
+size, bold, italic, underline and color. Paragraph controls target paragraphs
+intersecting the selection (or caret paragraph); newline insertion inherits the
+paragraph's alignment/line spacing/spacing. Standalone text has only TextLayout
+resize metadata and invisible width/height bounds. Decorative background/border/
+padding/radius/opacity data is no longer modeled or rendered; its legacy reader
+retains text/IDs/geometry/resize and consumes known old styling fields. The writer
+emits only layout.resize. Future Shape + Text owns shape styling separately.
+
+Bundled DejaVu Sans/Mono (four faces), Droid CJK and egui fallback fonts remain.
+Native text_fonts uses fontdb's platform font discovery (Linux fontconfig and
+system/user directories, Windows/macOS supported discovery directories). Catalog
+names are deduplicated. Font providers query family/weight/slant on demand, cache
+shared face bytes/index, and retain bundled fallback chains. Display and normalized
+metrics use the same providers; arrow previews never reset the font atlas.
+WASM intentionally lists bundled families. Local Font Access/queryLocalFonts is
+experimental, permission/policy/secure-context dependent, and unavailable in many
+browsers; no local-font enumeration bridge is implemented or implied. A missing
+native family falls back while retaining its semantic name. Font embedding and
+embedding-license handling remain required before M2 PDF export.
+
+A font-browser session freezes source objects and the selection. Navigation builds
+transient previews, never canonical replacements. Escape/Cancel discard previews;
+Enter/mouse selection writes at most one rich journal operation. Arrow keys belong
+to the browser. Filtering, virtual scrolling and visible-row font-name previews
+avoid loading the entire catalog into the atlas. XiToc-to-XiToc text copy/paste
+retains runs/paragraphs in a session clipboard alongside normal plain text; external
+clipboard formats currently enter as plain text. Whole-object clipboard retains
+all semantic content. No HTML/RTF clipboard interoperability is claimed.
+
+Unhinted unit-DPI metrics establish canonical paragraph wraps and row positions;
+actual-size font raster rows map to those glyph/caret positions at 50–400% and
+across DPI changes. Paragraph alignment and spacing share those metrics. Justify
+expands only breakable word-gap advances on non-final wrapped rows and shifts
+following glyphs, preserving all letter advances. It skips single-word rows and
+paragraph endings; explicit newlines terminate paragraphs. Unspaced scripts retain
+natural spacing. Full bidirectional/RTL layout remains an egui engine limitation.
+The screen raster/decoration mapping, caret and hit-testing all
+consume this geometry. This deliberately avoids egui's default justification,
+which can also distribute space between letters. Width changes reflow and justify
+again. Paragraph patches never alter inline formatting. All eight
+local handles use frozen source, original pointer displacement, view/revision,
+viewport-independent ownership and one release transaction. Reflow changes wrap
+width/container height without changing type size; content establishes minimum
+height/width instead of losing text. Scale corners project onto the original
+diagonal, preserve aspect ratio and uniformly scale mixed sizes within supported
+limits. Edges always reflow. Opposite anchors are restored after layout fitting.
+Settings → Text initializes future boxes; each existing box owns its own mode.
+Group transforms still share immutable content and use uniform Placement scale.
+
+Rotated boxes render rotated and resize in their local coordinates; editing uses
+the existing explicitly labeled unrotated overlay. Reflections relocate the
+center while retaining readable glyphs. Page fitting preserves source even when
+the page clips the footprint; editing scrolls long content. Geometry beyond page
+limits remains subject to the existing page constraints.
+
+The same TextContent, ranges, paragraphs, font service and layout/editor APIs can
+host future shape text, sticky notes, connector/formula labels. None of those
+hosts is introduced. There is no PDF/schema/save change: editing remains memory
+only, dirty export stays blocked, and future PDFs must embed matching font assets,
+visible graphics and XiToc/document.json in one file. #26 stays open for its broader
+shape-text/platform verification requirements.

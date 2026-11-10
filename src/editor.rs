@@ -86,7 +86,8 @@ impl Editor {
                 self.navigate([0.0; 2], ui.input(|i| i.zoom_delta()) as f64, [0.0; 2]);
             }
         }
-        let pan = self.canvas.tool == Tool::Pan || ui.input(|i| i.key_down(egui::Key::Space));
+        let pan = self.canvas.tool == Tool::Pan
+            || (!self.canvas.text_editing() && ui.input(|i| i.key_down(egui::Key::Space)));
         egui::ScrollArea::both()
             .scroll_source(egui::scroll_area::ScrollSource {
                 drag: if pan {
@@ -184,7 +185,8 @@ impl Editor {
                         && ((button == egui::PointerButton::Middle && self.middle_button_pan)
                             || (button == egui::PointerButton::Primary
                                 && (self.canvas.tool == Tool::Pan
-                                    || ui.input(|i| i.key_down(egui::Key::Space))))) =>
+                                    || (!self.canvas.text_editing()
+                                        && ui.input(|i| i.key_down(egui::Key::Space)))))) =>
                     {
                         self.pan = Some((button, pos));
                     }

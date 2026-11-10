@@ -20,6 +20,11 @@ mod shape_style_tests;
 mod smoothing;
 mod storage;
 mod stroke_pattern;
+mod text;
+mod text_fonts;
+mod text_layout;
+#[cfg(test)]
+mod text_tests;
 mod ui;
 #[cfg(target_arch = "wasm32")]
 mod web_pressure;
@@ -34,7 +39,10 @@ fn main() -> eframe::Result {
                 .with_min_inner_size([480.0, 360.0]),
             ..Default::default()
         },
-        Box::new(|cc| Ok(Box::new(app::XiTocApp::new(cc.storage)))),
+        Box::new(|cc| {
+            text_layout::install(&cc.egui_ctx);
+            Ok(Box::new(app::XiTocApp::new(cc.storage)))
+        }),
     )
 }
 
@@ -54,6 +62,7 @@ fn main() {
                 canvas,
                 eframe::WebOptions::default(),
                 Box::new(|cc| {
+                    text_layout::install(&cc.egui_ctx);
                     web_pressure::install(cc.egui_ctx.clone());
                     Ok(Box::new(app::XiTocApp::new(cc.storage)))
                 }),

@@ -7,6 +7,7 @@ use egui::{Color32, Pos2, Rect, Stroke, StrokeKind, Vec2};
 pub enum Icon {
     Select,
     Shapes,
+    Text,
     Lasso,
     Duplicate,
     Delete,
@@ -42,6 +43,11 @@ pub fn paint(painter: &egui::Painter, center: Pos2, icon: Icon, color: Color32) 
     let point = |x: f32, y: f32| center + egui::vec2(x, y);
     let line = |a, b| painter.line_segment([a, b], stroke);
     match icon {
+        Icon::Text => {
+            line(point(-5., -6.), point(5., -6.));
+            line(point(0., -6.), point(0., 6.));
+            line(point(-3., 6.), point(3., 6.));
+        }
         Icon::Shapes => shape(painter, center, crate::shape::ShapeKind::Rectangle, color),
         Icon::Duplicate => {
             painter.rect_stroke(

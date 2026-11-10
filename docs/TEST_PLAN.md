@@ -1258,3 +1258,222 @@ Inspected captures: [orthogonal edit](screenshots/advanced-connectors/orthogonal
 [corrected 400% group move](screenshots/advanced-connectors/zoom400.png),
 [Page Note curve](screenshots/advanced-connectors/page-curve.png),
 [dark Page Note](screenshots/advanced-connectors/page-dark.png).
+
+
+## Editable text boxes — 2026-11-08
+
+Preparation confirmed advanced routing PR #41 merged into main at 58a80ad.
+Issue #26 has no comments and includes a shared shape-text dependency (#24);
+this slice implements standalone boxes and reusable text primitives, not embedded
+shape text, so it references #26 without closing it.
+
+Executed checks:
+
+- `cargo fmt --all -- --check`: passed.
+- `cargo clippy --all-targets -- -D warnings`: passed.
+- `cargo test --all-targets`: 216 passed, eight ignored performance tests.
+- `cargo test --release -- --ignored --nocapture`: all eight passed.
+- `cargo build --release`: passed; native application launched under an eight-second
+  smoke timeout without startup errors (timeout exit is expected).
+- `cargo check --target wasm32-unknown-unknown`: passed.
+- `trunk build --release`: passed.
+
+The 24 added tests cover semantic Unicode/style validation, clipboard preservation,
+shared immutable content, real TextEdit focus and IME events, source/page ownership,
+explicit newlines, wrapping/reflow, font faces, color/alpha/alignment, selection,
+rotation/readable flips, undo chunks, menu focus transfer, mixed offscreen dragging,
+50/100/200/400% views, monitor DPI independence and unchanged layout cache reuse.
+The existing ink, eraser, shapes, selection and advanced connector tests also pass.
+
+Actual Firefox GUI inspection used the packaged application, not a mock UI. Checked
+first-click typing, explicit Enter/newlines, Latin/Greek/CJK text, width reflow,
+24-point bold/italic/underline, custom hex blue, center alignment, double-click
+re-editing, text selection/plain-text copy versus object copy, paste menu and undo,
+object identity preservation, rotation, a mixed text/two-shape/connector drag and
+undo, 400% rendering/rapid dragging, Page Notes, light/dark themes and a 480px layout.
+The final packaged build was separately checked for Page Note creation, immediate
+focus, multiline Unicode text, contextual formatting and responsive layout.
+Screenshots are in [screenshots/text-boxes](screenshots/text-boxes).
+
+Browser clipboard commands were intercepted by the test harness to observe copied
+content and exercise the in-app text fallback; this does not verify OS clipboard
+permissions or interoperability with every browser. Native OS IME composition,
+physical keyboard/clipboard integration and Windows/macOS interactive behavior
+remain manual verification items. egui IME events are covered in controller tests.
+Rotated text edits in a labeled upright overlay and returns to its stored rotation.
+
+Manual reproduction:
+
+1. Create a Page Note or Whiteboard. Choose T in the top toolbar, click the canvas,
+   and type immediately. Use Enter for explicit paragraphs; test café, Greek and CJK.
+2. Escape to select the object. Drag its right-edge width handle: words reflow
+   without stretching letters. Double-click to edit; drag inside to select text.
+3. Open Text in the contextual toolbar. Change family, size, bold/italic/underline,
+   color/hex, opacity and alignment. Check undo/redo and mixed text formatting.
+4. While editing, use Ctrl/Cmd+A/C/X/V and arrow/delete keys. Escape, then use the
+   same copy/paste shortcuts to duplicate whole objects with new IDs.
+5. Rotate and flip the box; glyphs remain readable on flips. Select it together
+   with shapes/connectors, drag rapidly and partly offscreen, undo and redo.
+6. Repeat at 50%, 100%, 200%, 400%, after panning and on both document types.
+   Verify existing connector routes, pen and erasers still work.
+
+Text remains editable in memory. PDF saving/reopening editable content is outside
+this milestone and must not be inferred from the document’s .pdf filename.
+
+## Rich text upgrade — 2026-11-10, continued PR #42 (historical)
+
+This records the prior decorative Box iteration. The Text/Paragraph correction
+below supersedes its styling UI and manual steps; those features are removed.
+
+Regression coverage extends the existing 216 active tests with 15 tests (231
+active, eight separately runnable performance tests). Coverage includes mixed
+families/sizes, selected-word/property-only patches, grapheme/Unicode symbol
+formatting, insertion between runs, deletion across runs, rich session paste,
+paragraph/style preservation, shared rich undo, native catalog/missing fallback,
+preview navigation/cancel/single commit, all eight local handles with rotation at
+50/100/200/400%, stable release history, padding-layout invalidation, captured
+new-box defaults, and actual formatting-widget focus/typing behavior. Existing
+multi-object offscreen drag, connectors, routing, shapes, ink/eraser and layout
+regressions remain active. The eight release performance tests were explicitly
+run and passed (including cached group/shape movement).
+
+The packaged Firefox application was exercised through real pointer/keyboard
+input. Created a Whiteboard, typed “Hello beautiful world”, selected only
+“beautiful”, previewed Sans/Mono with Down, canceled with Escape, then confirmed
+Mono with Enter. Changed only that word to 32 pt and #D02A40 through numeric/hex
+controls; Hello/world retained their original family, size and color. Verified
+left/right-edge reflow, four corner gestures and undo, proportional corner Scale,
+paragraph alignment, background and border controls. Captures live under
+screenshots/rich-text/. This is actual application GUI observation, not just model
+or mocked widget testing. The initial freeze reproduction is covered by a failing-
+before/fixed-after real Canvas test.
+
+Manual repeat procedure:
+
+1. Create a Page Note or Whiteboard, use T, and type the example sentence.
+2. Select “beautiful”; Text → Font opens the browser. Use arrows/Escape, then
+   reopen and use arrows/Enter. Check that surrounding words remain unchanged.
+3. In Text enter a size and custom hex RGB, toggle bold/italic/underline, then
+   replace/insert text, copy/paste within XiToc, and undo/redo.
+4. With a caret only, choose a different style and type: existing letters stay
+   unchanged. Select mixed spans and verify mixed controls; change only color.
+5. Escape editing. Drag each of eight handles, then undo/redo. Rotate the box and
+   repeat. Check repeated positions, offscreen excursions and release ownership.
+6. Box → Reflow/Scale: corners in Scale keep aspect and mixed size proportions;
+   edges still reflow. In Settings → Text change the default, create another box,
+   and confirm existing boxes retain their mode.
+7. Use Block alignment/spacing and Box fill/opacity/border/pattern/radius/padding.
+   Re-edit and verify all source remains accessible after wrapping.
+8. Repeat at 50%, 100%, 200%, 400%, both layouts, light/dark and narrow windows;
+   include mixed groups containing ink, shapes and magnetic connectors.
+
+Limits: Windows/macOS native interactions, physical IME/tablet/clipboard hardware,
+and an exhaustive GUI matrix of every operation on every platform are unverified.
+Rotated text keeps its existing labeled unrotated editing overlay. Web fonts are
+bundled-only (no queryLocalFonts bridge); native discovery uses installed supported
+families with bundled fallback. XiToc session paste preserves rich data; external
+HTML/RTF clipboard formatting is not imported. All text remains memory-only until
+M2; no PDF round-trip or saved-rich-text claim is made.
+
+Final checks on the upgrade source:
+
+- `cargo fmt --all -- --check`: passed.
+- `cargo clippy --all-targets -- -D warnings`: passed.
+- `cargo test --all-targets`: 231 passed, eight ignored benchmarks.
+- `cargo test --release -- --ignored --nocapture`: all eight passed.
+- `cargo build --release`: passed; final binary startup ran under an eight-second
+  timeout with no startup errors (expected timeout exit 124).
+- `cargo check --target wasm32-unknown-unknown`: passed.
+- `trunk build --release`: passed. A terminated parent and overlapping output-lock
+  waits required collecting the completed child builds; an additional isolated
+  `trunk build --release --dist target/rich-dist` also passed.
+
+Firefox additionally verified actual 50/100/200/400% rendering and right-edge
+resize/undo, including a partly offscreen 400% box. The comprehensive eight-handle,
+rotation, both-layout and zoom matrix is automated; the GUI matrix is a subset.
+
+The final isolated release package was served separately and rechecked for
+first-click creation, retained selected-word formatting, virtual font-name preview,
+arrow preview and Enter commit. The final preview/commit captures are included.
+
+
+## Text/Paragraph correction — 2026-11-10, PR #42
+
+Executed final checks:
+
+- `cargo fmt --all -- --check`: passed.
+- `cargo clippy --all-targets -- -D warnings`: passed.
+- `cargo test --all-targets`: 240 passed, eight ignored performance benchmarks.
+- `cargo build --release`: passed. Native release startup ran without errors under
+  an eight-second smoke timeout (expected exit 124); native interactive input was
+  not verified.
+- `cargo check --target wasm32-unknown-unknown`: passed.
+- `trunk build --release --dist target/format-dist`: passed.
+
+New tests cover Left/Center/Right/Justify, word-gap geometry without letter
+stretching, natural final/single-word rows, explicit breaks, Unicode, mixed fonts
+and sizes, reflow at several widths, caret positions and gap hit-testing at
+50/100/200/400%, single/multi-paragraph scope, exact inline-style preservation,
+undo/redo and legacy decorated-object import without decoration output.
+Full Canvas/widget tests preserve range endpoints and direction through font
+opening, previews, cancel/commit, font size, bold/italic/underline, color entry,
+Text/Paragraph switching, numeric line spacing and Unicode grapheme selection.
+They inspect the actual selection backgrounds in rendered text meshes, prevent
+preview keyboard input from moving the caret, and assert absence of Box controls.
+Existing eight-handle rotated/zoomed Reflow/Scale, mixed-object drag, shape styling,
+connector/routing, ink/eraser, clipboard and both-layout regressions also pass.
+
+Actual GUI verification used the packaged Firefox application with real pointer
+and keyboard input. Created “Hello beautiful world”, selected “beautiful” once,
+previewed fonts with Down/Escape, then confirmed a font with Enter. Without
+reselecting, entered 32 pt, applied bold and #D02A40. The word stayed highlighted;
+Hello/world retained their styles. Repeated the sequence after double-clicking an
+existing object (font change, 30 pt, bold toggle and #154DB0) with the same result.
+Verified the UI contains Text and Paragraph only and has no decorative container.
+
+Created a separate multi-line paragraph with an explicit final paragraph. Applied
+Left, Center, Right and Justify, observing actual row changes. Justified eligible
+rows reached both margins; the last line and separate final paragraph stayed
+natural and left-aligned. Dragged the left grip outward: the left edge moved,
+the right stayed anchored, and wrapping/justification updated. Actual undo/redo
+restored alignment and width. Evidence: [screenshots/text-formatting-correction](screenshots/text-formatting-correction/).
+
+Manual repeat:
+
+1. Use T to create “Hello beautiful world”, finish, and double-click to edit.
+2. Select only “beautiful”. Open Text → Font, navigate with arrows and cancel
+   with Escape; reopen, navigate and confirm with Enter. Keep the word selected.
+3. Without reselecting, change numeric size, bold/italic/underline and hex color.
+   Confirm the exact same range stays highlighted and surrounding words keep their
+   original properties. Switch between Text and Paragraph and change line spacing.
+4. With a caret only, change a font property and type: existing characters stay
+   unchanged. Paragraph alignment affects the caret paragraph. With a multi-line
+   selection, alignment/spacing affect all intersecting paragraphs only.
+5. Type enough words to wrap and a separate paragraph using Enter. Apply each
+   alignment. Justify expands word gaps on eligible rows; paragraph-final and
+   single-word rows retain natural spacing. Resize from the left and undo/redo.
+6. Check all eight grips, rotation, zoom and Paragraph → Reflow/Scale. Edges reflow;
+   Scale corners preserve aspect and mixed-size proportions. Settings → Text still
+   sets future defaults. Inspect shapes separately: their styling is unchanged.
+
+Limits: unspaced scripts retain natural spacing; full RTL/bidirectional layout
+remains an egui limitation. Web fonts remain bundled-only and external HTML/RTF
+paste remains plain text. Native Windows/macOS hardware/IME interactions and an
+exhaustive GUI matrix of every tool/theme/device are unverified. Rotated text
+retains its labeled unrotated editing overlay. Editable text is still memory-only;
+no PDF persistence, Shape + Text or label host was implemented.
+
+## Mixed font-size scaling correction — 2026-11-10
+
+Automated checks: `proportional_font_scaling_preserves_runs_and_reciprocal_sizes`
+and `text_tab_is_read_only_for_mixed_sizes_and_selection_toolbar_scales_runs`.
+They cover 12/18/30 pt independent runs, proportional + and reciprocal − without
+geometric scaling, mixed-size panel initialization without document/history writes,
+and undo/redo. Run with `cargo test --all-targets`.
+
+Manual check: create one text object with 12 pt, 18 pt and 30 pt runs. Select the
+object and press + then −; verify all sizes return to their originals and the box
+geometry does not change. Open Text and Paragraph repeatedly; verify the size
+control says `Mixed`, all sizes stay unchanged, and history is unchanged. Select
+only the middle run, enter a size, verify the other two runs are unchanged, then
+undo and redo.

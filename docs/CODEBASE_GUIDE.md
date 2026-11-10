@@ -16,7 +16,7 @@ move/proportional resize, clipboard operations and undo/redo are implemented.
 Rotation has a live group handle and 15-degree Shift snapping; explicit z-order
 changes remain domain APIs without Arrange controls. Cut and arrow-key nudges are
 implemented alongside the existing clipboard and manipulation commands.
-Stroke, Shape and Connector are implemented canvas-object content types. Shapes include
+Stroke, Shape, Connector and Text are implemented canvas-object content types. Shapes include
 rectangle, rounded rectangle, circle, ellipse, triangle, diamond, line and arrow.
 Selected shapes support contextual fill/border/opacity/pattern/radius/arrowhead
 formatting, mixed-selection batch changes and separate persistent creation defaults.
@@ -24,7 +24,7 @@ formatting, mixed-selection batch changes and separate persistent creation defau
 The PDF codec creates and reopens **blank** native documents. It does not save or
 reload handwriting. Dirty drawing disables browser PDF export; Ctrl/Cmd+S explains
 the M2 limitation. Ordinary PDFs open as read-only with no PDF preview renderer.
-Text, sticky notes, formulas, images, multipage creation,
+Sticky notes, formulas, images, multipage creation,
 browser directory handles, ink autosave and crash recovery remain planned.
 
 ## Crate and module map
@@ -446,8 +446,8 @@ Right-clicking empty canvas preserves membership/content. eframe 0.37's canvas-o
 or new drawing toolbar is introduced. Flip failures leave history/content intact
 and report page/coordinate limits; only affected cached objects are invalidated.
 
-Future text follows geometric mirroring, including glyph appearance (no implicit
-readable-text counter-transform). Future groups must apply the world delta once
+Implemented text instead uses readable-glyph reflection; see the text section
+below for the documented center/orientation policy. Future groups must apply the world delta once
 to each descendant; connector endpoints retain object IDs/local anchors and derive
 world positions via Placement. Routing/free endpoints and relation-aware group
 journals need future adapters; no such object types are currently implemented.
@@ -526,7 +526,7 @@ is included by the private selection adapter via `#[path]`; it is not a second
 editor implementation. Tests assert cache Arc reuse, index pruning, exact history,
 legacy decoding, clip geometry, ownership, layout/focus and discard behavior.
 
-The current source has 200 Rust tests: 192 normally run and eight ignored
+The current source has 224 Rust tests: 216 normally run and eight ignored
 release benchmarks (whole erase, partial document, partial geometry, smoothing,
 indexed lasso, rectangle selection, multi-stroke rotation preview, and multi-shape movement preview). Historical recorded results are in TEST_PLAN, not proof of hardware
 latency or a fresh run of every platform. [scripts/test_release.py](../scripts/test_release.py)
@@ -789,3 +789,74 @@ frame. Hit testing, rectangle/lasso and bounds consume the same derived paths.
 Full obstacle avoidance can later replace the bounded corridor generator while
 retaining endpoint/route/manual/style semantics. Labels are explicitly excluded
 by #25; the future text-object milestone is not pulled into routing.
+
+## Editable text boxes (#26 standalone slice)
+
+`text.rs` owns reusable TextContent/TextStyle/FormatRun/ParagraphStyle and the
+TextObject host. UTF-8 source uses Unicode scalar ranges matching egui; operations
+snap to extended grapheme boundaries with unicode-segmentation. Sorted runs capture
+independent family/size/bold/italic/underline/RGBA, preserve unrelated properties,
+merge equal neighbors, and update on insert/delete/rich paste. Paragraph metadata
+survives newline edits. TextLayout contains only Reflow/Scale behavior; width and
+height remain invisible wrapping/manipulation bounds. Its compatibility reader
+accepts the former box_style field, retains resize, and consumes known decorative
+properties without painting or re-serializing them. Unknown layout fields fail.
+Stable IDs/Placement/surface and Arc content retain the shared object protocol.
+
+`text_layout.rs` builds mixed LayoutJob sections for display and the editable
+custom TextBuffer. The buffer mutates semantic runs before every re-layout; egui
+continues handling selection, caret, keyboard and IME. Normalized unit-DPI metrics
+and scaled raster glyph mapping keep paragraph wraps/caret coordinates stable.
+Paragraph alignment/spacing use document coordinates. Word-only justification
+expands breakable space advances and moves subsequent glyph positions on eligible
+wrapped rows. Last rows, single-word rows and unspaced scripts retain natural
+spacing. Scaled glyph meshes, decorations, caret positions and hit-testing consume
+the same canonical geometry; width changes recompute it. The host clears
+egui's string-only undoer and routes rich undo through the existing object journal.
+
+`text_fonts.rs` separates native fontdb discovery from portable family names.
+Native catalogs deduplicate installed family names; providers lazily query
+regular/bold/italic combinations, cache shared bytes and retain bundled glyph
+fallbacks. Both metric and display services share the provider/cache. WASM uses
+bundled Sans/Mono, CJK and emoji fallback, without system font enumeration or a
+queryLocalFonts permission bridge. Font assets/licenses remain under assets/fonts;
+M2 must embed/subset resources inside the canonical PDF before saved text is offered.
+
+`canvas_text.rs` adapts selection/typing state, rich clipboard, IME, formatting,
+font-browser previews and eight-handle resize sessions to Canvas. The session's
+CCursorRange is the single retained selection, including direction and row affinity.
+Before each edit pass the widget cursor is synchronized from it. Popup/browser
+interaction uses a noninteractive editor with an inactive selection highlight;
+egui's collapsed unfocused cursor cache is rehydrated afterward. Only genuine editor
+input can update the session range. Focus is deferred until popups close.
+Text controls patch the retained selected character range; no selection changes future typing
+style only. Paragraph controls patch only paragraph metadata, including Justify;
+they expose the individual resize mode as a layout choice. There is no decorative
+Box UI/model/renderer; shape styling stays on shapes. Mixed attributes remain
+visible. Font browsing freezes sources and the session range, previews without writes,
+cancels exactly, and commits one operation. The virtual list loads visible font
+names only; keyboard arrows do not reach the editor/canvas while it is active.
+
+Local resize sessions freeze source/pointer/view/revision and survive hover loss;
+release commits once. Reflow keeps font sizes and expands to fit text. Scale corners
+preserve box aspect ratio and mixed-size proportions; edges reflow. Settings → Text
+is persisted separately from documents, captured by new boxes; per-box mode changes
+do not alter geometry. Group transformations continue sharing immutable content.
+Rotated text retains the labeled unrotated editing overlay. Page clipping/scroll
+and single-PDF save guards are preserved. XiToc session text paste retains rich
+runs; external clipboard data is currently plain text, not HTML/RTF.
+
+Tests in text_tests.rs and canvas_text.rs cover range/grapheme operations, mixed
+layout, native fonts/fallback, clipboard/history, real widgets/focus, preview
+transactions and rotated eight-handle resizing at 50–400%. Existing text_controller
+and mixed object regression suites remain active. Future shape text/labels/sticky
+notes reuse these primitives; those hosts and PDF serialization remain outside
+this feature. See ARCHITECTURE.md and TEST_PLAN.md for platform/manual limits.
+
+For text-only selections, the contextual −/+ buttons scale `TextContent.style.size`
+and every `FormatRun.style.size` by reciprocal 0.9/1.1 factors. They do not change
+`Placement.scale`, object identity or other character/paragraph properties, and
+each action is one journal operation. Other selections keep geometric scaling.
+Mixed-size Text controls display an explicit `Mixed` entry without a representative
+font-size slider; entering a valid numeric size is an explicit uniform-size edit.
+Opening or switching formatting menus is read-only and does not add history.

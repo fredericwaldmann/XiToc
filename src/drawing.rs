@@ -419,6 +419,11 @@ impl Drawing {
     }
     pub fn valid_object(&self, object: &ObjectSnapshot) -> bool {
         match object {
+            ObjectSnapshot::Text(t) => {
+                t.valid()
+                    && t.document_id == self.owner
+                    && t.corners().iter().all(|p| self.contains(t.surface, *p))
+            }
             ObjectSnapshot::Connector(c) => self.valid_connector(c, |id| self.snapshot(id)),
             ObjectSnapshot::Stroke(s) => self.valid_stroke(s),
             ObjectSnapshot::Shape(s) => {
@@ -849,6 +854,88 @@ impl Drawing {
             self.execute(Command::Replace { before, after });
         }
         true
+    }
+    /// Canonical text changes share the object journal. Merge only the same
+    /// immediately preceding results; callers bound typing/slider sessions.
+    pub fn replace_texts(&mut self, texts: Vec<crate::text::TextObject>, merge: bool) -> bool {
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut next = self.items.len();
+        for text in texts {
+            if !seen.insert(text.id) {
+                return false;
+            }
+            let object = ObjectSnapshot::from(text);
+            if !self.valid_object(&object) {
+                return false;
+            }
+            let index = if let Some(old) = self.snapshot(object.id()) {
+                let (ObjectSnapshot::Text(a), ObjectSnapshot::Text(b)) = (old, &object) else {
+                    return false;
+                };
+                if a.document_id != b.document_id || a.surface != b.surface {
+                    return false;
+                }
+                if old == &object {
+                    continue;
+                }
+                let i = self.object_slots[&object.id()];
+                before.push((i, old.clone()));
+                i
+            } else {
+                let i = next;
+                next += 1;
+                i
+            };
+            after.push((index, object));
+        }
+        if after.is_empty() {
+            return false;
+        }
+        before.sort_by_key(|(i, _)| *i);
+        after.sort_by_key(|(i, _)| *i);
+        let original = if merge && self.cursor == self.history.len() {
+            match self.history.last().map(|entry| &entry.command) {
+                Some(Command::Replace {
+                    before: original,
+                    after: previous,
+                }) if *previous == before => Some(original.clone()),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if let Some(original) = original {
+            self.history.pop();
+            self.cursor -= 1;
+            self.execute(Command::Replace { before, after });
+            if let Command::Replace { before, .. } = &mut self.history.last_mut().unwrap().command {
+                *before = original;
+            }
+        } else {
+            self.execute(Command::Replace { before, after });
+        }
+        true
+    }
+    pub fn fit_text(&self, text: &mut crate::text::TextObject) {
+        if let Some(page) = self.bounds(text.surface) {
+            let origin = text.placement.apply([0.; 2]);
+            let edge = text.placement.apply([text.width, 0.]);
+            let up = text.placement.apply([0., 1.]);
+            let direction: [f64; 2] = std::array::from_fn(|i| up[i] - origin[i]);
+            let mut limit = text.height;
+            for base in [origin, edge] {
+                for axis in 0..2 {
+                    if direction[axis] > 1e-10 {
+                        limit = limit.min((page[axis] - base[axis]) / direction[axis]);
+                    } else if direction[axis] < -1e-10 {
+                        limit = limit.min(-base[axis] / direction[axis]);
+                    }
+                }
+            }
+            text.height = limit.max(1.);
+        }
     }
     pub fn replace_shape(&mut self, shape: crate::shape::Shape) -> bool {
         let Some(index) = self.items.iter().position(|o| o.id() == shape.id) else {
