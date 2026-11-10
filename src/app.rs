@@ -366,6 +366,7 @@ impl XiTocApp {
                             ui.label("PDF preview is not available yet. The original file is preserved and will not be rewritten.");
                         });
                     } else {
+                        opened.editor.canvas.text_resize_default = self.preferences.text_resize;
                         opened.editor.middle_button_pan = self.preferences.middle_button_pan;
                         opened.editor.show(ui, &opened.loaded.document.data);
                         if let Some(notice)=opened.editor.canvas.notice.take(){self.status=notice;}

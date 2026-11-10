@@ -488,44 +488,42 @@ Routing and shared style controls do not cover rotation handles.
 Popover placement includes route-control positions outside the curve envelope,
 so an off-curve Bézier diamond remains clickable when viewport space permits.
 
-## Editable text boxes
+## Editable rich text boxes
 
-A vector T insertion button follows Shapes in the top drawing toolbar. Its space
-is reserved from the scrollable preset strip; Explorer/tabs/tool placement is
-unchanged. Click blank canvas to focus a default 240-point-wide, 18-point text box;
-drag horizontally to set width, with a transient outline. The tool returns to
-Selection with editing active. Empty drafts are discarded without a document edit.
-New Page text uses dark ink; Whiteboard defaults use the current contrasting text
-color. Captured object colors remain independent of theme/default changes.
+The T tool stays directly below document tabs in the TOP drawing toolbar. Click
+or width-drag creates and focuses a box. Escape finishes editing and preserves
+object selection; double-click re-enters the same object. Rotated boxes use the
+existing labeled unrotated editing overlay. Empty drafts are discarded.
 
-Double-click an existing box to edit. Caret, character selection, line breaks and
-Unicode use egui TextEdit. Dragging inside editing selects text; outside editing it
-moves the object through the same persistent object controller. Escape finishes
-editing and keeps object selection; clicking canvas outside also finishes. Space
-remains a text character while editing and does not start canvas panning. Rotated
-text shows an unrotated editing overlay with an explicit rotation-on-exit hint.
+Contextual/right-click formatting separates **Text | Block | Box**. Text shows
+family, directly editable numeric size with −/+, size slider, bold/italic/underline,
+shared RGB/HSV/hex color and independent text opacity. Controls preserve the retained
+character selection; a range patches only those characters, while a caret changes
+future typing style. Mixed family/size/color labels and indeterminate style toggles
+communicate mixed attributes. Property changes preserve unrelated run formatting.
+Block controls expose Left/Center/Right, line spacing and paragraph spacing for
+selected/caret paragraphs. Box exposes shared Fill/Border/Width/Style/Radius
+controls, padding, container opacity and Reflow/Scale. Fill and text color are
+independent; no drawing toolbar is moved or added at the bottom.
 
-A selected singleton has a small right-edge width grip, distinct from group resize
-corners. Width reflows natural glyphs; height auto-fits. A wide glyph sets a minimum
-fit width. Group scaling is uniform, explicit rotation rotates text, and flips
-relocate boxes while keeping glyphs readable. Page geometry clips overflow without
-discarding source; the editor scrolls long text.
+The searchable Font browser highlights the current family. Up/Down preview the
+highlighted font on the frozen text range without closing; Enter or a mouse choice
+confirms one undoable change; Escape/Cancel restores the original. Selection and
+caret stay fixed; font arrows do not move text or objects. Its scrollable virtual
+list renders visible family names in their own font, loading resources as needed.
+Native lists installed supported families. Web lists bundled families and states
+the limitation; no unrestricted browser font enumeration is implied.
 
-The existing contextual toolbar and right-click Format expose Text: Sans/Mono,
-font size (4–128 pt controls), Bold, Italic, Underline, inline custom RGB/HSV/hex
-color, separate opacity, and Left/Center/Right alignment. The entire box uses one
-style. Mixed-property changes affect selected text boxes only; fixed header slots
-keep continuous sliders stable. Menus retain object membership and text selection.
-Existing shape and connector controls remain available for compatible selections.
+Object mode displays eight local corner/edge grips. Each uses the original drag
+snapshot and pointer offset at every zoom and after rotation. Reflow (default)
+changes container dimensions/wrapping without stretching glyphs or changing sizes;
+the container grows to retain text. Scale corners preserve aspect ratio and scale
+all inline sizes proportionally. Edge grips always reflow. Settings → Text →
+Default Text Box Resize Behavior initializes future boxes; Box allows an individual
+mode override. Changing either mode does not itself resize existing content.
 
-Editing shortcuts operate on text (A/C/V/X, arrows, Backspace/Delete, Undo/Redo).
-Object mode retains the same shortcuts for whole objects and nudges. Edit-menu
-commands and toolbar Undo/Redo follow the active editor. Browser keyboard paste
-uses eframe's DOM bridge; menu paste can use text copied in XiToc, otherwise it
-shows a keyboard-paste hint. No silent clipboard-read permission is implied.
-
-Fonts are bundled DejaVu Sans/Mono in four faces plus Droid CJK and egui emoji
-fallbacks; the browser does not require system fonts. Source/layout/caret positions
-remain document-based at 50/100/200/400% and DPI changes, while glyphs rasterize at
-the displayed size. Text remains memory-only until M2, with existing dirty/discard
-guards. Text inside shapes, sticky notes, labels and rich spans are not exposed.
+Text edits, range/paragraph/container formatting and completed resize gestures use
+the shared undo journal. Native/browser IME and clipboard continue through egui;
+XiToc session copies retain rich runs, while external text paste is plain text.
+Both layouts retain current dirty/discard protections and page overflow scrolling.
+PDF saving, text inside shapes, sticky notes, labels and formulas are not added.

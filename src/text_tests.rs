@@ -49,7 +49,7 @@ fn portable_faces_wrapping_explicit_breaks_and_reflow_preserve_source() {
         assert!(rows.rows.len() > 4);
         for family in [TextFamily::Sans, TextFamily::Monospace] {
             for (bold, italic) in [(false, false), (true, false), (false, true), (true, true)] {
-                t.content_mut().style.family = family;
+                t.content_mut().style.family = family.clone();
                 t.content_mut().style.bold = bold;
                 t.content_mut().style.italic = italic;
                 assert!(!text_layout::layout(ctx, &t.content, t.width).is_empty());
@@ -231,6 +231,8 @@ fn zoomed_layout_keeps_rows_alignment_and_explicit_breaks() {
             for alignment in [Alignment::Left, Alignment::Center, Alignment::Right] {
                 let content = TextContent {
                     text: "Words wrap at box width.\nAn explicit line break.\n中文 café".into(),
+                    runs: Vec::new(),
+                    paragraphs: Vec::new(),
                     style: TextStyle {
                         alignment,
                         ..Default::default()
@@ -295,4 +297,259 @@ fn a_box_never_clips_a_single_wide_glyph_when_resized() {
                 .all(|r| f64::from(r.size.x) <= t.width + 0.001)
         );
     });
+}
+
+#[test]
+fn rich_ranges_preserve_other_properties_and_outside_words() {
+    let mut c = TextContent {
+        text: "Hello beautiful world".into(),
+        ..Default::default()
+    };
+    c.format(
+        6..15,
+        &TextStylePatch {
+            family: Some(TextFamily::Monospace),
+            size: Some(42.),
+            rgb: Some([210, 30, 70]),
+            ..Default::default()
+        },
+    );
+    assert_eq!(c.style_at(0), &TextStyle::default());
+    assert_eq!(c.style_at(16), &TextStyle::default());
+    assert_eq!(c.style_at(8).family, TextFamily::Monospace);
+    assert_eq!(c.style_at(8).size, 42.);
+    c.format(
+        6..10,
+        &TextStylePatch {
+            bold: Some(true),
+            ..Default::default()
+        },
+    );
+    c.format(
+        0..21,
+        &TextStylePatch {
+            rgb: Some([0, 100, 0]),
+            ..Default::default()
+        },
+    );
+    assert!(c.style_at(8).bold);
+    assert!(!c.style_at(12).bold);
+    assert_eq!(c.style_at(8).size, 42.);
+    assert_eq!(c.style_at(18).size, 18.);
+    assert!(c.valid());
+    let copy: TextContent = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+    assert_eq!(c, copy);
+}
+#[test]
+fn rich_unicode_ranges_snap_to_whole_extended_graphemes() {
+    let mut c = TextContent {
+        text: "Ae\u{301}👩‍💻中Ω!".into(),
+        ..Default::default()
+    };
+    c.format(
+        2..3,
+        &TextStylePatch {
+            underline: Some(true),
+            ..Default::default()
+        },
+    );
+    assert!(c.style_at(1).underline && c.style_at(2).underline);
+    assert!(!c.style_at(0).underline && !c.style_at(3).underline);
+    c.format(
+        4..5,
+        &TextStylePatch {
+            size: Some(50.),
+            ..Default::default()
+        },
+    );
+    for i in 3..6 {
+        assert_eq!(c.style_at(i).size, 50.);
+    }
+    c.replace(4..5, &TextContent::default());
+    assert_eq!(c.text, "Ae\u{301}中Ω!");
+    assert!(c.valid());
+}
+#[test]
+fn insert_delete_and_rich_clipboard_keep_runs_and_paragraphs() {
+    let mut c = TextContent {
+        text: "leftRIGHT\nlast".into(),
+        ..Default::default()
+    };
+    c.format(
+        4..9,
+        &TextStylePatch {
+            bold: Some(true),
+            family: Some(TextFamily::Monospace),
+            ..Default::default()
+        },
+    );
+    c.format_paragraphs(10..14, |p| {
+        p.alignment = Alignment::Right;
+        p.spacing = 12.;
+    });
+    let pasted = c.slice(4..14);
+    c.replace(
+        4..4,
+        &TextContent {
+            text: "✨".into(),
+            style: TextStyle {
+                italic: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+    assert_eq!(c.text, "left✨RIGHT\nlast");
+    assert!(c.style_at(4).italic && c.style_at(5).bold && !c.style_at(3).bold);
+    c.replace(2..7, &TextContent::default());
+    assert_eq!(c.text, "leGHT\nlast");
+    assert_eq!(c.paragraph(1).alignment, Alignment::Right);
+    c.replace(c.text.chars().count()..c.text.chars().count(), &pasted);
+    assert!(c.text.ends_with("RIGHT\nlast"));
+    let n = c.text.chars().count();
+    assert!(c.style_at(n - 6).bold);
+    assert_eq!(c.paragraph(2).spacing, 12.);
+    assert!(c.valid());
+}
+#[test]
+fn eight_handles_anchor_rotated_boxes_and_scaling_preserves_mixed_sizes() {
+    let d = Drawing::new(&DocumentData::blank(DocumentKind::Whiteboard));
+    for rotation in [0., 0.7, -1.8] {
+        let mut t = text(&d, Surface::Canvas);
+        t.height = 100.;
+        t.placement.rotation = rotation;
+        t.placement.scale = 2.;
+        t.content_mut().format(
+            0..5,
+            &TextStylePatch {
+                size: Some(36.),
+                ..Default::default()
+            },
+        );
+        for (i, h) in TEXT_HANDLES.iter().enumerate() {
+            let start = t
+                .placement
+                .apply([t.width * h[0] + 1., t.height * h[1] + 2.]);
+            let target = t
+                .placement
+                .apply([t.width * h[0] + 11., t.height * h[1] + 12.]);
+            let resized = t.resized(i, start, target);
+            assert_ne!((resized.width, resized.height), (t.width, t.height));
+            let anchor = [
+                if h[0] == 0. { 1. } else { 0. },
+                if h[1] == 0. { 1. } else { 0. },
+            ];
+            let before = t
+                .placement
+                .apply([anchor[0] * t.width, anchor[1] * t.height]);
+            let after = resized
+                .placement
+                .apply([anchor[0] * resized.width, anchor[1] * resized.height]);
+            assert!((before[0] - after[0]).hypot(before[1] - after[1]) < 1e-8);
+            assert_eq!(resized.content, t.content);
+            let stationary = t.resized(i, start, start);
+            assert_eq!(stationary, t);
+        }
+        t.box_style.resize = ResizeBehavior::Scale;
+        let start = t.placement.apply([t.width, t.height]);
+        let target = t.placement.apply([t.width * 1.5, t.height * 1.5]);
+        let scaled = t.resized(3, start, target);
+        assert!((scaled.width / scaled.height - t.width / t.height).abs() < 1e-8);
+        assert_eq!(scaled.content.style_at(1).size, 54.);
+        assert_eq!(scaled.content.style_at(7).size, 27.);
+        assert_eq!(scaled.content.text, t.content.text);
+        let edge = t.resized(5, start, target);
+        assert_eq!(edge.content, t.content);
+    }
+}
+#[test]
+fn rich_layout_retains_fonts_sizes_paragraphs_and_caret_metrics_at_all_zooms() {
+    with_fonts(|ctx| {
+        let mut c = TextContent {
+            text: "Hello beautiful world\nCentered second paragraph\nRight".into(),
+            ..Default::default()
+        };
+        c.format(
+            6..15,
+            &TextStylePatch {
+                family: Some(TextFamily::Monospace),
+                size: Some(36.),
+                bold: Some(true),
+                ..Default::default()
+            },
+        );
+        c.format_paragraphs(22..47, |p| {
+            p.alignment = Alignment::Center;
+            p.line_spacing = 1.6;
+            p.spacing = 15.;
+        });
+        c.format_paragraphs(49..54, |p| p.alignment = Alignment::Right);
+        let logical = text_layout::layout(ctx, &c, 220.);
+        assert_eq!(logical.text(), c.text);
+        let job = text_layout::job(&c, 220.);
+        assert!(job.sections.iter().any(|s| s.format.font_id.size == 36.));
+        assert!(job.sections.iter().any(|s| s.format.font_id.size == 18.));
+        for zoom in [0.5, 1., 2., 4.] {
+            let screen = text_layout::layout_scaled(ctx, &c, 220., zoom);
+            assert_eq!(screen.rows.len(), logical.rows.len());
+            for (a, b) in screen.rows.iter().zip(&logical.rows) {
+                assert_eq!(a.text(), b.text());
+                assert!((a.pos.y - b.pos.y * zoom as f32).abs() < 0.01);
+                assert_eq!(a.glyphs.len(), b.glyphs.len());
+            }
+        }
+    });
+}
+#[test]
+fn installed_font_catalog_is_unique_and_missing_fonts_fall_back() {
+    let families = crate::text_fonts::families();
+    let mut names: Vec<_> = families.iter().map(|(n, _)| n.to_lowercase()).collect();
+    let count = names.len();
+    names.sort();
+    names.dedup();
+    assert_eq!(count, names.len());
+    #[cfg(not(target_arch = "wasm32"))]
+    assert!(
+        families.len() > 2,
+        "This native test requires at least one system font fixture"
+    );
+    with_fonts(|ctx| {
+        let mut c = TextContent {
+            text: "Fallback café 中文 Ω".into(),
+            ..Default::default()
+        };
+        c.style.family = TextFamily::Installed("XiToc nonexistent font fixture".into());
+        assert!(!text_layout::layout(ctx, &c, 240.).is_empty());
+        for (_, family) in families.iter().take(5) {
+            c.style.family = family.clone();
+            assert!(!text_layout::layout(ctx, &c, 240.).is_empty());
+        }
+    });
+}
+#[test]
+fn rich_journal_restores_full_content_and_box_styles() {
+    let mut d = Drawing::new(&DocumentData::blank(DocumentKind::Whiteboard));
+    let t = text(&d, Surface::Canvas);
+    let id = t.id;
+    assert!(d.replace_texts(vec![t.clone()], false));
+    let mut changed = t.clone();
+    changed.content_mut().format(
+        0..5,
+        &TextStylePatch {
+            size: Some(40.),
+            family: Some(TextFamily::Monospace),
+            ..Default::default()
+        },
+    );
+    changed
+        .content_mut()
+        .format_paragraphs(0..5, |p| p.alignment = Alignment::Center);
+    changed.box_style.background = Some([200, 100, 0, 123]);
+    changed.box_style.padding = 12.;
+    changed.box_style.resize = ResizeBehavior::Scale;
+    assert!(d.replace_texts(vec![changed.clone()], false));
+    d.undo();
+    assert_eq!(d.snapshot(id), Some(&t.clone().into()));
+    d.redo();
+    assert_eq!(d.snapshot(id), Some(&changed.into()));
 }

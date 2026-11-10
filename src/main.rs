@@ -21,6 +21,7 @@ mod smoothing;
 mod storage;
 mod stroke_pattern;
 mod text;
+mod text_fonts;
 mod text_layout;
 #[cfg(test)]
 mod text_tests;

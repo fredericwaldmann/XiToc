@@ -66,6 +66,7 @@ pub struct Preferences {
     pub explorer_visible: bool,
     pub drawing: DrawingPreferences,
     pub middle_button_pan: bool,
+    pub text_resize: crate::text::ResizeBehavior,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -75,6 +76,7 @@ impl Default for Preferences {
             explorer_visible: true,
             drawing: DrawingPreferences::default(),
             middle_button_pan: true,
+            text_resize: Default::default(),
         }
     }
 }
@@ -178,6 +180,7 @@ impl Preferences {
         storage.get_string(STORAGE_KEY).as_deref() == Some(json.as_str())
     }
     pub fn apply_drawing(&self, canvas: &mut crate::canvas::Canvas) {
+        canvas.text_resize_default = self.text_resize;
         canvas.shape_defaults = self.drawing.shape_defaults.clone();
         canvas.apply_pen(&self.drawing.presets.active().style);
         canvas.eraser_radius = self.drawing.eraser_radius;

@@ -557,3 +557,32 @@ actual visual evidence. Native OS IME/hardware coverage remains unverified.
 
 No shape text, labels, sticky notes, rich spans, PDF persistence, sidecars or
 unrelated Explorer/tab redesign. Fonts are compiled resources with licenses.
+
+## 2026-11-10 — Rich text upgrade on open text-box PR #42
+
+Confirmed feature/editable-text-boxes and PR #42 are still open and continued that
+branch. Read actual #26 and its shape-host/platform acceptance criteria; reference
+it without closing it. The existing egui engine supports a semantic TextBuffer and
+mixed LayoutJob sections, so no replacement editor or unfocused-only rich rendering
+was needed. Added grapheme-safe character runs, paragraph metadata, a transient
+caret typing style, mixed controls and rich session paste. Full semantic edits use
+the shared journal; the plain-string framework undoer is cleared.
+
+Fontdb catalogs native families and lazily resolves/caches faces through a shared
+font provider for display/normalized metrics. WASM retains bundled fonts; the
+experimental permission-gated Local Font Access API is documented, not implemented.
+A reversible font session retains source/range, previews without writes, and commits
+one operation. A virtual font list renders only visible family-name previews.
+Eight local resize handles reuse captured source/pointer/view/revision ownership.
+Reflow preserves glyph sizes; corner Scale preserves aspect and mixed proportions.
+Per-box and persisted new-box defaults remain independent. Text/Block/Box controls
+separate character, paragraph and container patches; borders reuse shape rendering.
+
+Actual browser testing reproduced an existing egui lock failure when clicking
+outside active text: a nested layer query ran inside an input read. Added a real
+canvas/widget regression, moved the query outside that lock, rebuilt and verified
+selected-word formatting. Also tested focus-preserving controls, immediate typing
+style handoff, preview cancel/commit, Unicode/rich clipboard, padding-cache reflow,
+future resize defaults and rotated eight-handle sessions across four zoom levels.
+See TEST_PLAN for final executed checks and GUI evidence/limits. No shape-contained
+text, labels, PDF serialization or unrelated tools were introduced.

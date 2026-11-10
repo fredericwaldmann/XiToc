@@ -49,12 +49,27 @@ pub fn install(ctx: &egui::Context) {
             .families
             .insert(FontFamily::Name(name.into()), fallback);
     }
+    for provider in crate::text_fonts::providers(&fonts) {
+        ctx.add_font_provider(provider);
+    }
     ctx.set_fonts(fonts);
 }
 pub fn font(content: &TextContent) -> FontId {
-    let family = match content.style.family {
+    let family = match &content.style.family {
         TextFamily::Sans => "sans",
         TextFamily::Monospace => "mono",
+        TextFamily::Installed(name) => {
+            return FontId::new(
+                content.style.size as f32,
+                FontFamily::Name(
+                    format!(
+                        "system:{name}:{}:{}",
+                        content.style.bold, content.style.italic
+                    )
+                    .into(),
+                ),
+            );
+        }
     };
     let suffix = match (content.style.bold, content.style.italic) {
         (false, false) => "",
@@ -75,23 +90,43 @@ pub fn alignment(content: &TextContent) -> egui::Align {
     }
 }
 pub fn job(content: &TextContent, width: f64) -> egui::text::LayoutJob {
-    let c = content.style.color;
-    let color = Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]);
     let mut job = egui::text::LayoutJob::default();
-    job.append(
-        &content.text,
-        0.,
-        egui::TextFormat {
-            font_id: font(content),
-            color,
-            underline: if content.style.underline {
-                Stroke::new(1., color)
-            } else {
-                Stroke::NONE
-            },
+    let mut bytes: Vec<_> = content.text.char_indices().map(|(i, _)| i).collect();
+    bytes.push(content.text.len());
+    let n = bytes.len() - 1;
+    for run in content.segments() {
+        let style = &run.style;
+        let c = style.color;
+        let color = Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]);
+        let template = TextContent {
+            style: style.clone(),
             ..Default::default()
-        },
-    );
+        };
+        job.append(
+            &content.text[bytes[run.range.start]..bytes[run.range.end]],
+            0.,
+            egui::TextFormat {
+                font_id: font(&template),
+                color,
+                underline: if style.underline {
+                    Stroke::new(1., color)
+                } else {
+                    Stroke::NONE
+                },
+                ..Default::default()
+            },
+        );
+    }
+    if n == 0 {
+        job.append(
+            "",
+            0.,
+            egui::TextFormat {
+                font_id: font(content),
+                ..Default::default()
+            },
+        );
+    }
     job.keep_trailing_whitespace = true;
     job.round_output_to_gui = false;
     job.wrap.max_width = width as f32;
@@ -116,7 +151,8 @@ pub fn layout(ctx: &egui::Context, content: &TextContent, width: f64) -> Arc<egu
                 ..Default::default()
             };
             let service = Arc::new(std::sync::Mutex::new(Metrics {
-                fonts: egui::epaint::text::Fonts::new(options, definitions),
+                fonts: egui::epaint::text::Fonts::new(options, definitions.clone())
+                    .with_font_providers(crate::text_fonts::providers(&definitions)),
                 frame: None,
             }));
             ctx.data_mut(|d| d.insert_temp(id, service.clone()));
@@ -129,24 +165,74 @@ pub fn layout(ctx: &egui::Context, content: &TextContent, width: f64) -> Arc<egu
         service.fonts.begin_pass(options, Default::default());
         service.frame = Some(frame);
     }
-    service
-        .fonts
-        .with_pixels_per_point(1.)
-        .layout_job(job(content, width))
+    let mut parts = Vec::new();
+    let mut offset = 0;
+    let mut spacings = Vec::new();
+    for (index, paragraph) in content.text.split('\n').enumerate() {
+        let count = paragraph.chars().count();
+        let mut part = content.slice(offset..offset + count);
+        part.text = paragraph.to_owned();
+        let style = content.paragraph(index);
+        part.style.alignment = style.alignment;
+        let mut job = job(&part, width);
+        for section in &mut job.sections {
+            section.format.line_height =
+                Some(section.format.font_id.size * 1.3 * style.line_spacing as f32);
+        }
+        let mut galley = (*service.fonts.with_pixels_per_point(1.).layout_job(job)).clone();
+        if index < content.text.matches('\n').count()
+            && let Some(row) = galley.rows.last_mut()
+        {
+            row.ends_with_newline = true;
+        }
+        let left = match style.alignment {
+            Alignment::Left => 0.,
+            Alignment::Center => (width as f32 - galley.size().x) * 0.5,
+            Alignment::Right => width as f32 - galley.size().x,
+        };
+        let dx = left - galley.rect.min.x;
+        for row in &mut galley.rows {
+            row.pos.x += dx;
+        }
+        galley.rect = galley.rect.translate(egui::vec2(dx, 0.));
+        galley.mesh_bounds = galley.mesh_bounds.translate(egui::vec2(dx, 0.));
+        spacings.push(style.spacing as f32);
+        parts.push(Arc::new(galley));
+        offset += count + 1;
+    }
+    let mut merged = egui::Galley::concat(Arc::new(job(content, width)), &parts, 1.);
+    let mut y = 0.;
+    let mut index = 0;
+    merged.rect = egui::Rect::ZERO;
+    merged.mesh_bounds = egui::Rect::NOTHING;
+    for (part, spacing) in parts.iter().zip(spacings) {
+        for source in &part.rows {
+            let row = &mut merged.rows[index];
+            row.pos = source.pos + egui::vec2(0., y);
+            merged.rect |= egui::Rect::from_min_size(row.pos, row.size);
+            merged.mesh_bounds |= row.visuals.mesh_bounds.translate(row.pos.to_vec2());
+            index += 1;
+        }
+        y += part.rect.height() + spacing;
+    }
+    merged.rect.max.y = y;
+    Arc::new(merged)
 }
 pub fn measure(ctx: &egui::Context, text: &mut TextObject) {
-    let mut galley = layout(ctx, &text.content, text.width);
+    let mut galley = layout(ctx, &text.content, text.wrap_width());
     // A single wide glyph cannot wrap. Keep the box at least as wide as that
     // glyph rather than clipping it or distorting the font.
-    if f64::from(galley.size().x) > text.width + 0.001 {
-        text.width = f64::from(galley.size().x);
-        galley = layout(ctx, &text.content, text.width);
+    if f64::from(galley.size().x) > text.wrap_width() + 0.001 {
+        text.width = f64::from(galley.size().x) + 2. * text.box_style.padding;
+        galley = layout(ctx, &text.content, text.wrap_width());
     }
-    text.height = f64::from(galley.size().y).max(text.content.style.size * 1.3);
+    text.height = text.height.max(
+        f64::from(galley.size().y).max(text.content.style.size * 1.3) + 2. * text.box_style.padding,
+    );
 }
 
-/// Reusable plain Unicode editing core: egui owns selection, IME and its local
-/// undoer; canvas objects only store source/style. Hosts provide focus/placement.
+/// Rich semantic buffer and mixed layout; egui owns caret/selection and IME.
+/// Hosts route undo/redo through the rich object journal before calling this.
 pub fn edit(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -156,56 +242,38 @@ pub fn edit(
 ) -> egui::text_edit::TextEditOutput {
     let mut template = content.clone();
     template.style.size = (template.style.size * scale).clamp(1., 1024.);
-    let content_style = content.style.clone();
-    let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, _: f32| {
-        layout_scaled(
-            ui.ctx(),
-            &TextContent {
-                text: buffer.as_str().to_owned(),
-                style: content_style.clone(),
-            },
-            width,
-            scale,
-        )
+    let mirror = std::rc::Rc::new(std::cell::RefCell::new(content.clone()));
+    let layout_content = mirror.clone();
+    let mut layouter = move |ui: &egui::Ui, _: &dyn egui::TextBuffer, _: f32| {
+        layout_scaled(ui.ctx(), &layout_content.borrow(), width, scale)
     };
-    let atomic = ui.input(|i| {
-        i.events.iter().any(|e| {
-            matches!(
-                e,
-                egui::Event::Cut
-                    | egui::Event::Paste(_)
-                    | egui::Event::Ime(egui::ImeEvent::Commit(_))
-            )
-        })
-    });
-    if atomic && let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), id) {
-        let mut undoer = state.undoer();
-        undoer.add_undo(&(
-            state.cursor.char_range().unwrap_or_default(),
-            content.text.clone(),
-        ));
-        state.set_undoer(undoer);
-        state.store(ui.ctx(), id);
-    }
-    let mut output = egui::TextEdit::multiline(&mut content.text)
+    let typing = ui
+        .ctx()
+        .data(|d| d.get_temp::<crate::text::TextStyle>(id.with("typing")))
+        .unwrap_or_else(|| content.style.clone());
+    let paste = ui
+        .ctx()
+        .data(|d| d.get_temp::<TextContent>(egui::Id::unique("XiToc-rich-clipboard")));
+    let mut buffer = RichBuffer {
+        content,
+        mirror,
+        typing,
+        paste,
+    };
+    let mut output = egui::TextEdit::multiline(&mut buffer)
         .id(id)
         .font(font(&template))
-        .align(egui::Align2([alignment(&template), egui::Align::TOP]))
+        .align(egui::Align2::LEFT_TOP)
         .desired_width((width * scale) as f32)
         .desired_rows(1)
         .margin(egui::Margin::ZERO)
         .frame(egui::Frame::NONE)
         .layouter(&mut layouter)
         .show(ui);
-    if atomic && output.response.changed() {
-        let mut undoer = output.state.undoer();
-        undoer.add_undo(&(
-            output.state.cursor.char_range().unwrap_or_default(),
-            content.text.clone(),
-        ));
-        output.state.set_undoer(undoer);
-        output.state.clone().store(ui.ctx(), id);
-    }
+    // The framework undoer stores plain strings. Never retain a second history
+    // capable of restoring source without its formatting/paragraphs.
+    output.state.clear_undoer();
+    output.state.clone().store(ui.ctx(), id);
     output
 }
 
@@ -221,10 +289,17 @@ pub fn layout_scaled(
     let logical = layout(ctx, content, width);
     let factor = scale as f32;
     let mut screen = content.clone();
-    screen.style.size = (content.style.size * scale).clamp(1., 1024.);
+    screen.style.size = (content.style.size * scale).clamp(1., 4096.);
+    for run in &mut screen.runs {
+        run.style.size = (run.style.size * scale).clamp(1., 4096.);
+    }
     let mut parts = Vec::new();
+    let mut offset = 0;
     for canonical in &logical.rows {
-        let mut line = screen.clone();
+        let count = canonical.text().chars().count();
+        let mut line = screen.slice(offset..offset + count);
+        offset += count + usize::from(canonical.ends_with_newline);
+        // Slicing must preserve empty rows as well as explicit line breaks.
         line.text = canonical.text();
         let mut rendered = (*ctx.fonts_mut(|f| f.layout_job(job(&line, f64::INFINITY)))).clone();
         for placed in &mut rendered.rows {
@@ -286,4 +361,48 @@ pub fn layout_scaled(
         egui::pos2(logical.rect.max.x * factor, logical.rect.max.y * factor),
     );
     Arc::new(galley)
+}
+
+/// TextEdit edits this semantic buffer directly; every IME/paste/delete operation
+/// updates runs before the widget asks the layouter for its next galley.
+struct RichBuffer<'a> {
+    content: &'a mut TextContent,
+    mirror: std::rc::Rc<std::cell::RefCell<TextContent>>,
+    typing: crate::text::TextStyle,
+    paste: Option<TextContent>,
+}
+impl egui::TextBuffer for RichBuffer<'_> {
+    fn is_mutable(&self) -> bool {
+        true
+    }
+    fn as_str(&self) -> &str {
+        &self.content.text
+    }
+    fn insert_text(&mut self, text: &str, index: egui::text::CharIndex) -> usize {
+        if self.content.text.len() + text.len() > crate::text::MAX_TEXT_BYTES || text.contains('\0')
+        {
+            return 0;
+        }
+        let value = self
+            .paste
+            .as_ref()
+            .filter(|p| p.text == text)
+            .cloned()
+            .unwrap_or(TextContent {
+                text: text.into(),
+                style: self.typing.clone(),
+                ..Default::default()
+            });
+        self.content.replace(index.0..index.0, &value);
+        *self.mirror.borrow_mut() = self.content.clone();
+        text.chars().count()
+    }
+    fn delete_char_range(&mut self, range: std::ops::Range<egui::text::CharIndex>) {
+        self.content
+            .replace(range.start.0..range.end.0, &TextContent::default());
+        *self.mirror.borrow_mut() = self.content.clone();
+    }
+    fn type_id(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<TextContent>()
+    }
 }

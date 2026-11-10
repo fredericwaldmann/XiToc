@@ -270,6 +270,8 @@ const MESH_SEGMENTS: usize = 128;
 pub struct Canvas {
     pub drawing: Drawing,
     text_session: Option<text_ui::TextSession>,
+    font_browser: Option<text_ui::FontBrowser>,
+    pub text_resize_default: crate::text::ResizeBehavior,
     text_creation: Option<text_ui::TextCreation>,
     text_resize: Option<text_ui::TextResize>,
     text_cache: HashMap<Uuid, text_ui::TextCache>,
@@ -320,6 +322,8 @@ impl Canvas {
         Self {
             drawing: Drawing::new(data),
             text_session: None,
+            font_browser: None,
+            text_resize_default: Default::default(),
             text_creation: None,
             text_resize: None,
             text_cache: Default::default(),
@@ -382,6 +386,7 @@ impl Canvas {
             || matches!(&self.gesture, Some(Gesture::Pen(stroke)) if !stroke.points.is_empty())
     }
     pub fn finish(&mut self) {
+        self.font_browser = None;
         self.finish_text();
         self.text_creation = None;
         self.text_resize = None;
@@ -502,7 +507,8 @@ impl Canvas {
             return;
         }
         self.selection.refresh(&self.drawing);
-        if self.text_session.is_none()
+        if self.font_browser.is_none()
+            && self.text_session.is_none()
             && self.text_creation.is_none()
             && self.text_resize.is_none()
             && !ui.ctx().text_edit_focused()
@@ -917,10 +923,25 @@ impl Canvas {
                         .filter(|r| r.preview.id == t.id)
                         .map(|r| &r.preview)
                         .unwrap_or(t);
+                    let source = self
+                        .font_browser
+                        .as_ref()
+                        .and_then(|b| b.previews.iter().find(|p| p.id == t.id))
+                        .unwrap_or(source);
                     let text = selection_preview
                         .filter(|_| preview_ids.contains(&t.id))
                         .map(|d| source.transformed(d))
                         .unwrap_or_else(|| source.clone());
+                    let mut box_painter = painter.clone();
+                    box_painter.multiply_opacity(f32::from(text.box_style.opacity) / 255.);
+                    shapes_ui::paint_shape(
+                        ui,
+                        &box_painter,
+                        transform,
+                        &text.box_shape(),
+                        Default::default(),
+                        &mut self.shape_cache,
+                    );
                     text_ui::paint_text(ui, &painter, transform, &text, &mut self.text_cache);
                     continue;
                 }

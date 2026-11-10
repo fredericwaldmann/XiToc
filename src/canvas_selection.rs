@@ -1404,7 +1404,7 @@ impl Canvas {
 
 #[cfg(test)]
 #[path = "selection_tests.rs"]
-mod tests;
+pub(super) mod tests;
 
 #[cfg(test)]
 #[path = "manipulation_tests.rs"]

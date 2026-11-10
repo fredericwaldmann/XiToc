@@ -14,9 +14,9 @@ fn mixed<T: PartialEq>(ui: &mut egui::Ui, shapes: &[Shape], value: impl Fn(&Shap
     ui.weak(if mixed {
         "Mixed values"
     } else {
-        "Selected shapes"
+        "Selected objects"
     })
-    .on_hover_text("Changes apply to all compatible selected shapes.");
+    .on_hover_text("Changes apply to all compatible selected objects.");
 }
 pub(crate) fn menu(ui: &mut egui::Ui, name: &str, content: impl FnOnce(&mut egui::Ui)) {
     let config = egui::containers::menu::MenuConfig::new()

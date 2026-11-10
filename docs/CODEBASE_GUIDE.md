@@ -792,61 +792,51 @@ by #25; the future text-object milestone is not pulled into routing.
 
 ## Editable text boxes (#26 standalone slice)
 
-`text.rs` adds `TextObject` to the same stable-ID `ObjectSnapshot` store/protocol
-and journal. It owns document/surface, Placement, wrap width, fitted height and
-`Arc<TextContent>` (UTF-8 source plus whole-box TextStyle). Content/style are
-platform-neutral, immutable during transforms and shared by snapshots/clipboard;
-editing uses copy-on-write. There is no second document store. Source is bounded
-to 64 KiB, and unknown font/alignment variants or invalid geometry are rejected.
+`text.rs` owns reusable TextContent/TextStyle/FormatRun/ParagraphStyle and the
+TextObject host. UTF-8 source uses Unicode scalar ranges matching egui; operations
+snap to extended grapheme boundaries with unicode-segmentation. Sorted runs capture
+independent family/size/bold/italic/underline/RGBA, preserve unrelated properties,
+merge equal neighbors, and update on insert/delete/rich paste. Paragraph metadata
+survives newline edits. TextBoxStyle independently captures background, shared
+shape border/pattern, radius, padding, container opacity and Reflow/Scale behavior.
+Stable IDs/Placement/surface and Arc content retain the shared object protocol.
 
-`text_layout.rs` owns bundled font registration, the shared LayoutJob builder,
-normalized metrics, wrapping, display galleys and the reusable egui TextEdit
-component. Sans/Mono use unmodified DejaVu regular/bold/oblique/bold-oblique faces,
-with bundled Droid CJK and egui emoji fallbacks. Font data is compiled into the
-application; licenses are under assets/fonts. There are no runtime system-font
-assumptions or external note font links. Future PDF export must embed/subset the
-required faces and matching visible text; this feature does not change the codec.
+`text_layout.rs` builds mixed LayoutJob sections for display and the editable
+custom TextBuffer. The buffer mutates semantic runs before every re-layout; egui
+continues handling selection, caret, keyboard and IME. Normalized unit-DPI metrics
+and scaled raster glyph mapping keep paragraph wraps/caret coordinates stable.
+Paragraph alignment/spacing and padding use document coordinates. The host clears
+egui's string-only undoer and routes rich undo through the existing object journal.
 
-Document line breaks use the same egui/epaint engine with normalized unhinted
-1-pixel-per-point metrics, independent of camera/DPI. Display/editing rasterize
-glyphs at the actual screen size and map rows/glyph/caret positions to those same
-document metrics. Logical wraps and explicit newlines do not change at 50–400%.
-Screen galleys cache by source/style/width/scale, with DPI/atlas-reset invalidation.
-Unrelated drawing does not re-layout unchanged text. No text is stored as pixels.
+`text_fonts.rs` separates native fontdb discovery from portable family names.
+Native catalogs deduplicate installed family names; providers lazily query
+regular/bold/italic combinations, cache shared bytes and retain bundled glyph
+fallbacks. Both metric and display services share the provider/cache. WASM uses
+bundled Sans/Mono, CJK and emoji fallback, without system font enumeration or a
+queryLocalFonts permission bridge. Font assets/licenses remain under assets/fonts;
+M2 must embed/subset resources inside the canonical PDF before saved text is offered.
 
-`canvas_text.rs` is an adapter inside Canvas. The top T tool starts a transient
-click/width-drag box, focuses its caret immediately and returns to Selection in
-editing mode. Blank drafts do not enter history. Double-click re-edits an existing
-ID; text drag selects characters, while object-mode drag uses the existing frozen
-drag session. Escape finishes editing and retains object selection; another Escape
-uses normal selection behavior. Canvas clicks outside finish editing. Rotated
-text uses a clearly indicated unrotated editing overlay, preserving its stored
-rotation and applying it again on exit.
+`canvas_text.rs` adapts selection/typing state, rich clipboard, IME, formatting,
+font-browser previews and eight-handle resize sessions to Canvas. Text controls
+patch the retained selected character range; no selection changes future typing
+style only. Block controls patch selected paragraphs. Box controls reuse shared
+shape/color/border widgets and cached shape rendering. Mixed attributes remain
+visible. Font browsing freezes original sources/ranges, previews without writes,
+cancels exactly, and commits one operation. The virtual list loads visible font
+names only; keyboard arrows do not reach the editor/canvas while it is active.
 
-A selected singleton has one local right-edge width handle: it reflows text without
-changing font size. Height auto-fits; width cannot clip a single wide glyph. Group
-scaling scales type uniformly through Placement. Explicit rotation works normally.
-Flips transform box centers while retaining readable glyph orientation (superseding
-the older planned mirrored-text policy). Page fitting caps the visible footprint
-at the page boundary while retaining all source; the editing surface scrolls
-long content. Whiteboards retain full height and arbitrary positions.
+Local resize sessions freeze source/pointer/view/revision and survive hover loss;
+release commits once. Reflow keeps font sizes and expands to fit text. Scale corners
+preserve box aspect ratio and mixed-size proportions; edges reflow. Settings → Text
+is persisted separately from documents, captured by new boxes; per-box mode changes
+do not alter geometry. Group transformations continue sharing immutable content.
+Rotated text retains the labeled unrotated editing overlay. Page clipping/scroll
+and single-PDF save guards are preserved. XiToc session text paste retains rich
+runs; external clipboard data is currently plain text, not HTML/RTF.
 
-Text formatting reuses the contextual/right-click Format UI, corrected inline
-RGB/HSV/hex picker and shared sliders. Family, size, bold/italic/underline, RGBA
-and paragraph alignment patch only compatible selected text boxes. Mixed controls
-keep stable header/slider positions. Existing shape/connector formatting remains
-independent.
-
-Active text editing owns text shortcuts and IME via egui. Preedit stays transient;
-committed source uses `Drawing::replace_texts` in the same Replace journal. Typing
-coalesces for at most two seconds/32 changes; paste, cut and IME commits have
-explicit editing undo boundaries. Idle frames/caret changes do not write history.
-Edit-menu and toolbar history commands route to the active text editor. A transient
-cursor is retained across menu focus changes. Native Paste uses eframe's request;
-web uses DOM paste/keyboard input and an explicit in-app plain-text copy fallback,
-separate from object clipboard bundles. Unsupported menu paste prompts Ctrl/Cmd+V.
-
-Issue #26 assumes embedded shape text from #24, which is not implemented. This
-standalone task establishes reusable TextContent/TextStyle/layout/edit APIs but
-does not add text inside shapes, labels, sticky notes or rich spans. It references
-#26 without closing its broader acceptance criteria.
+Tests in text_tests.rs and canvas_text.rs cover range/grapheme operations, mixed
+layout, native fonts/fallback, clipboard/history, real widgets/focus, preview
+transactions and rotated eight-handle resizing at 50–400%. Existing text_controller
+and mixed object regression suites remain active. Future shape text/labels/sticky
+notes reuse these primitives; those hosts and PDF serialization remain outside
+this feature. See ARCHITECTURE.md and TEST_PLAN.md for platform/manual limits.

@@ -1319,3 +1319,76 @@ Manual reproduction:
 
 Text remains editable in memory. PDF saving/reopening editable content is outside
 this milestone and must not be inferred from the document’s .pdf filename.
+
+## Rich text upgrade — 2026-11-10, continued PR #42
+
+Regression coverage extends the existing 216 active tests with 15 tests (231
+active, eight separately runnable performance tests). Coverage includes mixed
+families/sizes, selected-word/property-only patches, grapheme/Unicode symbol
+formatting, insertion between runs, deletion across runs, rich session paste,
+paragraph/style preservation, shared rich undo, native catalog/missing fallback,
+preview navigation/cancel/single commit, all eight local handles with rotation at
+50/100/200/400%, stable release history, padding-layout invalidation, captured
+new-box defaults, and actual formatting-widget focus/typing behavior. Existing
+multi-object offscreen drag, connectors, routing, shapes, ink/eraser and layout
+regressions remain active. The eight release performance tests were explicitly
+run and passed (including cached group/shape movement).
+
+The packaged Firefox application was exercised through real pointer/keyboard
+input. Created a Whiteboard, typed “Hello beautiful world”, selected only
+“beautiful”, previewed Sans/Mono with Down, canceled with Escape, then confirmed
+Mono with Enter. Changed only that word to 32 pt and #D02A40 through numeric/hex
+controls; Hello/world retained their original family, size and color. Verified
+left/right-edge reflow, four corner gestures and undo, proportional corner Scale,
+paragraph alignment, background and border controls. Captures live under
+screenshots/rich-text/. This is actual application GUI observation, not just model
+or mocked widget testing. The initial freeze reproduction is covered by a failing-
+before/fixed-after real Canvas test.
+
+Manual repeat procedure:
+
+1. Create a Page Note or Whiteboard, use T, and type the example sentence.
+2. Select “beautiful”; Text → Font opens the browser. Use arrows/Escape, then
+   reopen and use arrows/Enter. Check that surrounding words remain unchanged.
+3. In Text enter a size and custom hex RGB, toggle bold/italic/underline, then
+   replace/insert text, copy/paste within XiToc, and undo/redo.
+4. With a caret only, choose a different style and type: existing letters stay
+   unchanged. Select mixed spans and verify mixed controls; change only color.
+5. Escape editing. Drag each of eight handles, then undo/redo. Rotate the box and
+   repeat. Check repeated positions, offscreen excursions and release ownership.
+6. Box → Reflow/Scale: corners in Scale keep aspect and mixed size proportions;
+   edges still reflow. In Settings → Text change the default, create another box,
+   and confirm existing boxes retain their mode.
+7. Use Block alignment/spacing and Box fill/opacity/border/pattern/radius/padding.
+   Re-edit and verify all source remains accessible after wrapping.
+8. Repeat at 50%, 100%, 200%, 400%, both layouts, light/dark and narrow windows;
+   include mixed groups containing ink, shapes and magnetic connectors.
+
+Limits: Windows/macOS native interactions, physical IME/tablet/clipboard hardware,
+and an exhaustive GUI matrix of every operation on every platform are unverified.
+Rotated text keeps its existing labeled unrotated editing overlay. Web fonts are
+bundled-only (no queryLocalFonts bridge); native discovery uses installed supported
+families with bundled fallback. XiToc session paste preserves rich data; external
+HTML/RTF clipboard formatting is not imported. All text remains memory-only until
+M2; no PDF round-trip or saved-rich-text claim is made.
+
+Final checks on the upgrade source:
+
+- `cargo fmt --all -- --check`: passed.
+- `cargo clippy --all-targets -- -D warnings`: passed.
+- `cargo test --all-targets`: 231 passed, eight ignored benchmarks.
+- `cargo test --release -- --ignored --nocapture`: all eight passed.
+- `cargo build --release`: passed; final binary startup ran under an eight-second
+  timeout with no startup errors (expected timeout exit 124).
+- `cargo check --target wasm32-unknown-unknown`: passed.
+- `trunk build --release`: passed. A terminated parent and overlapping output-lock
+  waits required collecting the completed child builds; an additional isolated
+  `trunk build --release --dist target/rich-dist` also passed.
+
+Firefox additionally verified actual 50/100/200/400% rendering and right-edge
+resize/undo, including a partly offscreen 400% box. The comprehensive eight-handle,
+rotation, both-layout and zoom matrix is automated; the GUI matrix is a subset.
+
+The final isolated release package was served separately and rechecked for
+first-click creation, retained selected-word formatting, virtual font-name preview,
+arrow preview and Enter commit. The final preview/commit captures are included.

@@ -572,3 +572,28 @@ Actual browser verification caught missing initial IME/caret handoff; initialize
 the cursor and request focus after widget creation, with a real-editor separate
 press/release regression. Zoom testing caught font-size-dependent wraps; canonical
 row mapping fixes that instead of accepting different line breaks at each zoom.
+
+
+## 2026-11-10 — Rich text extends the existing editor (#26, PR #42)
+
+Continue the still-open feature/editable-text-boxes branch/PR. Retain egui 0.37
+TextEdit's caret/IME engine, using its custom TextBuffer and mixed LayoutJob API
+rather than replacing the entire editor or switching to plain text while focused.
+Source and normalized grapheme-safe runs/paragraphs remain portable semantic data.
+Use the canonical Replace journal for rich undo; the framework undoer holds strings
+and therefore cannot restore inline formatting safely. Clear that duplicate history.
+
+Fontdb supplies native catalog/weight/style discovery; an egui FontProvider and a
+shared face-byte cache serve both normalized and screen fonts without atlas resets
+on browser navigation. Keep bundled fallbacks. Browser Local Font Access is limited,
+permission-gated and experimental: retain bundled-only web behavior without claiming
+cross-browser enumeration. See [MDN Local Font Access](https://developer.mozilla.org/en-US/docs/Web/API/Local_Font_Access_API)
+and [fontdb API](https://docs.rs/fontdb/0.24.0/fontdb/struct.Database.html).
+Actual native Windows/macOS font and physical IME behavior remain unverified here.
+
+Freeze sources/ranges for reversible font previews; commit only on confirmation.
+Reuse the persistent captured-source resize protocol for eight local handles.
+Reflow defaults to natural text; corner Scale preserves proportions, while edges
+reflow. Separate run, paragraph and container styles for future reuse in shapes.
+Rich session paste is supported; HTML/RTF clipboard interchange is not implemented.
+No PDF persistence/schema changes or new text hosts are part of this decision.

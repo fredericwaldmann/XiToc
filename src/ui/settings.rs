@@ -9,6 +9,7 @@ enum Section {
     Appearance,
     Drawing,
     Input,
+    Text,
 }
 #[derive(Default)]
 pub struct SettingsDialog {
@@ -28,7 +29,7 @@ impl SettingsDialog {
             ui.add_space(style::GAP);
             ui.horizontal_wrapped(|ui| {
                 for (section, label) in [(Section::General, "General"), (Section::Appearance, "Appearance"),
-                    (Section::Drawing, "Drawing"), (Section::Input, "Input Devices")] {
+                    (Section::Drawing, "Drawing"), (Section::Text, "Text"), (Section::Input, "Input Devices")] {
                     ui.selectable_value(&mut self.section, section, label);
                 }
             });
@@ -69,6 +70,12 @@ impl SettingsDialog {
                                         ui.selectable_value(&mut prefs.drawing.eraser_mode, mode, mode.label());
                                     }
                                 });
+                        }
+                        Section::Text => {
+                            ui.strong("Default Text Box Resize Behavior");
+                            ui.selectable_value(&mut prefs.text_resize, crate::text::ResizeBehavior::Reflow, "Reflow Text");
+                            ui.selectable_value(&mut prefs.text_resize, crate::text::ResizeBehavior::Scale, "Scale Text");
+                            ui.weak("Captured by new boxes. Existing boxes keep their own resize behavior.");
                         }
                         Section::Input => {
                             ui.strong("Navigation");
