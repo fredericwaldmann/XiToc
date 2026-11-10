@@ -214,6 +214,7 @@ impl Connector {
             placement: Placement::default(),
             geometry,
             style,
+            text: None,
         }
     }
     /// Formatting retains canonical heads even when coincident endpoints have

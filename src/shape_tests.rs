@@ -97,6 +97,199 @@ fn all_shapes_create_in_every_direction_both_layouts_and_zoom() {
         }
     }
 }
+
+#[test]
+fn shape_text_regions_stay_inside_supported_geometry_and_exclude_segments() {
+    for kind in [
+        ShapeKind::Rectangle,
+        ShapeKind::RoundedRectangle,
+        ShapeKind::Circle,
+        ShapeKind::Ellipse,
+        ShapeKind::Triangle,
+        ShapeKind::Diamond,
+    ] {
+        let shape = Shape::create(
+            Uuid::new_v4(),
+            Surface::Canvas,
+            kind,
+            [10., 20.],
+            [210., 180.],
+            false,
+        )
+        .unwrap();
+        let region = shape.text_region().expect("supported host shape");
+        let contour = &shape.contours(0.005)[0];
+        assert!(region.min[0] < region.max[0] && region.min[1] < region.max[1]);
+        for corner in region.corners() {
+            assert!(
+                crate::selection::inside(shape.placement.apply(corner), contour),
+                "{kind:?} text corner {corner:?} outside contour"
+            );
+        }
+        let mut transformed = shape.clone();
+        transformed.placement.rotation = 0.7;
+        transformed.placement.reflected = [true, false];
+        let region = transformed.text_region().unwrap();
+        for corner in region.corners() {
+            assert!(
+                crate::selection::inside(
+                    transformed.placement.apply(corner),
+                    &transformed.contours(0.005)[0]
+                ),
+                "transformed {kind:?} text region must remain inside"
+            );
+        }
+    }
+    for kind in [ShapeKind::Line, ShapeKind::Arrow] {
+        let line = Shape::create(
+            Uuid::new_v4(),
+            Surface::Canvas,
+            kind,
+            [0., 0.],
+            [100., 100.],
+            false,
+        )
+        .unwrap();
+        assert!(line.text_region().is_none());
+    }
+}
+
+#[test]
+fn shape_rich_text_is_same_object_through_style_resize_transform_clipboard_and_history() {
+    use crate::{
+        object::{ObjectSnapshot, Placement},
+        object_clipboard::ObjectBundle,
+        shape::{ShapeText, VerticalAlignment},
+        text::{Alignment, TextStylePatch},
+    };
+    let data = crate::document::DocumentData::blank(DocumentKind::Whiteboard);
+    let mut drawing = Drawing::new(&data);
+    let mut shape = Shape::create(
+        data.id(),
+        Surface::Canvas,
+        ShapeKind::Rectangle,
+        [20., 30.],
+        [320., 220.],
+        false,
+    )
+    .unwrap();
+    let id = shape.id;
+    shape.text = Some(ShapeText::default());
+    let content = std::sync::Arc::make_mut(&mut shape.text.as_mut().unwrap().content);
+    content.text = "IMPORTANT\nPlease review this step.".into();
+    content.format(
+        0..9,
+        &TextStylePatch {
+            size: Some(24.),
+            bold: Some(true),
+            ..Default::default()
+        },
+    );
+    content.format(
+        10..17,
+        &TextStylePatch {
+            size: Some(12.),
+            italic: Some(true),
+            family: Some(crate::text::TextFamily::Monospace),
+            ..Default::default()
+        },
+    );
+    content.format_paragraphs(0..content.text.chars().count(), |p| {
+        p.alignment = Alignment::Justify
+    });
+    shape.text.as_mut().unwrap().vertical_alignment = VerticalAlignment::Bottom;
+    assert!(drawing.add_shape(shape.clone()));
+
+    let mut adapter = crate::text::TextObject::new(data.id(), Surface::Canvas, [0.; 2], 240.);
+    adapter.id = id;
+    adapter.content = shape.text.as_ref().unwrap().content.clone();
+    adapter.content_mut().format(
+        0..9,
+        &TextStylePatch {
+            rgb: Some([200, 10, 20]),
+            ..Default::default()
+        },
+    );
+    assert!(drawing.replace_text_adapters(vec![adapter], Some(VerticalAlignment::Top), false));
+    let ObjectSnapshot::Shape(formatted) = drawing.snapshot(id).unwrap().clone() else {
+        panic!()
+    };
+    assert_eq!(formatted.id, id);
+    assert_eq!(
+        formatted.text.as_ref().unwrap().vertical_alignment,
+        VerticalAlignment::Top
+    );
+    assert_eq!(
+        formatted.text.as_ref().unwrap().content.style_at(2).size,
+        24.
+    );
+    assert_eq!(
+        formatted.text.as_ref().unwrap().content.style_at(12).size,
+        12.
+    );
+    assert_eq!(
+        formatted.text.as_ref().unwrap().content.style_at(12).family,
+        crate::text::TextFamily::Monospace
+    );
+    assert_eq!(
+        formatted
+            .text
+            .as_ref()
+            .unwrap()
+            .content
+            .paragraph(0)
+            .alignment,
+        Alignment::Justify
+    );
+    let before_transform = formatted.clone();
+    let transformed = ObjectSnapshot::Shape(formatted.clone()).transformed(Placement {
+        origin: [170., 125.],
+        position: [260., 245.],
+        scale: 1.4,
+        rotation: 0.6,
+        reflected: [true, false],
+    });
+    let ObjectSnapshot::Shape(transformed) = transformed else {
+        panic!()
+    };
+    assert_eq!(transformed.id, id);
+    assert_eq!(transformed.text, before_transform.text);
+    let resized = formatted.with_corner(2, [380., 270.], false).unwrap();
+    assert_eq!(resized.id, id);
+    assert_eq!(resized.text, before_transform.text);
+
+    let bundle =
+        ObjectBundle::capture_objects([ObjectSnapshot::Shape(formatted.clone())].into_iter())
+            .unwrap();
+    let decoded = ObjectBundle::decode(&bundle.encode().unwrap()).unwrap();
+    let pasted = decoded.paste(&mut drawing, Surface::Canvas, [600., 500.]);
+    assert_eq!(pasted.len(), 1);
+    assert_ne!(pasted[0], id);
+    let ObjectSnapshot::Shape(copy) = drawing.snapshot(pasted[0]).unwrap() else {
+        panic!()
+    };
+    assert_eq!(copy.text, formatted.text);
+    drawing.undo();
+    assert!(drawing.snapshot(pasted[0]).is_none());
+    drawing.redo();
+    assert!(matches!(
+        drawing.snapshot(pasted[0]),
+        Some(ObjectSnapshot::Shape(_))
+    ));
+    drawing.undo();
+    drawing.undo();
+    let ObjectSnapshot::Shape(restored) = drawing.snapshot(id).unwrap() else {
+        panic!()
+    };
+    assert_eq!(
+        restored.text.as_ref().unwrap().vertical_alignment,
+        VerticalAlignment::Bottom
+    );
+    assert_eq!(
+        restored.text.as_ref().unwrap().content.style_at(2).color,
+        [32, 39, 49, 255]
+    );
+}
 #[test]
 fn shift_constraints_zero_size_escape_focus_and_camera_cancel() {
     for kind in [

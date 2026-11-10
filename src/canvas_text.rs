@@ -8,6 +8,7 @@ use crate::{
 };
 pub(super) struct TextSession {
     pub(super) value: TextObject,
+    pub(super) target: TextTarget,
     ctx: egui::Context,
     new: bool,
     focus: bool,
@@ -21,6 +22,12 @@ pub(super) struct TextSession {
     history: (bool, bool),
     cursor: Option<egui::text::CCursorRange>,
     typing: crate::text::TextStyle,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum TextTarget {
+    #[default]
+    Standalone,
+    Shape,
 }
 pub(super) struct TextCreation {
     surface: Surface,
@@ -42,6 +49,38 @@ pub(super) struct TextCache {
     width: f64,
     scale: f64,
     pub(super) galley: Arc<egui::Galley>,
+}
+fn shape_text_adapter(shape: &crate::shape::Shape) -> Option<TextObject> {
+    let region = shape.text_region()?;
+    let width = (region.max[0] - region.min[0]).max(1.0);
+    let height = (region.max[1] - region.min[1]).max(1.0);
+    let center = region.center();
+    let world_center = shape.placement.apply(center);
+    let half = [width * 0.5, height * 0.5];
+    let (sin, cos) = shape.placement.rotation.sin_cos();
+    let offset = [
+        (cos * half[0] - sin * half[1]) * shape.placement.scale,
+        (sin * half[0] + cos * half[1]) * shape.placement.scale,
+    ];
+    let mut placement = shape.placement;
+    placement.origin = [0.; 2];
+    placement.position = [world_center[0] - offset[0], world_center[1] - offset[1]];
+    placement.reflected = [false; 2];
+    let content = shape
+        .text
+        .as_ref()
+        .map(|text| text.content.clone())
+        .unwrap_or_else(|| crate::shape::ShapeText::default().content);
+    Some(TextObject {
+        id: shape.id,
+        document_id: shape.document_id,
+        surface: shape.surface,
+        placement,
+        width,
+        height,
+        content,
+        layout: Default::default(),
+    })
 }
 pub(super) fn paint_text(
     ui: &egui::Ui,
@@ -82,22 +121,118 @@ pub(super) fn paint_text(
             .with_angle(text.placement.rotation as f32),
     );
 }
+pub(super) fn paint_shape_text(
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    view: Transform,
+    shape: &crate::shape::Shape,
+    delta: crate::object::Placement,
+    cache: &mut HashMap<Uuid, TextCache>,
+) {
+    let Some(text) = &shape.text else { return };
+    let mut preview = shape.clone();
+    if !delta.is_identity() {
+        preview.placement = shape.placement.then(delta, [0.; 2]);
+    }
+    let Some(adapter) = shape_text_adapter(&preview) else {
+        return;
+    };
+    let scale = view.scale * adapter.placement.scale;
+    if cache.get(&shape.id).is_none_or(|c| {
+        (!Arc::ptr_eq(&c.content, &text.content) && c.content != text.content)
+            || c.width != adapter.width
+            || c.scale != scale
+    }) {
+        let galley = text_layout::layout_scaled(ui.ctx(), &text.content, adapter.width, scale);
+        cache.insert(
+            shape.id,
+            TextCache {
+                content: text.content.clone(),
+                width: adapter.width,
+                scale,
+                galley,
+            },
+        );
+    }
+    let galley = cache[&shape.id].galley.clone();
+    let region_height = (adapter.height * scale) as f32;
+    let vertical_offset = match text.vertical_alignment {
+        crate::shape::VerticalAlignment::Top => 0.,
+        crate::shape::VerticalAlignment::Middle => (region_height - galley.size().y).max(0.) * 0.5,
+        crate::shape::VerticalAlignment::Bottom => (region_height - galley.size().y).max(0.),
+    };
+    let origin = adapter
+        .placement
+        .apply([0., vertical_offset as f64 / scale]);
+    let p = view.to_screen(origin);
+    let corners = adapter.corners().map(|p| view.to_screen(p));
+    let clip = Rect::from_min_max(
+        Pos2::new(
+            corners
+                .iter()
+                .map(|p| p[0] as f32)
+                .fold(f32::INFINITY, f32::min),
+            corners
+                .iter()
+                .map(|p| p[1] as f32)
+                .fold(f32::INFINITY, f32::min),
+        ),
+        Pos2::new(
+            corners
+                .iter()
+                .map(|p| p[0] as f32)
+                .fold(f32::NEG_INFINITY, f32::max),
+            corners
+                .iter()
+                .map(|p| p[1] as f32)
+                .fold(f32::NEG_INFINITY, f32::max),
+        ),
+    );
+    painter.with_clip_rect(clip).add(
+        egui::epaint::TextShape::new(Pos2::new(p[0] as f32, p[1] as f32), galley, Color32::BLACK)
+            .with_angle(preview.placement.rotation as f32),
+    );
+    if cache[&shape.id].galley.size().y > region_height + 0.5
+        || cache[&shape.id].galley.size().x > (adapter.width * scale) as f32 + 0.5
+    {
+        let marker = adapter.placement.apply([adapter.width, adapter.height]);
+        let marker = view.to_screen(marker);
+        painter.text(
+            Pos2::new(marker[0] as f32, marker[1] as f32),
+            egui::Align2::RIGHT_BOTTOM,
+            "!",
+            egui::FontId::proportional(13.),
+            Color32::from_rgb(210, 112, 24),
+        );
+    }
+}
 impl Canvas {
     pub(super) fn scale_selected_text_sizes(&mut self, factor: f64, ctx: &egui::Context) -> bool {
         self.finish_text();
         let mut texts = Vec::new();
         let mut any_changed = false;
         for id in &self.selection.ids {
-            let Some(ObjectSnapshot::Text(snapshot)) = self.drawing.snapshot(*id) else {
-                return false;
+            let mut text = match self.drawing.snapshot(*id) {
+                Some(ObjectSnapshot::Text(snapshot)) => (**snapshot).clone(),
+                Some(ObjectSnapshot::Shape(shape)) if shape.text.is_some() => {
+                    let Some(proxy) = shape_text_adapter(shape) else {
+                        return false;
+                    };
+                    proxy
+                }
+                _ => return false,
             };
-            let mut text = (**snapshot).clone();
             any_changed |= text.content_mut().scale_font_sizes(factor);
             text_layout::measure(ctx, &mut text);
-            self.drawing.fit_text(&mut text);
+            if matches!(self.drawing.snapshot(*id), Some(ObjectSnapshot::Text(_))) {
+                self.drawing.fit_text(&mut text);
+            }
             texts.push(text);
         }
-        if texts.is_empty() || !any_changed || !self.drawing.replace_texts(texts, false) {
+        if texts.is_empty()
+            || !any_changed
+            || !self.drawing.replace_text_adapters(texts, None, false)
+        {
             return false;
         }
         self.selection.refresh(&self.drawing);
@@ -180,6 +315,20 @@ impl Canvas {
         }
     }
     fn start_text(&mut self, ui: &egui::Ui, text: TextObject, new: bool) {
+        self.start_text_target(ui, text, new, TextTarget::Standalone);
+    }
+    fn start_shape_text(&mut self, ui: &egui::Ui, shape: &crate::shape::Shape) {
+        if let Some(text) = shape_text_adapter(shape) {
+            self.start_text_target(ui, text, false, TextTarget::Shape);
+        }
+    }
+    fn start_text_target(
+        &mut self,
+        ui: &egui::Ui,
+        text: TextObject,
+        new: bool,
+        target: TextTarget,
+    ) {
         self.finish_text();
         self.selection_gesture = None;
         self.connection_gesture = None;
@@ -202,6 +351,7 @@ impl Canvas {
         self.text_session = Some(TextSession {
             typing: text.content.style.clone(),
             value: text,
+            target,
             ctx: ui.ctx().clone(),
             new,
             focus: true,
@@ -220,7 +370,11 @@ impl Canvas {
         let p = if text.placement.rotation.abs() < 1e-8 {
             text.placement.apply([0.; 2])
         } else {
-            text.world_bounds().unwrap().min
+            let center = text.placement.apply([text.width * 0.5, text.height * 0.5]);
+            [
+                center[0] - text.width * text.placement.scale * 0.5,
+                center[1] - text.height * text.placement.scale * 0.5,
+            ]
         };
         let p = view.to_screen(p);
         Rect::from_min_size(
@@ -459,10 +613,18 @@ impl Canvas {
             && let Some(pos) = ui.input(|i| i.pointer.interact_pos())
             && bounds.intersect(ui.clip_rect()).contains(pos)
             && let Some(id) = self.pick(surface, view.to_document([pos.x as f64, pos.y as f64]), 0.)
-            && let Some(ObjectSnapshot::Text(t)) = self.drawing.snapshot(id)
         {
-            self.start_text(ui, (**t).clone(), false);
-            return true;
+            match self.drawing.snapshot(id).cloned() {
+                Some(ObjectSnapshot::Text(t)) => {
+                    self.start_text(ui, (*t).clone(), false);
+                    return true;
+                }
+                Some(ObjectSnapshot::Shape(shape)) if !shape.kind().segment() => {
+                    self.start_shape_text(ui, &shape);
+                    return true;
+                }
+                _ => (),
+            }
         }
         consumed
     }
@@ -502,13 +664,38 @@ impl Canvas {
             self.text_session = Some(s);
             return;
         }
-        if let Some(ObjectSnapshot::Text(current)) = self.drawing.snapshot(s.value.id) {
-            s.value.placement = current.placement;
-            s.value.width = current.width;
-            s.value.height = current.height;
+        let current = match (s.target, self.drawing.snapshot(s.value.id)) {
+            (TextTarget::Standalone, Some(ObjectSnapshot::Text(current))) => Some((
+                current.placement,
+                current.width,
+                current.height,
+                current.content.clone(),
+                current.layout.clone(),
+            )),
+            (TextTarget::Shape, Some(ObjectSnapshot::Shape(current))) => {
+                shape_text_adapter(current).map(|proxy| {
+                    (
+                        proxy.placement,
+                        proxy.width,
+                        proxy.height,
+                        current
+                            .text
+                            .as_ref()
+                            .map(|text| text.content.clone())
+                            .unwrap_or(proxy.content),
+                        proxy.layout,
+                    )
+                })
+            }
+            _ => None,
+        };
+        if let Some((placement, width, height, content, layout)) = current {
+            s.value.placement = placement;
+            s.value.width = width;
+            s.value.height = height;
             if !s.composing {
-                s.value.content = current.content.clone();
-                s.value.layout = current.layout.clone();
+                s.value.content = content;
+                s.value.layout = layout;
             }
         }
         if let Some(preview) = self
@@ -531,13 +718,15 @@ impl Canvas {
         child.set_clip_rect(bounds.intersect(ui.clip_rect()));
 
         let palette = crate::ui::style::palette(ui);
-        child.painter().rect_stroke(
-            rect,
-            2.,
-            Line::new(1., palette.accent),
-            egui::StrokeKind::Outside,
-        );
-        if s.value.placement.rotation.abs() > 1e-8 {
+        if s.target == TextTarget::Standalone {
+            child.painter().rect_stroke(
+                rect,
+                2.,
+                Line::new(1., palette.accent),
+                egui::StrokeKind::Outside,
+            );
+        }
+        if s.target == TextTarget::Standalone && s.value.placement.rotation.abs() > 1e-8 {
             child.painter().text(
                 rect.left_top() - egui::vec2(0., 5.),
                 egui::Align2::LEFT_BOTTOM,
@@ -700,6 +889,20 @@ impl Canvas {
                 )
             })
             .inner;
+        if s.target == TextTarget::Shape {
+            let layout = text_layout::layout(ui.ctx(), &s.value.content, s.value.width);
+            if layout.size().y > s.value.height as f32 + 0.5
+                || layout.size().x > s.value.width as f32 + 0.5
+            {
+                child.painter().text(
+                    rect.right_bottom() - egui::vec2(3., 2.),
+                    egui::Align2::RIGHT_BOTTOM,
+                    "!",
+                    egui::FontId::proportional(13.),
+                    egui::Color32::from_rgb(210, 112, 24),
+                );
+            }
+        }
         if request_focus {
             output.response.request_focus();
             s.focus = false;
@@ -754,19 +957,25 @@ impl Canvas {
                 s.limit_notice = true;
             } else {
                 text_layout::measure(ui.ctx(), &mut s.value);
-                self.drawing.fit_text(&mut s.value);
+                if s.target == TextTarget::Standalone {
+                    self.drawing.fit_text(&mut s.value);
+                }
                 if s.composing {
                     self.text_session = Some(s);
                     return;
                 }
-                if !self.drawing.valid_object(&s.value.clone().into())
+                if s.target == TextTarget::Standalone
+                    && !self.drawing.valid_object(&s.value.clone().into())
                     && let Some(ObjectSnapshot::Text(old)) = self.drawing.snapshot(s.value.id)
                 {
                     s.value.height = old.height;
                 }
                 let time = ui.input(|i| i.time);
                 let merge = s.merge && time - s.chunk < 2. && s.edits < 32;
-                if self.drawing.replace_texts(vec![s.value.clone()], merge) {
+                let changed =
+                    self.drawing
+                        .replace_text_adapters(vec![s.value.clone()], None, merge);
+                if changed {
                     if !merge {
                         s.chunk = time;
                         s.edits = 0;
@@ -827,6 +1036,14 @@ impl Canvas {
             .iter()
             .filter_map(|id| match self.drawing.snapshot(*id) {
                 Some(ObjectSnapshot::Text(t)) => Some((**t).clone()),
+                Some(ObjectSnapshot::Shape(shape))
+                    if shape.text.is_some()
+                        || self.text_session.as_ref().is_some_and(|s| {
+                            s.target == TextTarget::Shape && s.value.id == shape.id
+                        }) =>
+                {
+                    shape_text_adapter(shape)
+                }
                 _ => None,
             })
             .collect();
@@ -901,6 +1118,26 @@ impl Canvas {
             .filter(|c| *c == '\n')
             .count();
         let mut paragraph_style = texts[0].content.paragraph(paragraph_index);
+        let shape_target = texts.iter().any(|text| {
+            matches!(
+                self.drawing.snapshot(text.id),
+                Some(ObjectSnapshot::Shape(_))
+            )
+        });
+        let mut vertical_alignment = texts
+            .iter()
+            .find_map(|text| match self.drawing.snapshot(text.id) {
+                Some(ObjectSnapshot::Shape(shape)) => Some(
+                    shape
+                        .text
+                        .as_ref()
+                        .map(|text| text.vertical_alignment)
+                        .unwrap_or_default(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let mut vertical_patch = None;
         let mut alignment_patch = None;
         let mut resize_patch = None;
         let mut line_spacing = None;
@@ -1062,6 +1299,24 @@ impl Canvas {
                     }
                 }
             });
+            if shape_target {
+                ui.horizontal(|ui| {
+                    ui.label("Vertical");
+                    for (label, value) in [
+                        ("Top", crate::shape::VerticalAlignment::Top),
+                        ("Middle", crate::shape::VerticalAlignment::Middle),
+                        ("Bottom", crate::shape::VerticalAlignment::Bottom),
+                    ] {
+                        if ui
+                            .selectable_value(&mut vertical_alignment, value, label)
+                            .clicked()
+                        {
+                            vertical_patch = Some(value);
+                            changed = true;
+                        }
+                    }
+                });
+            }
             let p = &mut paragraph_style;
             if ui
                 .add(
@@ -1086,19 +1341,21 @@ impl Canvas {
                 paragraph_spacing = Some(p.spacing);
                 changed = true;
             }
-            ui.separator();
-            ui.label("Text layout · resize behavior");
-            let mut mode = texts[0].layout.resize;
-            for (label, value) in [
-                ("Reflow Text", crate::text::ResizeBehavior::Reflow),
-                ("Scale Text (corners)", crate::text::ResizeBehavior::Scale),
-            ] {
-                if ui.selectable_value(&mut mode, value, label).clicked() {
-                    resize_patch = Some(value);
-                    changed = true;
+            if !shape_target {
+                ui.separator();
+                ui.label("Text layout · resize behavior");
+                let mut mode = texts[0].layout.resize;
+                for (label, value) in [
+                    ("Reflow Text", crate::text::ResizeBehavior::Reflow),
+                    ("Scale Text (corners)", crate::text::ResizeBehavior::Scale),
+                ] {
+                    if ui.selectable_value(&mut mode, value, label).clicked() {
+                        resize_patch = Some(value);
+                        changed = true;
+                    }
                 }
+                ui.weak("Edge handles always reflow text.");
             }
-            ui.weak("Edge handles always reflow text.");
         });
         if changed {
             let character_changed = patch != crate::text::TextStylePatch::default();
@@ -1163,11 +1420,16 @@ impl Canvas {
                     }
                 }
                 text_layout::measure(ui.ctx(), &mut t);
-                self.drawing.fit_text(&mut t);
+                if matches!(self.drawing.snapshot(t.id), Some(ObjectSnapshot::Text(_))) {
+                    self.drawing.fit_text(&mut t);
+                }
                 values.push(t);
             }
             let merge = self.style_gesture == Some((control, self.drawing.revision()));
-            if self.drawing.replace_texts(values, merge) {
+            if self
+                .drawing
+                .replace_text_adapters(values, vertical_patch, merge)
+            {
                 ui.ctx().request_repaint();
                 if let Some(s) = &mut self.text_session {
                     s.merge = false;
@@ -1333,11 +1595,13 @@ impl Canvas {
                 .into_iter()
                 .map(|mut t| {
                     text_layout::measure(ui.ctx(), &mut t);
-                    self.drawing.fit_text(&mut t);
+                    if matches!(self.drawing.snapshot(t.id), Some(ObjectSnapshot::Text(_))) {
+                        self.drawing.fit_text(&mut t);
+                    }
                     t
                 })
                 .collect();
-            self.drawing.replace_texts(values, false);
+            self.drawing.replace_text_adapters(values, None, false);
             self.selection.refresh(&self.drawing);
         } else {
             self.font_browser = Some(browser);

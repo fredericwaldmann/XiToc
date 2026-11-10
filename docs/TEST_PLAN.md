@@ -1477,3 +1477,19 @@ geometry does not change. Open Text and Paragraph repeatedly; verify the size
 control says `Mixed`, all sizes stay unchanged, and history is unchanged. Select
 only the middle run, enter a size, verify the other two runs are unchanged, then
 undo and redo.
+
+## M1.9 Shape + Text regression
+
+Automated shape tests cover supported-shape safe regions, excluded line/arrow
+hosts, stable shape identity, shared rich formatting scope, shape resize/rotate/
+reflect, clipboard/history, and magnetic connector attachment after movement.
+The canvas editor test types into a shape-hosted session, formats only a selected
+word, and verifies the selection remains highlighted and the object remains one
+Shape. Run `cargo test --all-targets`.
+
+Manual check: create a rectangle, double-click and type several lines; select a
+word and apply font, size, bold, and color without reselecting. Change paragraph
+alignment and shape vertical alignment, resize/rotate/flip, then duplicate and
+connect shapes. Verify the text stays readable/editable, object IDs and magnetic
+attachments behave normally, and overflowing content is retained and visibly
+marked. Repeat on Page and Whiteboard surfaces and at multiple zoom levels.

@@ -918,6 +918,84 @@ impl Drawing {
         }
         true
     }
+    /// Replace rich-text adapters in one journal entry. A standalone adapter
+    /// updates its TextObject; an adapter whose stable ID names a Shape updates
+    /// only that shape's embedded text, retaining geometry/style/relationships.
+    pub fn replace_text_adapters(
+        &mut self,
+        texts: Vec<crate::text::TextObject>,
+        vertical: Option<crate::shape::VerticalAlignment>,
+        merge: bool,
+    ) -> bool {
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut next = self.items.len();
+        for text in texts {
+            let id = text.id;
+            if !seen.insert(id) {
+                return false;
+            }
+            let old = self.snapshot(id);
+            let target: ObjectSnapshot = match old {
+                Some(ObjectSnapshot::Text(_)) | None => text.into(),
+                Some(ObjectSnapshot::Shape(shape)) => {
+                    let mut target = (**shape).clone();
+                    let mut shape_text = target.text.clone().unwrap_or_default();
+                    shape_text.content = text.content.clone();
+                    if let Some(value) = vertical {
+                        shape_text.vertical_alignment = value;
+                    }
+                    target.text = Some(shape_text);
+                    target.into()
+                }
+                Some(_) => return false,
+            };
+            if !self.valid_object(&target) {
+                return false;
+            }
+            if old == Some(&target) {
+                continue;
+            }
+            let index = if let Some(old) = old {
+                let index = self.object_slots[&id];
+                before.push((index, old.clone()));
+                index
+            } else {
+                let index = next;
+                next += 1;
+                index
+            };
+            after.push((index, target));
+        }
+        if after.is_empty() {
+            return false;
+        }
+        before.sort_by_key(|(i, _)| *i);
+        after.sort_by_key(|(i, _)| *i);
+        let original = if merge && self.cursor == self.history.len() {
+            match self.history.last().map(|entry| &entry.command) {
+                Some(Command::Replace {
+                    before: original,
+                    after: previous,
+                }) if *previous == before => Some(original.clone()),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if let Some(original) = original {
+            self.history.pop();
+            self.cursor -= 1;
+            self.execute(Command::Replace { before, after });
+            if let Command::Replace { before, .. } = &mut self.history.last_mut().unwrap().command {
+                *before = original;
+            }
+        } else {
+            self.execute(Command::Replace { before, after });
+        }
+        true
+    }
     pub fn fit_text(&self, text: &mut crate::text::TextObject) {
         if let Some(page) = self.bounds(text.surface) {
             let origin = text.placement.apply([0.; 2]);

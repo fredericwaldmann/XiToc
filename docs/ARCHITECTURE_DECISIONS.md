@@ -598,6 +598,18 @@ reflow. Separate run, paragraph and container styles for future reuse in shapes.
 Rich session paste is supported; HTML/RTF clipboard interchange is not implemented.
 No PDF persistence/schema changes or new text hosts are part of this decision.
 
+## M1.9 — Host rich text directly on Shape
+
+`Shape` owns optional `ShapeText` containing the shared `TextContent` and
+vertical alignment. Use the existing TextSession through a temporary editor
+adapter carrying the same stable Shape ID; updates patch Shape content only.
+This avoids a second editor and avoids child objects that would need separate
+selection, movement, clipboard, and connector synchronization. Geometry-derived
+safe regions provide initial wrapping for closed shapes; render clipping plus an
+overflow marker preserves content when it does not fit. Known tradeoff: the
+existing editing overlay remains unrotated, while committed rendering follows
+shape rotation. This does not alter persistence or PDF formats.
+
 
 ## 2026-11-10 — Correct standalone text scope and retain formatting selection
 

@@ -258,3 +258,13 @@ selection, installed native fonts,
 reversible live font previews, eight local resize handles and Unicode source.
 Embedded shape text and labels remain separate hosts; #26 stays open for its broader shape-text dependency.
 PDF text/font persistence and round trips remain M2.
+
+## M1.9 — Text inside shapes
+
+Supported closed shapes can host editable rich text as part of the same shape
+object. The existing rich editor, formatting runs, selection, clipboard and
+history are reused; shape geometry defines a conservative text region, with
+horizontal paragraph and vertical alignment. Rotation, reflection, shape
+transforms and magnetic connectors retain the canonical shape identity. Text
+remains in-memory until M2 PDF persistence; text inside open line/arrow shapes
+is not supported.

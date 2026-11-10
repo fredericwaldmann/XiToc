@@ -162,6 +162,7 @@ impl Canvas {
                 let text_only = !self.selection.ids.is_empty()
                     && self.selection.ids.iter().all(|id| {
                         matches!(self.drawing.snapshot(*id), Some(ObjectSnapshot::Text(_)))
+                            || matches!(self.drawing.snapshot(*id), Some(ObjectSnapshot::Shape(s)) if s.text.is_some())
                     });
                 if text_only {
                     let factor = if command == Smaller { 1.0 / 1.1 } else { 1.1 };
