@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const STORAGE_KEY: &str = "XiToc/preferences";
-const VERSION: u32 = 6;
+const VERSION: u32 = 7;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Theme {
@@ -14,6 +14,7 @@ pub enum Theme {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DrawingPreferences {
+    pub snapping: crate::snapping::SnapSettings,
     pub shape_defaults: crate::shape::ShapeDefaults,
     pub presets: crate::pen::Presets,
     pub eraser_radius: f64,
@@ -23,6 +24,7 @@ pub struct DrawingPreferences {
 impl Default for DrawingPreferences {
     fn default() -> Self {
         Self {
+            snapping: Default::default(),
             shape_defaults: Default::default(),
             presets: Default::default(),
             eraser_radius: 14.0,
@@ -155,7 +157,7 @@ impl Preferences {
                 serde_json::to_value(drawing).expect("serializable drawing defaults"),
             );
             object.insert("schema_version".into(), VERSION.into());
-        } else if version == 5 {
+        } else if version == 5 || version == 6 {
             value
                 .as_object_mut()
                 .ok_or("Preferences must be an object.")?
@@ -166,7 +168,8 @@ impl Preferences {
         if prefs.schema_version != VERSION {
             return Err("Unsupported preferences version.".into());
         }
-        if !prefs.drawing.shape_defaults.valid()
+        if !prefs.drawing.snapping.valid()
+            || !prefs.drawing.shape_defaults.valid()
             || !prefs.drawing.presets.validate()
             || !prefs.drawing.eraser_radius.is_finite()
             || !(4.0..=48.0).contains(&prefs.drawing.eraser_radius)
@@ -187,6 +190,7 @@ impl Preferences {
         storage.get_string(STORAGE_KEY).as_deref() == Some(json.as_str())
     }
     pub fn apply_drawing(&self, canvas: &mut crate::canvas::Canvas) {
+        canvas.snapping = self.drawing.snapping;
         canvas.text_resize_default = self.text_resize;
         canvas.shape_defaults = self.drawing.shape_defaults.clone();
         canvas.apply_pen(&self.drawing.presets.active().style);
@@ -381,7 +385,7 @@ pub(crate) mod tests {
         assert_eq!(Preferences::load(Some(&storage)).unwrap(), prefs);
         for json in [
             "broken",
-            r#"{"schema_version":7}"#,
+            r#"{"schema_version":8}"#,
             r#"{"drawing":{"width":0.0}}"#,
             r#"{"drawing":{"eraser_radius":49.0}}"#,
             r#"{"drawing":{"color":[0,0,0,0]}}"#,
@@ -390,5 +394,41 @@ pub(crate) mod tests {
             assert!(Preferences::decode(json).is_err(), "{json}");
         }
         assert_eq!(Preferences::decode("{}").unwrap(), Preferences::default());
+    }
+}
+
+#[cfg(test)]
+mod snapping_preferences_tests {
+    use super::*;
+    #[test]
+    fn snapping_defaults_migrate_validate_and_remain_separate_from_active_editors() {
+        for version in [5, 6, 7] {
+            let json = format!(
+                r#"{{"schema_version":{version},"drawing":{{"presets":{}}}}}"#,
+                serde_json::to_string(&crate::pen::Presets::default()).unwrap()
+            );
+            let preferences = Preferences::decode(&json).unwrap();
+            assert_eq!(preferences.drawing.snapping, Default::default());
+        }
+        let mut p = Preferences::default();
+        p.drawing.snapping.grid = true;
+        p.drawing.snapping.show_grid = false;
+        p.drawing.snapping.spacing = 24.;
+        p.drawing.snapping.sensitivity = crate::snapping::Sensitivity::High;
+        let mut storage = tests::MemoryStorage::default();
+        assert!(p.store(&mut storage));
+        assert_eq!(Preferences::load(Some(&storage)).unwrap(), p);
+        for bad in [0., 5000.] {
+            let mut value = serde_json::to_value(&p).unwrap();
+            value["drawing"]["snapping"]["spacing"] = bad.into();
+            assert!(Preferences::decode(&value.to_string()).is_err());
+        }
+        let doc = crate::document::DocumentData::blank(crate::document::DocumentKind::Page);
+        let mut c = crate::canvas::Canvas::new(&doc);
+        p.apply_drawing(&mut c);
+        assert_eq!(c.snapping, p.drawing.snapping);
+        c.snapping.objects = false;
+        assert!(p.drawing.snapping.objects);
+        assert!(!c.dirty());
     }
 }

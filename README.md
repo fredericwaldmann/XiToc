@@ -379,3 +379,9 @@ ungroups them. Double-click enters one group level, then double-click a child
 to edit it. Escape exits text editing before leaving a group. Right-click offers
 Lock/Unlock, Arrange and Transform. Grouping, locks and all canvas edits remain
 in memory until M2 PDF persistence. See [UI design](docs/UI_DESIGN.md) for policies.
+
+Object alignment: Edit/right-click → Align Objects aligns selected siblings or
+sets equal horizontal/vertical gaps. The top Snap menu controls object snapping,
+guides and the optional document grid; hold Alt during a drag to bypass snapping.
+Settings → Snapping configures defaults for future editors. All changes remain
+in memory pending M2 PDF persistence.

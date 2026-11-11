@@ -613,3 +613,42 @@ and effective visible order intact. Rendering and picking now both use canonical
 stacking order for all variants, including connectors crossing text/shapes.
 Canvas-only browser default suppression includes G and Shift+G; text input keeps
 native shortcuts. Existing top toolbar, themes, tabs and Explorer are unchanged.
+
+## M1.12 snapping and canvas alignment
+
+The TOP toolbar exposes Snap at editor widths ≥650 points; narrower layouts put
+Snap inside View. Menus use the existing CloseOnClickOutside behavior. Checkboxes:
+Snap to Objects, Show Alignment Guides, Snap to Grid and Show Grid. Snapping
+Settings exposes sensitivity (Low 4 / Normal 8 / High 12 logical screen points)
+and grid spacing (1–4096 document points). Defaults: objects/guides/grid display
+on, grid snapping off, 32-point grid. Settings → Snapping edits separately persisted
+defaults for newly opened editors; the toolbar changes the active session only.
+The grid is the existing subtle dot style on both document types. Hidden dots
+still permit snapping; low-zoom dot thinning does not change the configured grid.
+
+Edit and right-click → Align Objects exposes Left, Center Horizontally, Right,
+Top, Middle Vertically, Bottom and horizontal/vertical distribution. At least two
+eligible objects are required for alignment and three for distribution. These
+are canvas commands, distinct from rich-text Paragraph alignment. Collective
+eligible bounds are the alignment reference; distribution keeps the outer objects
+fixed and equalizes actual gaps without resizing. Insufficient space is reported
+without moving anything. Locked objects/groups with locked descendants cannot
+move and never unlock implicitly; locked siblings may be snap references.
+
+Normal selection treats a group as one unit; entering a group restricts candidates
+and commands to that sibling scope. Derived connector paths do not determine
+rectangular alignment bounds, including when grouped. External magnetic endpoints
+stay attached during group movement. One drag is still one history command.
+
+Hold Alt during an existing move/resize to bypass snapping temporarily; Alt-click
+still subtracts membership. Screen tolerance divides by zoom, release tolerance is
+1.5× acquisition tolerance, and pointer displacement always uses the original
+press. No animation or drag-origin reset. Resize follows existing anchors/aspect
+policies; rotated objects snap the active world-space grip, while proportional
+resizing accepts only achievable corrections without amplified rail jumps.
+
+Guides use the existing theme Accent and centralized SNAP_GUIDE_WIDTH=1 logical
+screen point. At most one relevant guide per axis appears, with small brackets
+and document-point gap numbers for equal spacing. They are painter overlays with
+no input allocation or canonical objects, and disappear on release/cancellation.
+Explorer, horizontal tabs, drawing toolbar placement and light/dark styles remain.

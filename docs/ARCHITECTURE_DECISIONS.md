@@ -657,3 +657,32 @@ connector fallbacks atomically. No PDF, sidecar, alignment or snapping is added.
 The requested GitHub issue was absent from the repository's open/closed issue list;
 the user confirmed no issue reference is needed. Implementation follows the
 supplied task specification without creating an issue or adding a Fixes reference.
+
+## 2026-11-11 — M1.12 snap a frozen proposal, not the previous preview
+
+Keep the existing drag/resize owners and immutable sources. Capture document-space
+sibling bounds once at gesture start, including locked references; use sorted
+axis-feature ranges and bounded neighbor searches rather than new per-frame
+geometry scans. Independent axis latches acquire at 4/8/12 screen points and release
+at 1.5×, with stable ID/feature tie order. Alt bypass clears latches without changing
+selection or persistent settings. Guide records are ephemeral painter data.
+
+Use AABBs for meaningful object edges/centers and actual unequal-size gaps. Group
+bounds for alignment omit derived connector paths, which may stretch to external
+objects. Restrict equal-spacing discovery to straddling neighbors with overlapping
+perpendicular projections and bounded nearby searches; global layout is out of
+scope. Explicit commands use collective eligible bounds and pin distribution
+extremes, rejecting insufficient space atomically. Locks exclude modification,
+including locked descendants; scopes never spill out of the active group/page.
+
+Retain intrinsic opposite-anchor resizing and text Reflow/Scale. Rotated hosts
+snap the world grip; one-degree-of-freedom resizing projects only achievable
+corrections and bounds the actual screen displacement to avoid near-parallel rail
+amplification. Final measured/page-constrained geometry can reject a guide.
+
+Different root deltas share one Replace transaction and connector reverse-index
+resolution. Container-owned wires keep external attachments while direct wire
+drags/copies retain their documented detach policies. Schema 7 stores only device
+snapping defaults; per-editor controls, grid display, latches and guides remain
+session state. The dot grid and snapping share document origin/spacing while
+visibility stays independent. No PDF persistence or constraint/layout solver.

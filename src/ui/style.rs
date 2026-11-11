@@ -167,3 +167,6 @@ pub fn frame(color: Color32, x: i8, y: i8) -> egui::Frame {
 const fn rgb(r: u8, g: u8, b: u8) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
+
+/// Logical screen-point width, independent of document zoom.
+pub const SNAP_GUIDE_WIDTH: f32 = 1.0;

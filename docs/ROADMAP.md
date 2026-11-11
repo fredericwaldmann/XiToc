@@ -287,3 +287,13 @@ Arrange changes immediate sibling order with consistent geometry hit priority.
 Both layouts share the same implementation. See ARCHITECTURE/UI_DESIGN for exact
 ownership, text-entry, child-lock and connector policies. All content remains
 memory-only pending M2; Alignment & Smart Snapping is separate future work.
+
+## M1.12 — Alignment, smart snapping and distribution
+
+Screen-space object/center/edge and focused equal-spacing snapping use captured
+candidates and per-axis hysteresis on existing drag/resize sessions. Explicit
+alignment and equal-gap distribution share the object/connector journal and obey
+group scopes/locks. TOP Snap and Settings provide independent object/grid/guide
+controls, sensitivity and grid spacing on both layouts. This does not implement
+automatic diagram layout, constraint solving or PDF persistence. Exact policies
+and verification are in ARCHITECTURE, UI_DESIGN and TEST_PLAN.

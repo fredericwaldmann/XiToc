@@ -849,7 +849,13 @@ impl Drawing {
             .filter(|(_, s)| ids.contains(&s.id()))
         {
             let target = match source {
-                ObjectSnapshot::Connector(c) => c.transformed(delta, ids).into(),
+                ObjectSnapshot::Connector(c) => c
+                    .transformed_in_group(
+                        delta,
+                        ids,
+                        self.parent(c.id).is_some_and(|p| ids.contains(&p)),
+                    )
+                    .into(),
                 _ => source.transformed(delta),
             };
             if !self.valid_object(&target) {
@@ -1650,3 +1656,6 @@ mod tests {
 
 #[path = "group_commands.rs"]
 mod organization;
+
+#[path = "alignment_commands.rs"]
+mod alignment_commands;

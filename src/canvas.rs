@@ -12,6 +12,8 @@ use std::{
 use uuid::Uuid;
 #[path = "canvas_selection.rs"]
 mod selection_ui;
+#[path = "canvas_snapping.rs"]
+mod snapping_ui;
 use crate::object::{CanvasObject, ObjectSnapshot};
 use selection_ui::SelectionGesture;
 #[path = "canvas_connectors.rs"]
@@ -269,6 +271,8 @@ impl Cached {
 const MESH_SEGMENTS: usize = 128;
 
 pub struct Canvas {
+    pub snapping: crate::snapping::SnapSettings,
+    snap_session: Option<crate::snapping::SnapSession>,
     unlock_target: Option<Uuid>,
     pub drawing: Drawing,
     text_session: Option<text_ui::TextSession>,
@@ -336,6 +340,8 @@ impl Canvas {
             pen_type: crate::pen::PenType::Pressure,
             color: [37, 99, 200, 255],
             width: 2.5,
+            snapping: Default::default(),
+            snap_session: None,
             unlock_target: None,
             eraser_radius: 14.0,
             smoothing_strength: 50,
@@ -391,6 +397,7 @@ impl Canvas {
             || matches!(&self.gesture, Some(Gesture::Pen(stroke)) if !stroke.points.is_empty())
     }
     pub fn finish(&mut self) {
+        self.snap_session = None;
         self.font_browser = None;
         self.finish_text();
         self.text_creation = None;
@@ -555,6 +562,7 @@ impl Canvas {
             // Explicit releases have already committed on the owning surface.
             // A lost button state without a release safely cancels the preview.
             self.selection_gesture = None;
+            self.snap_session = None;
         }
         // A release can occur outside the canvas/window or on a hidden page.
         if !ui.input(|i| i.pointer.button_down(PointerButton::Primary)) && self.gesture.is_some() {

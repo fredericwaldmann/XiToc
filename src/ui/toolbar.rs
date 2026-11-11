@@ -63,7 +63,7 @@ pub fn show(
                 editor.canvas.select(Tool::StickyNote);
             }
             let reserved = if width >= 1000.0 { 480.0 } else if width >= 800.0 { 380.0 } else if width >= 500.0 { 268.0 } else { 210.0 };
-            let reserved=reserved+60.0+if width>=400.0{30.0}else{0.0};
+            let reserved=reserved+120.0+if width>=400.0{30.0}else{0.0};
             let strip_width = (width - reserved).max(24.0);
             ui.allocate_ui(egui::vec2(strip_width, style::CONTROL), |ui| {
                 egui::ScrollArea::horizontal().id_salt("pen-presets").min_scrolled_width(24.0).auto_shrink([false, false])
@@ -120,9 +120,11 @@ pub fn show(
                     }
                     super::drawing_controls::eraser_radius(ui, &mut editor.canvas.eraser_radius);
                 });
+            if width >= 650.0 { menu(ui, "Snap", |ui| super::snapping_controls::menu(ui, &mut editor.canvas.snapping)); }
             if width >= 500.0 { history(ui, &mut editor.canvas); }
             if width >= 800.0 { view(ui, doc, editor); }
-            else { menu(ui, "View", |ui| { if width<400.0 && icons::button(ui,Icon::Hand,"Hand · Space-drag to pan",editor.canvas.tool==Tool::Pan).clicked(){editor.canvas.select(Tool::Pan);} history(ui, &mut editor.canvas); view(ui, doc, editor); export(ui, action, editor.canvas.dirty()); }); }
+            else { menu(ui, "View", |ui| { if width<650.0 {menu(ui, "Snap", |ui| super::snapping_controls::menu(ui, &mut editor.canvas.snapping));}
+                if width<400.0 && icons::button(ui,Icon::Hand,"Hand · Space-drag to pan",editor.canvas.tool==Tool::Pan).clicked(){editor.canvas.select(Tool::Pan);} history(ui, &mut editor.canvas); view(ui, doc, editor); export(ui, action, editor.canvas.dirty()); }); }
             #[cfg(target_arch = "wasm32")]
             if width >= 1000.0 { export(ui, action, editor.canvas.dirty()); }
         });

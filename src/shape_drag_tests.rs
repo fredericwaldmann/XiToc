@@ -146,7 +146,7 @@ fn sticky_note_eight_resize_handles_follow_rotation_zoom_and_disable_auto_height
                 start,
                 moved: false,
             });
-            c.selection_sample(surface, target, scale, false);
+            c.selection_sample(surface, target, scale, false, false);
             c.commit_selection();
             let ObjectSnapshot::Shape(resized) = c.drawing.snapshot(id).unwrap() else {
                 panic!("resizing retains the same note object")
