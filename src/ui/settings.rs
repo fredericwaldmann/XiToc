@@ -61,6 +61,29 @@ impl SettingsDialog {
                             ui.separator();
                             super::shape_controls::defaults(ui, &mut prefs.drawing.shape_defaults);
                             ui.separator();
+                            ui.strong("Default sticky note color");
+                            ui.horizontal_wrapped(|ui| {
+                                for (name, color) in crate::shape::STICKY_NOTE_PALETTE
+                                    .iter()
+                                    .filter(|(name, _)| *name != "Custom")
+                                {
+                                    let selected = prefs.drawing.sticky_note_color == *color;
+                                    if ui.add(egui::Button::new("  ")
+                                        .fill(egui::Color32::from_rgb(color[0], color[1], color[2]))
+                                        .selected(selected))
+                                        .on_hover_text(*name)
+                                        .clicked()
+                                    {
+                                        prefs.drawing.sticky_note_color = *color;
+                                    }
+                                }
+                            });
+                            super::shape_controls::color_control(
+                                ui,
+                                &mut prefs.drawing.sticky_note_color,
+                                255,
+                            );
+                            ui.separator();
                             super::drawing_controls::eraser_radius(ui, &mut prefs.drawing.eraser_radius);
                             ui.strong("Eraser mode");
                             egui::ComboBox::from_id_salt("preferred-eraser-mode")

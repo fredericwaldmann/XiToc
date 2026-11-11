@@ -303,7 +303,9 @@ impl Canvas {
             return None;
         };
         let corner = shape.endpoints().is_none();
-        let ends: Vec<_> = if let Some(ends) = shape.endpoints() {
+        let ends: Vec<_> = if let Some(handles) = shape.note_resize_handles() {
+            handles.to_vec()
+        } else if let Some(ends) = shape.endpoints() {
             ends.to_vec()
         } else {
             shape.box_corners()?.to_vec()
@@ -352,8 +354,9 @@ impl Canvas {
         };
         let shape = self.shape_edit_preview().unwrap_or(shape);
         let points: Vec<_> = shape
-            .endpoints()
+            .note_resize_handles()
             .map(|p| p.to_vec())
+            .or_else(|| shape.endpoints().map(|p| p.to_vec()))
             .or_else(|| shape.box_corners().map(|p| p.to_vec()))
             .unwrap_or_default();
         if !points.is_empty() {

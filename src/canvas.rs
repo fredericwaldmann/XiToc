@@ -30,6 +30,7 @@ pub enum Tool {
     Lasso,
     Shape,
     Text,
+    StickyNote,
 }
 
 struct Erasing {
@@ -302,6 +303,7 @@ pub struct Canvas {
     connection_gesture: Option<connectors_ui::ConnectionGesture>,
     route_cache: HashMap<Uuid, (crate::connector::Connector, crate::shape::Shape)>,
     pub shape_defaults: crate::shape::ShapeDefaults,
+    pub sticky_note_color: [u8; 3],
     style_gesture: Option<(egui::Id, u64)>,
     pub shape_kind: crate::shape::ShapeKind,
     shape_draft: Option<shapes_ui::ShapeDraft>,
@@ -362,6 +364,7 @@ impl Canvas {
             connection_gesture: None,
             route_cache: Default::default(),
             shape_defaults: Default::default(),
+            sticky_note_color: [255, 244, 177],
             style_gesture: None,
             shape_kind: crate::shape::ShapeKind::Rectangle,
             shape_draft: None,
@@ -591,6 +594,10 @@ impl Canvas {
             self.shape_surface(ui, bounds, surface, transform);
             self.paint(ui, bounds, surface, transform);
             self.paint_shape_draft(ui, bounds, surface, transform);
+            return;
+        }
+        if self.tool == Tool::StickyNote {
+            self.paint(ui, bounds, surface, transform);
             return;
         }
         if matches!(self.tool, Tool::Select | Tool::Lasso) {
@@ -1002,6 +1009,12 @@ impl Canvas {
                             delta,
                             self.drawing.owner(),
                         );
+                        text_ui::paint_sticky_shadow(
+                            &selected,
+                            transform,
+                            preview,
+                            crate::object::Placement::default(),
+                        );
                         shapes_ui::paint_shape(
                             ui,
                             &selected,
@@ -1023,6 +1036,7 @@ impl Canvas {
                             );
                         }
                     } else {
+                        text_ui::paint_sticky_shadow(&painter, transform, preview, delta);
                         shapes_ui::paint_shape(
                             ui,
                             &painter,

@@ -646,3 +646,15 @@ Shape styling and connectors retain their existing model and ID relationships.
 Coverage includes shape text-region geometry, formatting scope, stable identity,
 clipboard/history, transforms, and magnetic connector behavior. Text remains
 memory-only pending the PDF persistence milestone.
+
+## M1.10 — Sticky Notes
+
+Sticky notes reuse Shape + Text as one object: a rounded rectangle with captured
+fill, optional shadow/auto-height options and shared ShapeText content. The
+toolbar click creates and immediately edits a note; TextSession, formatting
+selection, rich clipboard, resizing/rotation/flip, object journal and magnetic
+connector routing are reused. Note appearance has a separate compact palette and
+custom picker; Drawing Settings captures the default color for future notes.
+Eight local grips resize rotated notes and disable auto-height; text never
+shrinks or disappears, and Page-constrained growth falls back to a visible
+overflow marker. M1.10 is in-memory; no PDF persistence or grouping is added.

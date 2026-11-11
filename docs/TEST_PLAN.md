@@ -1493,3 +1493,18 @@ alignment and shape vertical alignment, resize/rotate/flip, then duplicate and
 connect shapes. Verify the text stays readable/editable, object IDs and magnetic
 attachments behave normally, and overflowing content is retained and visibly
 marked. Repeat on Page and Whiteboard surfaces and at multiple zoom levels.
+
+## M1.10 Sticky Notes regression
+
+Automated coverage verifies tool creation enters the shared Shape text session,
+default/custom colors and settings migration, mixed text formatting, auto-height
+and journal restoration, all eight resize grips under rotated placement and
+0.5–4× zoom, manual-resize auto-height disablement, clipboard identity, and
+magnetic connector anchors after resize/move/undo. Run `cargo test --all-targets`.
+
+Manual check: create a note on both a Page Note and Whiteboard. Type multiple
+paragraphs, format one selected word via Text | Paragraph, then change the note
+color and verify the text styles stay unchanged. Resize from all eight grips,
+rotate/flip, test auto-height and overflow near a Page edge, duplicate/copy/paste,
+connect to a rectangle and move both objects. Repeat at 50%, 100%, 200%, and
+400%, then undo/redo creation, text, appearance and geometry changes.

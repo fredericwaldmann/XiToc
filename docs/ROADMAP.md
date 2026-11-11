@@ -268,3 +268,12 @@ horizontal paragraph and vertical alignment. Rotation, reflection, shape
 transforms and magnetic connectors retain the canonical shape identity. Text
 remains in-memory until M2 PDF persistence; text inside open line/arrow shapes
 is not supported.
+
+## M1.10 — Sticky Notes
+
+Sticky notes reuse the existing Shape snapshot and ShapeText editor as one
+object. A top-toolbar click creates a ready-to-type note; appearance uses
+pastel/custom backgrounds, optional shadow and automatic height. Eight local
+resize grips, transforms, clipboard/history and magnetic connectors stay on the
+canonical shape ID. Per-device defaults affect future notes only. No PDF
+persistence, grouping, or other planned tools are included in this slice.

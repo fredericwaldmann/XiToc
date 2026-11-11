@@ -485,6 +485,69 @@ fn labeled_shapes_keep_magnetic_connector_identity_and_routing_after_move() {
 }
 
 #[test]
+fn sticky_note_resize_keeps_attached_connector_live_and_undoable() {
+    use crate::{object::Placement, shape::Shape};
+    let (mut canvas, surface) = setup(DocumentKind::Whiteboard);
+    let mut note = Shape::create_sticky_note(
+        canvas.drawing.owner(),
+        surface,
+        [50., 100.],
+        [180., 140.],
+        [255, 244, 177],
+    )
+    .unwrap();
+    let note_id = note.id;
+    assert!(canvas.drawing.add_shape(note.clone()));
+    let other = add_shape(
+        &mut canvas,
+        surface,
+        ShapeKind::Rectangle,
+        [360., 120.],
+        [460., 220.],
+    );
+    let connector = Connector::new(
+        canvas.drawing.owner(),
+        surface,
+        Endpoint::attached(&note, Port::Right).unwrap(),
+        Endpoint::attached(&other, Port::Left).unwrap(),
+        Default::default(),
+    );
+    let connector_id = connector.id;
+    assert!(canvas.drawing.add_connector(connector));
+    let old_endpoint = edge(&canvas).source.position();
+    let start = note.note_resize_handles().unwrap()[3];
+    let local = note.placement.inverse(start);
+    let target = note.placement.apply([local[0] + 30., local[1]]);
+    note = note.with_note_handle(3, target).unwrap();
+    assert!(canvas.drawing.replace_shape(note));
+    let ObjectSnapshot::Connector(updated) = canvas.drawing.snapshot(connector_id).unwrap() else {
+        panic!()
+    };
+    assert_eq!(updated.source.target(), Some(note_id));
+    assert_ne!(updated.source.position(), old_endpoint);
+    assert!(canvas.drawing.transform_objects(
+        &std::collections::HashSet::from([note_id]),
+        Placement {
+            origin: [100., 160.],
+            position: [160., 220.],
+            ..Default::default()
+        }
+    ));
+    let ObjectSnapshot::Connector(moved) = canvas.drawing.snapshot(connector_id).unwrap() else {
+        panic!()
+    };
+    assert_eq!(moved.source.target(), Some(note_id));
+    assert_ne!(moved.source.position(), old_endpoint);
+    canvas.drawing.undo();
+    canvas.drawing.undo();
+    let ObjectSnapshot::Connector(restored) = canvas.drawing.snapshot(connector_id).unwrap() else {
+        panic!()
+    };
+    assert_eq!(restored.source.target(), Some(note_id));
+    assert_eq!(restored.source.position(), old_endpoint);
+}
+
+#[test]
 fn advanced_route_handle_drags_preview_commit_cancel_and_undo_once_across_views() {
     use crate::connector::Route;
     for kind in [DocumentKind::Page, DocumentKind::Whiteboard] {

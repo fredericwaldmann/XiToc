@@ -18,13 +18,16 @@ changes remain domain APIs without Arrange controls. Cut and arrow-key nudges ar
 implemented alongside the existing clipboard and manipulation commands.
 Stroke, Shape, Connector and Text are implemented canvas-object content types. Shapes include
 rectangle, rounded rectangle, circle, ellipse, triangle, diamond, line and arrow.
+Sticky notes are Shape objects with note-specific appearance/auto-height options
+and ShapeText content; they share selection, transforms, clipboard, history and
+magnetic connector anchors with shapes.
 Selected shapes support contextual fill/border/opacity/pattern/radius/arrowhead
 formatting, mixed-selection batch changes and separate persistent creation defaults.
 
 The PDF codec creates and reopens **blank** native documents. It does not save or
 reload handwriting. Dirty drawing disables browser PDF export; Ctrl/Cmd+S explains
 the M2 limitation. Ordinary PDFs open as read-only with no PDF preview renderer.
-Sticky notes, formulas, images, multipage creation,
+Formulas, images, multipage creation,
 browser directory handles, ink autosave and crash recovery remain planned.
 
 ## Crate and module map
@@ -849,9 +852,9 @@ runs; external clipboard data is currently plain text, not HTML/RTF.
 Tests in text_tests.rs and canvas_text.rs cover range/grapheme operations, mixed
 layout, native fonts/fallback, clipboard/history, real widgets/focus, preview
 transactions and rotated eight-handle resizing at 50–400%. Existing text_controller
-and mixed object regression suites remain active. Future shape text/labels/sticky
-notes reuse these primitives; those hosts and PDF serialization remain outside
-this feature. See ARCHITECTURE.md and TEST_PLAN.md for platform/manual limits.
+and mixed object regression suites remain active. Shape text and sticky notes
+reuse these primitives; connector/formula label hosts and PDF serialization
+remain future work. See ARCHITECTURE.md and TEST_PLAN.md for platform/manual limits.
 
 For text-only selections, the contextual −/+ buttons scale `TextContent.style.size`
 and every `FormatRun.style.size` by reciprocal 0.9/1.1 factors. They do not change
@@ -880,3 +883,16 @@ Reflection relocates the region while rendered glyphs remain readable. Editing
 uses the existing unrotated text overlay. Connectors continue to reference the
 unchanged canonical shape ID. Text inside shapes is memory-only, like the rest
 of current drawing content; no PDF persistence is introduced.
+
+### M1.10 sticky notes
+
+Sticky notes use `sticky_note: Some(StickyNoteOptions)` on the canonical Shape,
+rounded-rectangle geometry, ShapeStyle fill, and shared ShapeText content. They
+reuse the existing shape renderer, eight local resize grips, selection,
+transforms, clipboard, history, and connector relationships. The top Sticky
+Note tool creates a default 220×180 object at the pointer and enters the shared
+Shape text session. `DrawingPreferences.sticky_note_color` affects new notes
+only. The separate Note appearance menu patches background/shadow/auto-height;
+Text | Paragraph retains the shared rich-text controls. Auto-height expands to
+measured content, and Page-constrained growth keeps the text while showing the
+overflow marker. Notes remain in-memory pending PDF persistence.

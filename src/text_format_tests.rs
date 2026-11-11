@@ -4,7 +4,7 @@ use super::{
     *,
 };
 use crate::{
-    canvas::selection_ui::tests::setup,
+    canvas::selection_ui::tests::{moved, screen, setup},
     document::DocumentKind,
     text::{Alignment, TextStylePatch},
 };
@@ -69,6 +69,37 @@ impl Harness {
             galleys: Vec::new(),
         };
         harness.frame(vec![]);
+        harness
+    }
+    fn create_sticky_note() -> Self {
+        let (mut canvas, surface) = setup(DocumentKind::Whiteboard);
+        let ctx = egui::Context::default();
+        text_layout::install(&ctx);
+        canvas.sticky_note_color = [255, 218, 226];
+        canvas.select(Tool::StickyNote);
+        let mut harness = Self {
+            ctx,
+            canvas,
+            surface,
+            id: Uuid::nil(),
+            labels: HashMap::new(),
+            galleys: Vec::new(),
+        };
+        let view = crate::canvas::selection_ui::tests::t();
+        let at = [220., 240.];
+        let screen = screen(view, at);
+        let pos = egui::pos2(screen[0] as f32, screen[1] as f32);
+        harness.frame(vec![
+            moved(view, at),
+            Event::PointerButton {
+                pos,
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: Default::default(),
+            },
+        ]);
+        harness.id = harness.canvas.drawing.items()[0].id();
+        assert!(harness.canvas.text_session.is_some());
         harness
     }
     fn value(&self) -> &TextObject {
@@ -238,6 +269,31 @@ fn shape_text_is_one_shape_and_reuses_the_rich_editor_and_formatting_scope() {
     assert_eq!(content.style_at(8).size, 19.);
     assert_eq!(content.style_at(18).size, 18.);
     assert_eq!(h.canvas.text_session.as_ref().unwrap().value.id, h.id);
+}
+
+#[test]
+fn sticky_note_tool_creates_pink_shape_and_edits_through_shared_rich_text_session() {
+    let mut h = Harness::create_sticky_note();
+    assert!(matches!(h.canvas.tool, Tool::Select));
+    assert_eq!(h.canvas.selection.ids, HashSet::from([h.id]));
+    let Some(ObjectSnapshot::Shape(note)) = h.canvas.drawing.snapshot(h.id) else {
+        panic!("sticky note is stored as one Shape object")
+    };
+    assert!(note.is_sticky_note());
+    assert_eq!(note.style.fill, Some([255, 218, 226]));
+    assert!(h.canvas.text_session.as_ref().unwrap().target == TextTarget::Shape);
+    h.frame(vec![Event::Text("Hello beautiful world".into())]);
+    let selected = h.select(6, 15);
+    h.click("Text", selected);
+    h.click("+", selected);
+    h.highlight();
+    let Some(ObjectSnapshot::Shape(note)) = h.canvas.drawing.snapshot(h.id) else {
+        panic!()
+    };
+    assert_eq!(note.text.as_ref().unwrap().content.style_at(0).size, 16.);
+    assert_eq!(note.text.as_ref().unwrap().content.style_at(8).size, 17.);
+    assert_eq!(note.text.as_ref().unwrap().content.style_at(18).size, 16.);
+    assert_eq!(note.style.fill, Some([255, 218, 226]));
 }
 #[test]
 fn font_preview_real_canvas_freezes_direction_and_highlights_cancel_and_commit() {

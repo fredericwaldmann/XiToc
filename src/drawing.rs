@@ -947,6 +947,27 @@ impl Drawing {
                         shape_text.vertical_alignment = value;
                     }
                     target.text = Some(shape_text);
+                    if target.sticky_note.is_some_and(|note| note.auto_height)
+                        && let crate::shape::ShapeGeometry::Box {
+                            size,
+                            corner_radius,
+                            ..
+                        } = &target.geometry
+                    {
+                        let original_geometry = target.geometry.clone();
+                        let size = *size;
+                        let wanted = (text.height + 28.0).max(size[1]);
+                        target.geometry = crate::shape::ShapeGeometry::Box {
+                            kind: crate::shape::ShapeKind::RoundedRectangle,
+                            size: [size[0], wanted],
+                            corner_radius: (*corner_radius).min(wanted * 0.2),
+                        };
+                        // Keep edits even when Page bounds leave no room to grow;
+                        // the renderer marks the retained overflow for the user.
+                        if !self.valid_object(&target.clone().into()) {
+                            target.geometry = original_geometry;
+                        }
+                    }
                     target.into()
                 }
                 Some(_) => return false,
@@ -969,6 +990,9 @@ impl Drawing {
             after.push((index, target));
         }
         if after.is_empty() {
+            return false;
+        }
+        if !self.update_links(&mut before, &mut after) {
             return false;
         }
         before.sort_by_key(|(i, _)| *i);

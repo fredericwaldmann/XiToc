@@ -215,6 +215,7 @@ impl Connector {
             geometry,
             style,
             text: None,
+            sticky_note: None,
         }
     }
     /// Formatting retains canonical heads even when coincident endpoints have
