@@ -595,7 +595,7 @@ fn oversized_paste_is_rejected_without_losing_existing_source() {
     assert_eq!(value(&c).content.text, "Keep this");
 }
 #[test]
-fn a_text_body_takes_pick_priority_over_a_crossing_connector() {
+fn a_text_body_and_crossing_connector_follow_explicit_stacking_order() {
     use crate::connector::{Connector, Endpoint};
     let (mut c, s) = setup(DocumentKind::Whiteboard);
     let mut text = TextObject::new(c.drawing.owner(), s, [40., 160.], 120.);
@@ -613,6 +613,12 @@ fn a_text_body_takes_pick_priority_over_a_crossing_connector() {
         },
         Default::default(),
     );
+    let wid = wire.id;
     assert!(c.drawing.add_connector(wire));
+    assert_eq!(c.pick(s, [60., 170.], 1.), Some(wid));
+    assert!(
+        c.drawing
+            .arrange(&HashSet::from([id]), SelectionCommand::BringToFront)
+    );
     assert_eq!(c.pick(s, [60., 170.], 1.), Some(id));
 }

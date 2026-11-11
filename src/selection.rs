@@ -7,6 +7,13 @@ use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SelectionCommand {
+    Group,
+    Ungroup,
+    Lock,
+    BringToFront,
+    BringForward,
+    SendBackward,
+    SendToBack,
     SelectAll,
     Copy,
     Cut,
@@ -32,6 +39,7 @@ pub enum Membership {
 
 pub struct Selection {
     pub ids: HashSet<ObjectId>,
+    pub expanded: HashSet<ObjectId>,
     pub surface: Surface,
     pub bounds: Option<ObjectBounds>,
     pub geometry: Option<ObjectBounds>,
@@ -42,6 +50,7 @@ impl Selection {
     pub fn new(surface: Surface) -> Self {
         Self {
             ids: HashSet::new(),
+            expanded: HashSet::new(),
             surface,
             bounds: None,
             geometry: None,
@@ -57,6 +66,7 @@ impl Selection {
     }
     pub fn clear(&mut self) {
         self.ids.clear();
+        self.expanded.clear();
         self.bounds = None;
         self.geometry = None;
         self.objects.clear();
@@ -92,14 +102,16 @@ impl Selection {
         self.bounds = None;
         self.geometry = None;
         self.objects.clear();
+        self.expanded.clear();
         if self.ids.is_empty() {
             return;
         }
         let mut live = HashSet::with_capacity(self.ids.len());
-        for object in drawing
-            .objects()
-            .filter(|o| o.surface() == self.surface && self.ids.contains(&o.object_id()))
-        {
+        for object in drawing.objects().filter(|o| {
+            o.surface() == self.surface
+                && self.ids.contains(&o.object_id())
+                && drawing.in_scope(o.object_id())
+        }) {
             let id = object.object_id();
             live.insert(id);
             if let Some(b) = object.world_bounds() {
@@ -111,6 +123,7 @@ impl Selection {
             }
         }
         self.ids = live;
+        self.expanded = drawing.expanded(&self.ids);
     }
 }
 

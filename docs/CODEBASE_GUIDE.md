@@ -13,10 +13,10 @@ See [architecture decisions](ARCHITECTURE_DECISIONS.md) for constraints and
 XiToc edits vector handwriting in memory on Page Notes and Whiteboards. Pen
 presets, smoothing, pressure where delivered, both erasers, selection/lasso,
 move/proportional resize, clipboard operations and undo/redo are implemented.
-Rotation has a live group handle and 15-degree Shift snapping; explicit z-order
-changes remain domain APIs without Arrange controls. Cut and arrow-key nudges are
+Rotation has a live group handle and 15-degree Shift snapping; Group/Ungroup, Lock
+and scoped Arrange commands are available in the Edit/context menus. Cut and arrow-key nudges are
 implemented alongside the existing clipboard and manipulation commands.
-Stroke, Shape, Connector and Text are implemented canvas-object content types. Shapes include
+Stroke, Shape, Connector, Text and Group are implemented canvas-object content types. Shapes include
 rectangle, rounded rectangle, circle, ellipse, triangle, diamond, line and arrow.
 Sticky notes are Shape objects with note-specific appearance/auto-height options
 and ShapeText content; they share selection, transforms, clipboard, history and
@@ -529,9 +529,9 @@ is included by the private selection adapter via `#[path]`; it is not a second
 editor implementation. Tests assert cache Arc reuse, index pruning, exact history,
 legacy decoding, clip geometry, ownership, layout/focus and discard behavior.
 
-The current source has 224 Rust tests: 216 normally run and eight ignored
+The M1.11 source has 273 Rust tests: 264 normally run and nine ignored
 release benchmarks (whole erase, partial document, partial geometry, smoothing,
-indexed lasso, rectangle selection, multi-stroke rotation preview, and multi-shape movement preview). Historical recorded results are in TEST_PLAN, not proof of hardware
+indexed lasso, rectangle selection, multi-stroke rotation preview, multi-shape movement preview, and nested-group movement preview). Historical recorded results are in TEST_PLAN, not proof of hardware
 latency or a fresh run of every platform. [scripts/test_release.py](../scripts/test_release.py)
 adds Python unittest fixtures for archive completeness, corruption/path safety,
 CPU headers, executable bits, manifest/tag matching and Cargo metadata discovery.
@@ -896,3 +896,33 @@ only. The separate Note appearance menu patches background/shadow/auto-height;
 Text | Paragraph retains the shared rich-text controls. Auto-height expands to
 measured content, and Page-constrained growth keeps the text while showing the
 overflow marker. Notes remain in-memory pending PDF persistence.
+
+## M1.11 organization source map
+
+`group.rs` adds the actual Group CanvasObject and bounded forest validation;
+`group_commands.rs` is a private child module of Drawing, implementing ownership,
+scoped selection targets, grouping/ungrouping, inherited locks, Arrange and
+postorder normalization. It shares Drawing's canonical ObjectSnapshot vector and
+Replace journal. Bounds/parent indexes are derived; child lists and individual
+lock flags are semantic. Children keep world-space placements and stable IDs.
+
+Selection caches expanded descendants by revision/membership. Frozen DragSession
+captures those IDs and sources once; all preview/commit routes expand without
+duplicating transforms. Canvas's normal sequence supplies both visible stacking
+and highest-index geometry picking. Group edit scope is session-only. Clipboard
+capture includes all descendants; validation checks the entire ownership forest,
+and paste remaps group members and internal connector targets to fresh IDs.
+Uncopied attachment targets detach. New pasted roots join the active scope.
+
+`group_tests.rs`, included by canvas_selection, covers both layouts, hierarchy and
+nested regrouping, identity/history, move/scale/rotate/flips, rich text/sticky/ink
+preservation, internal/external connectors, clipboard remapping/validation, lock
+inheritance/unlocking, all Arrange commands, geometry picking, area scope, actual
+keyboard/double-click/text editing and frozen offscreen drags at 50–400% zoom.
+See ARCHITECTURE and UI_DESIGN's M1.11 sections for interaction and lock policies.
+PDF storage remains blank-only; organization does not add persistence or snapping.
+
+Single-selection shape handles now resolve their one ID through Drawing's index,
+including when the selected object is a Group; they do not scan the document on
+every hover/paint. Movement benchmarks explicitly capture their frozen move because
+dense magnetic-port fixtures otherwise measure connector gestures accidentally.

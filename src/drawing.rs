@@ -100,6 +100,8 @@ pub enum Smoothing {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Stroke {
     #[serde(default)]
+    pub locked: bool,
+    #[serde(default)]
     pub placement: crate::object::Placement,
     #[serde(default)]
     pub pen_type: crate::pen::PenType,
@@ -121,6 +123,7 @@ impl Stroke {
             placement: Default::default(),
             pen_type: crate::pen::PenType::Monoline,
             pressure_style: PressureStyle::default(),
+            locked: false,
             id: Uuid::new_v4(),
             document_id,
             surface,
@@ -260,12 +263,15 @@ struct HistoryEntry {
     command: Command,
     // UI selection intent excludes automatically updated dependent connectors.
     selection: Option<Vec<Uuid>>,
+    undo_selection: Option<Vec<Uuid>>,
 }
 
 pub struct Drawing {
     owner: Uuid,
     layout: Layout,
     items: Vec<ObjectSnapshot>,
+    parents: std::collections::HashMap<Uuid, Uuid>,
+    pub editing_group: Option<Uuid>,
     live_ids: std::collections::HashSet<Uuid>,
     object_slots: std::collections::HashMap<Uuid, usize>,
     // Transient Schmitt state for live target previews; never canonical content.
@@ -283,6 +289,8 @@ impl Drawing {
             owner: data.id(),
             layout: data.layout().clone(),
             items: Vec::new(),
+            parents: Default::default(),
+            editing_group: None,
             live_ids: Default::default(),
             object_slots: Default::default(),
             routing_hints: Default::default(),
@@ -327,10 +335,24 @@ impl Drawing {
         }
     }
     fn refresh_ink_view(&mut self) {
+        self.parents.clear();
+        for o in &self.items {
+            if let ObjectSnapshot::Group(g) = o {
+                for child in &g.children {
+                    self.parents.insert(*child, g.id);
+                }
+            }
+        }
         self.object_slots.clear();
         self.links.clear();
         for index in 0..self.items.len() {
             self.index_object(index);
+        }
+        if self
+            .editing_group
+            .is_some_and(|id| !self.items.iter().any(|o| o.id() == id) || self.is_locked(id))
+        {
+            self.editing_group = None;
         }
         self.live_ids = self.items.iter().map(ObjectSnapshot::id).collect();
         self.strokes = self
@@ -347,6 +369,15 @@ impl Drawing {
     }
     #[allow(dead_code)]
     pub fn set_z_order(&mut self, id: Uuid, target: usize) -> bool {
+        // Legacy absolute-slot API is limited to the flat context. UI uses Arrange.
+        if self.is_locked(id)
+            || self
+                .items
+                .iter()
+                .any(|o| matches!(o, ObjectSnapshot::Group(_)))
+        {
+            return false;
+        }
         let Some(source) = self.items.iter().position(|o| o.id() == id) else {
             return false;
         };
@@ -419,6 +450,7 @@ impl Drawing {
     }
     pub fn valid_object(&self, object: &ObjectSnapshot) -> bool {
         match object {
+            ObjectSnapshot::Group(g) => g.document_id == self.owner && !g.id.is_nil(),
             ObjectSnapshot::Text(t) => {
                 t.valid()
                     && t.document_id == self.owner
@@ -548,6 +580,9 @@ impl Drawing {
         })
     }
     pub fn replace_connector(&mut self, mut c: crate::connector::Connector) -> bool {
+        if self.is_locked(c.id) {
+            return false;
+        }
         let Some(ObjectSnapshot::Connector(old)) = self.snapshot(c.id) else {
             return false;
         };
@@ -574,6 +609,9 @@ impl Drawing {
         let mut before = Vec::new();
         let mut after = Vec::new();
         for id in ids {
+            if self.is_locked(*id) {
+                continue;
+            }
             let Some(ObjectSnapshot::Connector(old)) = self.snapshot(*id) else {
                 continue;
             };
@@ -620,6 +658,15 @@ impl Drawing {
         true
     }
     pub fn erase(&mut self, ids: &std::collections::HashSet<Uuid>) {
+        let ids: std::collections::HashSet<_> = ids
+            .iter()
+            .filter(|id| !self.is_locked(**id))
+            .copied()
+            .collect();
+        let ids = &self.expanded(&ids);
+        if ids.iter().any(|id| self.is_locked(*id)) {
+            return;
+        }
         let removed: Vec<_> = self
             .items
             .iter()
@@ -668,6 +715,12 @@ impl Drawing {
         mut replacements: std::collections::HashMap<Uuid, Vec<Stroke>>,
     ) -> bool {
         if replacements.is_empty() {
+            return false;
+        }
+        if replacements
+            .keys()
+            .any(|id| self.is_locked(*id) || self.parent(*id) != self.editing_group)
+        {
             return false;
         }
         let mut ids = self.live_ids.clone();
@@ -737,6 +790,29 @@ impl Drawing {
                 return false;
             }
         }
+        let mut combined: Vec<_> = self.items.iter().chain(&objects).cloned().collect();
+        if let Some(scope) = self.editing_group {
+            let owned: std::collections::HashSet<_> = objects
+                .iter()
+                .filter_map(|o| match o {
+                    ObjectSnapshot::Group(g) => Some(&g.children),
+                    _ => None,
+                })
+                .flatten()
+                .copied()
+                .collect();
+            let roots: Vec<_> = objects
+                .iter()
+                .map(ObjectSnapshot::id)
+                .filter(|id| !owned.contains(id))
+                .collect();
+            if let Some(ObjectSnapshot::Group(g)) = combined.iter_mut().find(|o| o.id() == scope) {
+                Arc::make_mut(g).children.extend(roots);
+            }
+        }
+        if !crate::group::validate(&combined) {
+            return false;
+        }
         let start = self.items.len();
         self.execute(Command::Replace {
             before: Vec::new(),
@@ -754,6 +830,14 @@ impl Drawing {
         delta: crate::object::Placement,
     ) -> bool {
         if !delta.valid() || delta.is_identity() || ids.is_empty() {
+            return false;
+        }
+        if ids.iter().any(|id| self.is_locked(*id)) {
+            return false;
+        }
+        let primary = ids.iter().copied().collect();
+        let ids = &self.expanded(ids);
+        if ids.iter().any(|id| self.is_locked(*id)) {
             return false;
         }
         let mut before = Vec::new();
@@ -777,7 +861,6 @@ impl Drawing {
         if before.len() != ids.len() {
             return false;
         }
-        let primary = before.iter().map(|(_, o)| o.id()).collect();
         if !self.update_links(&mut before, &mut after) {
             return false;
         }
@@ -799,7 +882,7 @@ impl Drawing {
             .items
             .iter()
             .enumerate()
-            .filter(|(_, o)| ids.contains(&o.id()))
+            .filter(|(_, o)| ids.contains(&o.id()) && !self.is_locked(o.id()))
         {
             let target = match object {
                 ObjectSnapshot::Shape(shape) => {
@@ -863,6 +946,9 @@ impl Drawing {
         let mut seen = std::collections::HashSet::new();
         let mut next = self.items.len();
         for text in texts {
+            if self.is_locked(text.id) {
+                return false;
+            }
             if !seen.insert(text.id) {
                 return false;
             }
@@ -933,6 +1019,9 @@ impl Drawing {
         let mut next = self.items.len();
         for text in texts {
             let id = text.id;
+            if self.is_locked(id) {
+                return false;
+            }
             if !seen.insert(id) {
                 return false;
             }
@@ -1040,6 +1129,9 @@ impl Drawing {
         }
     }
     pub fn replace_shape(&mut self, shape: crate::shape::Shape) -> bool {
+        if self.is_locked(shape.id) {
+            return false;
+        }
         let Some(index) = self.items.iter().position(|o| o.id() == shape.id) else {
             return false;
         };
@@ -1065,12 +1157,78 @@ impl Drawing {
     fn execute(&mut self, command: Command) {
         self.execute_selected(command, None);
     }
-    fn execute_selected(&mut self, command: Command, selection: Option<Vec<Uuid>>) {
+    fn execute_selected(&mut self, mut command: Command, selection: Option<Vec<Uuid>>) {
+        let organized = self
+            .items
+            .iter()
+            .any(|o| matches!(o, ObjectSnapshot::Group(_)))
+            || matches!(&command, Command::Replace { after, .. } if after.iter().any(|(_, o)| matches!(o, ObjectSnapshot::Group(_))));
+        let original = organized.then(|| self.items.clone());
         self.clear_routing_hints();
         self.history.truncate(self.cursor);
         let append = matches!(&command,Command::Replace {before,after} if before.is_empty()&&after.iter().enumerate().all(|(i,(index,_))|*index==self.items.len()+i));
         command.apply(&mut self.items);
-        if append {
+        if let Some(original) = original {
+            if let Some(scope) = self.editing_group {
+                let old: std::collections::HashSet<_> =
+                    original.iter().map(ObjectSnapshot::id).collect();
+                let owned: std::collections::HashSet<_> = self
+                    .items
+                    .iter()
+                    .filter_map(|o| match o {
+                        ObjectSnapshot::Group(g) => Some(&g.children),
+                        _ => None,
+                    })
+                    .flatten()
+                    .copied()
+                    .collect();
+                let added: Vec<_> = self
+                    .items
+                    .iter()
+                    .map(ObjectSnapshot::id)
+                    .filter(|id| !old.contains(id) && !owned.contains(id))
+                    .collect();
+                if !added.is_empty() {
+                    let children = self
+                        .items
+                        .iter()
+                        .find_map(|o| match o {
+                            ObjectSnapshot::Group(g) if g.id == scope => Some(g.children.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let scope_ids: std::collections::HashSet<_> =
+                        children.into_iter().chain(added).collect();
+                    let order = self
+                        .items
+                        .iter()
+                        .map(ObjectSnapshot::id)
+                        .filter(|id| scope_ids.contains(id))
+                        .collect();
+                    if let Some(ObjectSnapshot::Group(g)) =
+                        self.items.iter_mut().find(|o| o.id() == scope)
+                    {
+                        Arc::make_mut(g).children = order;
+                    }
+                }
+            }
+            self.normalize_groups();
+            let before = original
+                .iter()
+                .enumerate()
+                .filter(|(i, o)| self.items.get(*i) != Some(*o))
+                .map(|(i, o)| (i, o.clone()))
+                .collect();
+            let after = self
+                .items
+                .iter()
+                .enumerate()
+                .filter(|(i, o)| original.get(*i) != Some(*o))
+                .map(|(i, o)| (i, o.clone()))
+                .collect();
+            command = Command::Replace { before, after };
+            self.refresh_ink_view();
+        } else if append {
             let Command::Replace { after, .. } = &command else {
                 unreachable!()
             };
@@ -1088,7 +1246,11 @@ impl Drawing {
         } else {
             self.refresh_ink_view();
         }
-        self.history.push(HistoryEntry { command, selection });
+        self.history.push(HistoryEntry {
+            command,
+            undo_selection: selection.clone(),
+            selection,
+        });
         self.cursor += 1;
         self.revision += 1;
     }
@@ -1102,12 +1264,15 @@ impl Drawing {
         let entry = &self.history[self.cursor];
         let command = &entry.command;
         command.revert(&mut self.items);
-        let ids = entry.selection.clone().unwrap_or_else(|| match command {
-            Command::Erase(objects)
-            | Command::Replace {
-                before: objects, ..
-            } => objects.iter().map(|(_, s)| s.id()).collect(),
-        });
+        let ids = entry
+            .undo_selection
+            .clone()
+            .unwrap_or_else(|| match command {
+                Command::Erase(objects)
+                | Command::Replace {
+                    before: objects, ..
+                } => objects.iter().map(|(_, s)| s.id()).collect(),
+            });
         self.refresh_ink_view();
         ids
     }
@@ -1482,3 +1647,6 @@ mod tests {
         assert!(two.dirty());
     }
 }
+
+#[path = "group_commands.rs"]
+mod organization;

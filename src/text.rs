@@ -61,6 +61,8 @@ pub struct TextContent {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TextObject {
+    #[serde(default)]
+    pub locked: bool,
     pub id: ObjectId,
     pub document_id: Uuid,
     pub surface: Surface,
@@ -78,6 +80,7 @@ impl TextObject {
     }
     pub fn new(owner: Uuid, surface: Surface, point: Point, width: f64) -> Self {
         Self {
+            locked: false,
             id: Uuid::new_v4(),
             document_id: owner,
             surface,

@@ -579,3 +579,37 @@ Manual resizing through any of eight rotated local grips disables auto-height;
 the user can re-enable it. Overflow is marked without removing text. Notes retain
 normal shape selection, rotation, flipping, duplication and connectors. No
 floating toolbar, separate text object, or PDF persistence is introduced.
+
+## M1.11 organization interactions
+
+Ctrl/Cmd+G groups two or more selected immediate siblings on the same surface;
+Ctrl/Cmd+Shift+G ungroups selected containers and selects their immediate unlocked
+children. These commands appear in Edit and canvas context menus, disabled when
+inapplicable. Existing right-click selection preserves a selected multi-selection.
+Lock and Arrange → Bring to Front / Bring Forward / Send Backward / Send to Back
+use the same menus; Transform retains rotation and both flips. No toolbar moves.
+
+Single-click selects a group through actual child geometry. Double-click enters
+one group level without starting text editing. Within that scope another
+double-click edits a text/shape/note host or enters a nested group. The canvas
+shows “Editing group … Esc to exit” using existing palette/body typography and
+spacing. Escape closes text editing first; subsequent Escape exits one group
+level and selects its container. No transforms occur on entry/exit. Select All,
+Shift/Alt clicks, directional rectangle and lasso use that active sibling scope.
+Crossing matches any descendant; containment/lasso require all descendant leaves.
+
+Locked objects stay visible and ordinary selection passes through them. Right-click
+on their geometry exposes Unlock for the outermost locked ancestor, even when
+unlocked objects are selected elsewhere. Unlock never clears independent child
+locks. Parent transforms/deletion are blocked if a descendant is independently
+locked; enter the group and unlock that child first. Ungroup retains child locks.
+Ink erasing respects the active group context and effective locks; pen drawing is
+unaffected. Duplicate preserves locks. Lock flags remain memory-only pending M2.
+
+Groups form contiguous stacking blocks. Group creation places the block at its
+highest selected sibling; Arrange changes only immediate siblings in the current
+context. Multi-selection retains relative order. Ungroup leaves nested containers
+and effective visible order intact. Rendering and picking now both use canonical
+stacking order for all variants, including connectors crossing text/shapes.
+Canvas-only browser default suppression includes G and Shift+G; text input keeps
+native shortcuts. Existing top toolbar, themes, tabs and Explorer are unchanged.

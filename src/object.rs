@@ -99,6 +99,7 @@ fn rotate([x, y]: Point, angle: f64) -> Point {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(dead_code)] // Semantic dispatch tag; only implemented content variants belong here.
 pub enum ObjectType {
+    Group,
     Text,
     Stroke,
     Shape,
@@ -110,6 +111,7 @@ pub enum ObjectType {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", deny_unknown_fields)]
 pub enum ObjectSnapshot {
+    Group(std::sync::Arc<crate::group::Group>),
     Text(std::sync::Arc<crate::text::TextObject>),
     Stroke(std::sync::Arc<Stroke>),
     Shape(std::sync::Arc<crate::shape::Shape>),
@@ -669,8 +671,28 @@ impl From<crate::connector::Connector> for ObjectSnapshot {
     }
 }
 impl ObjectSnapshot {
+    pub fn locked(&self) -> bool {
+        match self {
+            Self::Group(o) => o.locked,
+            Self::Stroke(o) => o.locked,
+            Self::Shape(o) => o.locked,
+            Self::Text(o) => o.locked,
+            Self::Connector(o) => o.locked,
+        }
+    }
+    pub fn set_locked(&mut self, value: bool) {
+        match self {
+            Self::Group(o) => std::sync::Arc::make_mut(o).locked = value,
+            Self::Stroke(o) => std::sync::Arc::make_mut(o).locked = value,
+            Self::Shape(o) => std::sync::Arc::make_mut(o).locked = value,
+            Self::Text(o) => std::sync::Arc::make_mut(o).locked = value,
+            Self::Connector(o) => std::sync::Arc::make_mut(o).locked = value,
+        }
+    }
+
     pub fn as_object(&self) -> &dyn CanvasObject {
         match self {
+            Self::Group(g) => g.as_ref(),
             Self::Text(t) => t.as_ref(),
             Self::Stroke(s) => s.as_ref(),
             Self::Shape(s) => s.as_ref(),
@@ -679,6 +701,7 @@ impl ObjectSnapshot {
     }
     pub fn id(&self) -> ObjectId {
         match self {
+            Self::Group(g) => g.id,
             Self::Text(t) => t.id,
             Self::Stroke(s) => s.id,
             Self::Shape(s) => s.id,
@@ -687,6 +710,7 @@ impl ObjectSnapshot {
     }
     pub fn transformed(&self, delta: Placement) -> Self {
         match self {
+            Self::Group(_) => self.clone(),
             Self::Text(t) => t.transformed(delta).into(),
             Self::Connector(c) => c.transformed(delta, &Default::default()).into(),
             Self::Stroke(s) => {
@@ -703,6 +727,13 @@ impl ObjectSnapshot {
     }
     pub fn relocated(&self, owner: Uuid, surface: crate::drawing::Surface) -> Self {
         match self {
+            Self::Group(g) => {
+                let mut g = (**g).clone();
+                g.id = Uuid::new_v4();
+                g.document_id = owner;
+                g.surface = surface;
+                Self::Group(std::sync::Arc::new(g))
+            }
             Self::Text(t) => {
                 let mut t = (**t).clone();
                 t.id = Uuid::new_v4();

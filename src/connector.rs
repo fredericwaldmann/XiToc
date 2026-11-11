@@ -131,6 +131,8 @@ pub struct Rail {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Connector {
+    #[serde(default)]
+    pub locked: bool,
     pub id: ObjectId,
     pub document_id: Uuid,
     pub surface: Surface,
@@ -149,6 +151,7 @@ impl Connector {
         style: ShapeStyle,
     ) -> Self {
         Self {
+            locked: false,
             id: Uuid::new_v4(),
             document_id: owner,
             surface,
@@ -208,6 +211,7 @@ impl Connector {
             }
         };
         Shape {
+            locked: self.locked,
             id: self.id,
             document_id: self.document_id,
             surface: self.surface,

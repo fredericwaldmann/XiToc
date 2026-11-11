@@ -127,3 +127,6 @@ and keyboard input: four-column picker, all eight forms, arrow endpoint edit,
 rectangle corner edit, group duplication, dark appearance, narrow 480×360 picker
 and Page Note geometry. Captured styles are the semantic defaults; no formatting
 UI or text is implemented. See TEST_PLAN for performed checks and device limits.
+
+M1.11 actual Firefox grouping/locking/child-text observations are indexed in
+[grouping/README.md](grouping/README.md); see TEST_PLAN for the tested subset.

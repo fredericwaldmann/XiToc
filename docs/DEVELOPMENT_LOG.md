@@ -658,3 +658,37 @@ custom picker; Drawing Settings captures the default color for future notes.
 Eight local grips resize rotated notes and disable auto-height; text never
 shrinks or disappears, and Page-constrained growth falls back to a visible
 overflow marker. M1.10 is in-memory; no PDF persistence or grouping is added.
+
+## 2026-11-11 — M1.11 grouping, locking and z-order
+
+Confirmed PR #44 (sticky notes) and #42 (rich text/alignment) merged. Branched
+feature/grouping-locking-z-order from latest main 3ff605a. Open/closed issue and
+title/body searches found no corresponding M1.11 issue; the user confirmed no
+issue reference is needed. Used the supplied specification without creating one.
+
+Added semantic Group IDs/ordered ownership, bounded forest validation, nested edit
+scope, inherited object locks and scoped Arrange to the shared object store and
+journal. Descendants keep original geometry/styles/IDs and use the existing frozen
+transform preview/connector machinery. Clipboard includes/remaps descendants and
+internal links; external references detach. Locks survive copy and history.
+Postorder group blocks align rendering with geometric hit priority for every
+variant. This deliberately updates the earlier shape/text-over-wire rule.
+
+Regression coverage includes actual group shortcuts, double-click scope then
+shape-text editing, nested regroup/ungroup, both layouts, rich/sticky/ink content,
+connector graphs, four Arrange actions, locks, clipboard and offscreen drags at
+multiple zooms. See TEST_PLAN's M1.11 section for final executed checks and limits.
+No PDF persistence, new storage, snapping or unrelated UI redesign was introduced.
+
+Performance review corrected the older 1,000-shape benchmark: densely overlapping
+magnetic ports could start a connector gesture instead of the intended body drag.
+Both flat/nested benchmarks now explicitly capture a move and assert its gesture
+kind. Single-selection shape handles use the existing ID index rather than scan
+the full store repeatedly. Base mesh reuse and unchanged preview revisions remain
+asserted. Temporary profiling instrumentation was removed after diagnosis.
+
+Final verification: 264 tests pass, nine ignored; both explicit release movement
+benchmarks pass (nested 922.52 ms / flat 1,112.82 ms for 40 changed frames with
+1,000 objects on this host). Formatting, Clippy, native release and WASM checks
+pass. Firefox verified group move/resize/lock/unlock/rotate/duplicate and rotated
+child text editing/Escape; screenshots and exact limitations are in TEST_PLAN.

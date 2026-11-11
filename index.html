@@ -20,8 +20,9 @@
       // drag the canvas itself and swallow the app's move/release events.
       // The text agent is a separate input element and keeps native text shortcuts.
       editorCanvas.addEventListener("keydown", (event) => {
-        if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey
-            && ["a", "d"].includes(event.key.toLowerCase())) {
+        if ((event.ctrlKey || event.metaKey) && !event.altKey
+            && (["a", "d"].includes(event.key.toLowerCase()) && !event.shiftKey
+                || event.key.toLowerCase() === "g")) {
           event.preventDefault();
         }
       });
