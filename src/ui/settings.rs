@@ -10,6 +10,7 @@ enum Section {
     Drawing,
     Input,
     Text,
+    Snapping,
 }
 #[derive(Default)]
 pub struct SettingsDialog {
@@ -29,7 +30,7 @@ impl SettingsDialog {
             ui.add_space(style::GAP);
             ui.horizontal_wrapped(|ui| {
                 for (section, label) in [(Section::General, "General"), (Section::Appearance, "Appearance"),
-                    (Section::Drawing, "Drawing"), (Section::Text, "Text"), (Section::Input, "Input Devices")] {
+                    (Section::Drawing, "Drawing"), (Section::Snapping, "Snapping"), (Section::Text, "Text"), (Section::Input, "Input Devices")] {
                     ui.selectable_value(&mut self.section, section, label);
                 }
             });
@@ -93,6 +94,12 @@ impl SettingsDialog {
                                         ui.selectable_value(&mut prefs.drawing.eraser_mode, mode, mode.label());
                                     }
                                 });
+                        }
+                        Section::Snapping => {
+                            ui.strong("Snapping defaults for new editors");
+                            super::snapping_controls::options(ui, &mut prefs.drawing.snapping);
+                            super::snapping_controls::details(ui, &mut prefs.drawing.snapping);
+                            ui.weak("The top Snap menu changes the active editor without changing these defaults.");
                         }
                         Section::Text => {
                             ui.strong("Default Text Box Resize Behavior");

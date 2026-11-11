@@ -10,7 +10,6 @@ use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 pub struct Editor {
     viewport: Viewport,
     pub canvas: Canvas,
-    grid_visible: bool,
     pub middle_button_pan: bool,
     navigation_frame: Option<u64>,
     pan: Option<(egui::PointerButton, Pos2)>,
@@ -23,7 +22,6 @@ impl Editor {
             navigation_frame: None,
             middle_button_pan: true,
             pan: None,
-            grid_visible: matches!(data.layout(), Layout::Whiteboard { grid: true, .. }),
             viewport: match data.layout() {
                 Layout::Whiteboard { viewport, .. } => viewport.clone(),
                 Layout::Page { .. } => Viewport::default(),
@@ -55,10 +53,10 @@ impl Editor {
         self.viewport = Viewport::default();
     }
     pub fn grid_visible(&self) -> bool {
-        self.grid_visible
+        self.canvas.snapping.show_grid
     }
     pub fn toggle_grid(&mut self) {
-        self.grid_visible = !self.grid_visible;
+        self.canvas.snapping.show_grid = !self.canvas.snapping.show_grid;
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, data: &DocumentData) {
@@ -135,16 +133,16 @@ impl Editor {
                             Stroke::new(0.75, Color32::from_gray(194)),
                             StrokeKind::Inside,
                         );
-                        self.canvas.surface(
-                            ui,
-                            response.rect,
-                            Surface::Page(index),
-                            Transform {
-                                origin: [response.rect.left() as f64, response.rect.top() as f64],
-                                center: [0.0; 2],
-                                scale: width as f64 / (page.width_mm * POINTS_PER_MM),
-                            },
-                        );
+                        let view = Transform {
+                            origin: [response.rect.left() as f64, response.rect.top() as f64],
+                            center: [0.0; 2],
+                            scale: width as f64 / (page.width_mm * POINTS_PER_MM),
+                        };
+                        if self.grid_visible() {
+                            self.grid(&painter, response.rect, view, p.dot);
+                        }
+                        self.canvas
+                            .surface(ui, response.rect, Surface::Page(index), view);
                     });
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
@@ -226,8 +224,17 @@ impl Editor {
             );
         }
         painter.rect_filled(bounds, 0.0, style::palette(ui).board);
-        if self.grid_visible {
-            self.grid(&painter, bounds, style::palette(ui).dot);
+        if self.grid_visible() {
+            self.grid(
+                &painter,
+                bounds,
+                Transform {
+                    origin: [bounds.center().x as f64, bounds.center().y as f64],
+                    center: self.viewport.center,
+                    scale: self.viewport.zoom,
+                },
+                style::palette(ui).dot,
+            );
         }
         if self.pan.is_some() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -244,25 +251,31 @@ impl Editor {
         );
     }
 
-    fn grid(&self, painter: &egui::Painter, bounds: Rect, color: Color32) {
-        // Only local offsets become f32: far-away world coordinates remain f64.
-        let world_step = 32.0 * 2_f64.powf((-self.viewport.zoom.log2()).ceil().max(0.0));
-        let spacing = (world_step * self.viewport.zoom) as f32;
-        let offset = [
-            self.viewport.center[0].rem_euclid(world_step) * self.viewport.zoom,
-            self.viewport.center[1].rem_euclid(world_step) * self.viewport.zoom,
+    fn grid(&self, painter: &egui::Painter, bounds: Rect, view: Transform, color: Color32) {
+        let painter = painter.with_clip_rect(bounds.intersect(painter.clip_rect()));
+        let spacing = self.canvas.snapping.spacing;
+        if !self.canvas.snapping.valid() {
+            return;
+        }
+        // Thin the displayed grid only. Snapping always uses the configured spacing.
+        let stride = (8.0 / (spacing * view.scale)).ceil().max(1.0);
+        let step = spacing * stride;
+        let min = view.to_document([bounds.left() as f64, bounds.top() as f64]);
+        let start = [
+            min[0] + (-min[0]).rem_euclid(step),
+            min[1] + (-min[1]).rem_euclid(step),
         ];
-        let start_x = bounds.center().x - offset[0] as f32;
-        let start_y = bounds.center().y - offset[1] as f32;
-        let x0 = bounds.left() + (start_x - bounds.left()).rem_euclid(spacing);
-        let y0 = bounds.top() + (start_y - bounds.top()).rem_euclid(spacing);
-        for col in 0..=(bounds.width() / spacing) as usize {
-            for row in 0..=(bounds.height() / spacing) as usize {
-                painter.circle_filled(
-                    Pos2::new(x0 + col as f32 * spacing, y0 + row as f32 * spacing),
-                    1.0,
-                    color,
-                );
+        let columns = (bounds.width() as f64 / (step * view.scale))
+            .ceil()
+            .min(512.) as usize;
+        let rows = (bounds.height() as f64 / (step * view.scale))
+            .ceil()
+            .min(512.) as usize;
+        for col in 0..=columns {
+            for row in 0..=rows {
+                let p =
+                    view.to_screen([start[0] + col as f64 * step, start[1] + row as f64 * step]);
+                painter.circle_filled(Pos2::new(p[0] as f32, p[1] as f32), 1.0, color);
             }
         }
     }

@@ -130,3 +130,6 @@ UI or text is implemented. See TEST_PLAN for performed checks and device limits.
 
 M1.11 actual Firefox grouping/locking/child-text observations are indexed in
 [grouping/README.md](grouping/README.md); see TEST_PLAN for the tested subset.
+
+M1.12 actual Firefox snapping, equal spacing, alignment, distribution, hidden grid
+and connected-group zoom observations: [snapping/README.md](snapping/README.md).

@@ -504,6 +504,20 @@ impl Canvas {
                 return true;
             }
             for event in ui.input(|i| i.events.clone()) {
+                let bypass = match &event {
+                    Event::ModifiersChanged(modifiers) | Event::PointerButton { modifiers, .. } => {
+                        modifiers.alt
+                    }
+                    _ => ui.input(|i| i.modifiers.alt),
+                };
+                let event = if matches!(event, Event::ModifiersChanged(_)) {
+                    let Some(pos) = ui.input(|i| i.pointer.interact_pos()) else {
+                        continue;
+                    };
+                    Event::PointerMoved(pos)
+                } else {
+                    event
+                };
                 match event {
                     Event::PointerMoved(pos)
                     | Event::PointerButton {
@@ -514,17 +528,72 @@ impl Canvas {
                     } => {
                         let point = view.to_document([pos.x as f64, pos.y as f64]);
                         let r = self.text_resize.as_mut().unwrap();
-                        let mut candidate = r.source.resized(r.handle, r.start, point);
-                        let desired = candidate.height;
-                        text_layout::measure(ui.ctx(), &mut candidate);
-                        candidate.height = candidate.height.max(desired);
-                        candidate.anchor_resize(&r.source, r.handle);
-                        self.drawing.fit_text(&mut candidate);
+                        let build = |pointer| {
+                            let mut candidate = r.source.resized(r.handle, r.start, pointer);
+                            let desired = candidate.height;
+                            text_layout::measure(ui.ctx(), &mut candidate);
+                            candidate.height = candidate.height.max(desired);
+                            candidate.anchor_resize(&r.source, r.handle);
+                            self.drawing.fit_text(&mut candidate);
+                            candidate
+                        };
+                        let mut candidate = build(point);
+                        if (point[0] - r.start[0]).hypot(point[1] - r.start[1]) * view.scale >= 3.
+                            && let Some(snap) = &mut self.snap_session
+                        {
+                            let h = crate::text::TEXT_HANDLES[r.handle];
+                            let grip = candidate
+                                .placement
+                                .apply([candidate.width * h[0], candidate.height * h[1]]);
+                            let anchor = r.source.placement.apply([
+                                r.source.width * (1. - h[0]),
+                                r.source.height * (1. - h[1]),
+                            ]);
+                            let rail = if r.source.layout.resize
+                                == crate::text::ResizeBehavior::Scale
+                                && r.handle < 4
+                            {
+                                Some([grip[0] - anchor[0], grip[1] - anchor[1]])
+                            } else if h.contains(&0.5) {
+                                let local = if h[0] == 0.5 { [0., 1.] } else { [1., 0.] };
+                                let zero = r.source.placement.apply([0.; 2]);
+                                let end = r.source.placement.apply(local);
+                                Some([end[0] - zero[0], end[1] - zero[1]])
+                            } else {
+                                None
+                            };
+                            let rotated = (r.source.placement.rotation * 2.).sin().abs() > 1e-8;
+                            let snapped = snap.handle(
+                                candidate.world_bounds().unwrap(),
+                                grip,
+                                rail,
+                                rotated,
+                                view.scale,
+                                bypass,
+                            );
+                            if snapped != grip {
+                                candidate = build([
+                                    point[0] + snapped[0] - grip[0],
+                                    point[1] + snapped[1] - grip[1],
+                                ]);
+                            }
+                            let final_bounds = if rotated {
+                                let p = candidate
+                                    .placement
+                                    .apply([candidate.width * h[0], candidate.height * h[1]]);
+                                crate::object::ObjectBounds { min: p, max: p }
+                            } else {
+                                candidate.world_bounds().unwrap()
+                            };
+                            snap.reconcile(final_bounds);
+                        }
                         if self.drawing.valid_object(&candidate.clone().into()) {
                             r.preview = candidate;
                             r.moved = (point[0] - r.start[0]).hypot(point[1] - r.start[1])
                                 * view.scale
                                 >= 3.;
+                        } else if let Some(snap) = &mut self.snap_session {
+                            snap.clear();
                         }
                         if matches!(event, Event::PointerButton { pressed: false, .. }) {
                             let r = self.text_resize.take().unwrap();
@@ -587,9 +656,11 @@ impl Canvas {
                             (p[0] - h[0]).hypot(p[1] - h[1]) * view.scale <= 7.
                         })
                     {
+                        let source = t.clone();
+                        self.begin_snapping(surface);
                         self.text_resize = Some(TextResize {
-                            source: t.clone(),
-                            preview: (**t).clone(),
+                            source: source.clone(),
+                            preview: (*source).clone(),
                             start: p,
                             view,
                             revision: self.drawing.revision(),

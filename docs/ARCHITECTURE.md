@@ -901,3 +901,81 @@ Attachment-derived geometry still follows an unlocked external target when a
 connector is locked; locking a connector does not lock its targets. Target deletion
 still safely detaches surviving references in the same undo transaction. Locks
 protect direct edits, not stale/dangling derived connector caches.
+
+## M1.12 — Alignment, snapping and distribution
+
+`snapping.rs` is a platform-neutral geometry engine. `SnapSettings` carries device
+preferences/session options; `SnapSession` contains captured target bounds, sorted
+per-axis edge/center features, neighbor orderings, per-axis target latches and up
+to two temporary guide records. `canvas_snapping.rs` adapts this to the existing
+Canvas controller. Movement continues to use the frozen DragSession, original
+pointer/view/revision and immutable source snapshots. A snap is a correction to
+that sample's proposed delta, never an accumulated mutation or a new drag origin.
+
+Candidates are immediate siblings on the same surface and current group editing
+scope. Selected descendants are excluded; locked siblings remain references.
+Shape/text/note/ink bounds are document-space AABBs including visible envelopes;
+groups union compatible descendant bounds. Connector paths are excluded, including
+inside groups, because externally anchored wires are not rigid rectangular
+content. Groups containing only connectors are not rectangular snap/alignment
+objects. Candidate geometry is captured once per gesture. Sorted feature ranges
+avoid full geometry or hit-testing work on each sample; equal-spacing searches
+inspect at most 32 nearby candidates on each side. No viewport membership limits
+ownership or freezes/restarts an offscreen drag.
+
+Edges match edges (left/right and top/bottom, including opposite edges); centers
+match centers. Each axis solves independently. Sensitivity Low/Normal/High is
+4/8/12 logical screen points, divided by the view scale. The first closest match
+wins with deterministic feature/ID ties. Its latch stays until displacement exceeds
+1.5 times that threshold; an unsnapped proposal always comes from the original
+source/pointer. Hold Alt after starting a drag to bypass and clear latches;
+release Alt to resume. Alt-click keeps its existing selection-subtraction meaning.
+There is no animation, low-pass filter or pointer lag.
+
+For common horizontal/vertical rows, the nearest compatible neighbors straddling
+the moving box can suggest equal gaps. Perpendicular bounds must overlap, neighbors
+must leave enough room for the moving box, and negative/overlapping final gaps
+are rejected. Centering the box in that available interval handles unequal sizes.
+Spacing and edge matches compete by correction distance, with existing latches
+retained. Thin, screen-sized accent guides and gap brackets/numeric distances are
+paint-only overlays; they never enter selection, clipboard, history or PDF data.
+Rejected page/minimum-size corrections clear their feedback.
+
+Resizing uses existing opposite-anchor handles and immutable-source resize APIs.
+Axis-aligned shapes/notes/text snap changing world AABB edges. Rotated hosts snap
+the active world-space grip to reference AABB edges; local edge grips stay on their
+one-dimensional rail. Proportional group/ink/text scaling chooses one achievable
+edge and derives one scalar around the frozen opposite anchor. A projected snap
+must also fit the screen-space movement tolerance, preventing nearly parallel
+rails from amplifying a small correction into a large jump. Text measurement and
+page/minimum-size limits remain authoritative; mixed formatting runs keep their
+existing Reflow/Scale policy. Guides are reconciled against the actual result.
+
+`alignment_commands.rs`, a private Drawing child module, implements six explicit
+canvas alignments plus two equal-gap distributions. Only unlocked immediate
+siblings with fully unlocked descendants can move. Collective eligible bounds
+provide alignment references; locked selected IDs are excluded without unlocking.
+Distribution sorts by start coordinate, pins the first/last objects, and subtracts
+all interior widths/heights before dividing the remaining span into equal gaps.
+Insufficient room produces an error without mutation or history. Objects retain
+size, rotation, styles, IDs, rich content, ownership and stacking order.
+
+Different per-root translations expand descendants once into the existing Replace
+transaction. Reverse connector dependencies resolve only affected attached ends
+in that same command. A container-owned connector retains external attachments;
+direct wire drags retain their existing detach policy and clipboard copies still
+remap internal references/detach external ones. Manual route policies are unchanged.
+One command or released gesture is one undo entry; cancellation and guides are not.
+
+Preference schema 7 migrates schemas 1–6 with independent snapping defaults.
+Settings → Snapping sets defaults for future editors; the TOP Snap menu changes
+only the active editor. Object snapping, guide visibility, grid snapping and grid
+visibility are independent. Grid spacing is 1–4096 document points (default 32),
+with origin zero on each Page/Whiteboard surface. Both layouts share the existing
+dot-grid style; display density may thin at low zoom while snapping still uses the
+configured spacing. Grid visibility does not control snapping. PDF schema/storage
+and memory-only save/discard safeguards remain unchanged.
+
+Page movement clamps the free proposal before adding snap corrections and
+reconciles feedback per axis against the final legal result. A rejected correction
+on one axis does not discard a valid independent correction on the other.

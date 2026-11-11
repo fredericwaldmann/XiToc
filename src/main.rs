@@ -19,6 +19,7 @@ mod shape_border;
 #[cfg(test)]
 mod shape_style_tests;
 mod smoothing;
+mod snapping;
 mod storage;
 mod stroke_pattern;
 mod text;

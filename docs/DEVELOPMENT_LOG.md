@@ -692,3 +692,33 @@ benchmarks pass (nested 922.52 ms / flat 1,112.82 ms for 40 changed frames with
 1,000 objects on this host). Formatting, Clippy, native release and WASM checks
 pass. Firefox verified group move/resize/lock/unlock/rotate/duplicate and rotated
 child text editing/Escape; screenshots and exact limitations are in TEST_PLAN.
+
+## 2026-11-11 — M1.12 alignment, smart snapping and distribution
+
+Confirmed M1.11 PR #45 merged, then branched feature/alignment-smart-snapping from
+main 2d74f54. No matching Alignment and Smart Snapping issue was present among open
+or closed issues; used the supplied specification without creating a duplicate.
+
+Added a portable cached axis/spacing snap engine and six align/equal-gap distribution
+commands to the shared object/gesture/journal infrastructure. Per-axis hysteresis,
+screen-space thresholds, Alt bypass, guide overlays, grid options and schema-7
+preferences retain original pointer displacement and immutable edit sources.
+Rotated/local/proportional resize policies preserve anchors and rich formatting.
+Explicit commands preserve hierarchy/order and update affected connector ends
+atomically. Group-owned external wires now stay attached during container movement;
+connector paths are excluded from rectangular alignment geometry.
+
+New regressions cover thresholds/edges/centers/hysteresis/spacing/grid, actual
+panned/offscreen gestures at 50–400%, cancel/history, group scope/locks, direct
+shape and rich-text resizing, rotation, nearly-parallel rail amplification,
+distribution failure safety and all connector routes. Required checks, real browser
+observations and limitations are recorded in TEST_PLAN. No PDF persistence,
+new shapes, graph layout or unrelated UI redesign.
+
+Final local checks: formatting, denied-warning Clippy, 289 passing tests (ten
+ignored), native release/startup, WASM and Trunk release. Explicit release query
+benchmark: 10,000 cached targets / 2,000 samples in 5.64 ms on this host. Firefox
+smoke verified five-size rectangle edge/equal-spacing guides, Align Left, vertical
+distribution/undo/redo, hidden-grid snapping and a magnetically connected group
+at displayed 200/400% with Alt bypass/resume. TEST_PLAN and screenshots/snapping
+separate these observations from unperformed physical/platform/theme checks.

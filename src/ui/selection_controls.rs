@@ -4,6 +4,7 @@ use crate::{canvas::Canvas, selection::SelectionCommand};
 pub struct MenuState {
     pub editable: bool,
     pub can_group: bool,
+    pub align_count: usize,
     pub can_ungroup: bool,
     pub selected: bool,
     pub can_undo: bool,
@@ -14,6 +15,7 @@ impl MenuState {
     pub fn for_canvas(canvas: &Canvas) -> Self {
         Self {
             editable: true,
+            align_count: canvas.alignment_count(),
             can_group: canvas.selection.ids.len() >= 2,
             can_ungroup: canvas.selection.ids.iter().any(|id| {
                 matches!(
@@ -68,6 +70,31 @@ pub fn menu(ui: &mut egui::Ui, state: MenuState) -> Option<SelectionCommand> {
             command = Some(value);
         }
     }
+    ui.add_enabled_ui(state.editable && state.align_count >= 2, |ui| {
+        ui.menu_button("Align Objects", |ui| {
+            use crate::snapping::Align as A;
+            for action in [
+                A::Left,
+                A::Center,
+                A::Right,
+                A::Top,
+                A::Middle,
+                A::Bottom,
+                A::DistributeHorizontal,
+                A::DistributeVertical,
+            ] {
+                if ui
+                    .add_enabled(
+                        state.align_count >= action.minimum(),
+                        egui::Button::new(action.label()),
+                    )
+                    .clicked()
+                {
+                    command = Some(Align(action));
+                }
+            }
+        });
+    });
     ui.add_enabled_ui(state.editable && state.selected, |ui| {
         ui.menu_button("Arrange", |ui| {
             for (label, value) in [

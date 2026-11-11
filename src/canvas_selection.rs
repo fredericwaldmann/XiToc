@@ -98,6 +98,14 @@ impl Canvas {
             return;
         }
         match command {
+            Align(action) => {
+                self.finish();
+                match self.drawing.align_objects(&self.selection.ids, action) {
+                    Ok(true) => self.prune_cache(),
+                    Ok(false) => (),
+                    Err(message) => self.notice = Some(message.into()),
+                }
+            }
             Group => {
                 self.finish();
                 if let Some(id) = self.drawing.group_selection(&self.selection.ids) {
@@ -590,6 +598,7 @@ impl Canvas {
             })
     }
     fn start_rotation(&mut self, surface: Surface, point: Point) {
+        self.snap_session = None;
         if self
             .selection
             .expanded
@@ -667,6 +676,7 @@ impl Canvas {
                 view,
                 revision: self.drawing.revision(),
             };
+            self.begin_snapping(surface);
             self.selection_gesture = Some(SelectionGesture::Transform {
                 session,
                 surface,
@@ -680,7 +690,14 @@ impl Canvas {
             });
         }
     }
-    fn selection_sample(&mut self, surface: Surface, point: Point, scale: f64, shift: bool) {
+    fn selection_sample(
+        &mut self,
+        surface: Surface,
+        point: Point,
+        scale: f64,
+        shift: bool,
+        bypass: bool,
+    ) {
         match &mut self.selection_gesture {
             Some(SelectionGesture::ShapeEdit {
                 surface: s,
@@ -705,19 +722,62 @@ impl Canvas {
                     source.endpoints().unwrap()[*index]
                 };
                 let target = std::array::from_fn(|i| handle[i] + (point[i] - start[i]));
-                let shape = if source.is_sticky_note() {
-                    source.with_note_handle(*index, target)
-                } else if *corner {
-                    source.with_corner(*index, target, shift)
-                } else {
-                    source.with_endpoint(*index, target, shift)
+                let resize = |target| {
+                    if source.is_sticky_note() {
+                        source.with_note_handle(*index, target)
+                    } else if *corner {
+                        source.with_corner(*index, target, shift)
+                    } else {
+                        source.with_endpoint(*index, target, shift)
+                    }
                 };
+                let mut shape = resize(target);
+                if let (Some(candidate), Some(snap)) = (&shape, &mut self.snap_session) {
+                    let grip = super::snapping_ui::resize_grip(candidate, *index, *corner, target);
+                    let rotated = (source.placement.rotation * 2.).sin().abs() > 1e-8;
+                    let bounds = candidate.world_bounds().unwrap();
+                    let rail = if source.is_sticky_note() && !index.is_multiple_of(2) {
+                        let local = if *index % 4 == 1 { [0., 1.] } else { [1., 0.] };
+                        let zero = source.placement.apply([0.; 2]);
+                        let end = source.placement.apply(local);
+                        Some([end[0] - zero[0], end[1] - zero[1]])
+                    } else if (*corner && shift) || source.kind() == crate::shape::ShapeKind::Circle
+                    {
+                        let anchor = source.box_corners().unwrap()[(*index + 2) % 4];
+                        Some([grip[0] - anchor[0], grip[1] - anchor[1]])
+                    } else {
+                        None
+                    };
+                    let snapped = snap.handle(bounds, grip, rail, rotated, scale, bypass);
+                    shape = resize(snapped);
+                    if let Some(final_shape) = &shape {
+                        let final_bounds = if rotated {
+                            let grip = super::snapping_ui::resize_grip(
+                                final_shape,
+                                *index,
+                                *corner,
+                                snapped,
+                            );
+                            ObjectBounds {
+                                min: grip,
+                                max: grip,
+                            }
+                        } else {
+                            final_shape.world_bounds().unwrap()
+                        };
+                        snap.reconcile(final_bounds);
+                    } else {
+                        snap.clear();
+                    }
+                }
                 if let Some(shape) = shape
                     && self
                         .drawing
                         .valid_object(&ObjectSnapshot::from(shape.clone()))
                 {
                     *preview = shape;
+                } else if let Some(snap) = &mut self.snap_session {
+                    snap.clear();
                 }
             }
 
@@ -855,6 +915,36 @@ impl Canvas {
                 } else {
                     selection::move_by(*bounds, movement, self.drawing.bounds(surface))
                 };
+                if let Some(snap) = &mut self.snap_session {
+                    let moving = snap.moving_bounds.unwrap_or(*bounds);
+                    if let Some(index) = corner {
+                        let snapped = snap.resize(moving, *delta, *index, scale, bypass);
+                        let clamped = selection::scale_about(
+                            *geometry,
+                            snapped.origin,
+                            snapped.scale.clamp(limits.0, limits.1),
+                            self.drawing.bounds(surface),
+                        );
+                        if clamped == snapped {
+                            *delta = snapped;
+                            snap.reconcile(moving.placed(*delta));
+                        } else {
+                            snap.clear();
+                        }
+                    } else {
+                        let proposed = moving.placed(*delta);
+                        let adjustment = snap.solve(proposed, scale, bypass, None);
+                        let snapped = selection::move_by(
+                            *bounds,
+                            std::array::from_fn(|i| {
+                                delta.position[i] - delta.origin[i] + adjustment[i]
+                            }),
+                            self.drawing.bounds(surface),
+                        );
+                        *delta = snapped;
+                        snap.reconcile(moving.placed(*delta));
+                    }
+                }
             }
             _ => {}
         }
@@ -1029,6 +1119,7 @@ impl Canvas {
                         && let Some((shape, index, corner)) =
                             self.shape_handle(point, transform.scale)
                     {
+                        self.begin_snapping(surface);
                         self.selection_gesture = Some(SelectionGesture::ShapeEdit {
                             surface,
                             source: shape.clone(),
@@ -1085,16 +1176,15 @@ impl Canvas {
                     }
                 }
                 Event::ModifiersChanged(modifiers) => {
-                    if matches!(
-                        self.selection_gesture,
-                        Some(SelectionGesture::Rotate { .. })
-                    ) && let Some(pos) = ui.input(|i| i.pointer.interact_pos())
+                    if self.selection_gesture.is_some()
+                        && let Some(pos) = ui.input(|i| i.pointer.interact_pos())
                     {
                         self.selection_sample(
                             surface,
                             transform.to_document([pos.x as f64, pos.y as f64]),
                             transform.scale,
                             modifiers.shift,
+                            modifiers.alt,
                         );
                     }
                 }
@@ -1103,6 +1193,7 @@ impl Canvas {
                     transform.to_document([pos.x as f64, pos.y as f64]),
                     transform.scale,
                     ui.input(|i| i.modifiers.shift),
+                    ui.input(|i| i.modifiers.alt),
                 ),
                 Event::PointerButton {
                     pos,
@@ -1126,6 +1217,7 @@ impl Canvas {
                             transform.to_document([pos.x as f64, pos.y as f64]),
                             transform.scale,
                             modifiers.shift,
+                            modifiers.alt,
                         );
                         self.commit_selection();
                     }
@@ -1153,6 +1245,7 @@ impl Canvas {
             .painter()
             .with_clip_rect(bounds.intersect(ui.clip_rect()));
         let p = crate::ui::style::palette(ui);
+        self.paint_snap_guides(ui, bounds, surface, transform);
         if self.drawing.editing_group.is_some() {
             painter.text(
                 bounds.left_top() + egui::vec2(8., 8.),
@@ -1593,3 +1686,7 @@ mod text_tests;
 #[cfg(test)]
 #[path = "group_tests.rs"]
 mod organization_tests;
+
+#[cfg(test)]
+#[path = "alignment_tests.rs"]
+mod alignment_tests;

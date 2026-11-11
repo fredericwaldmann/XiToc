@@ -278,6 +278,24 @@ impl Connector {
         }
         out
     }
+    /// A container move does not drag an external attached endpoint off its target.
+    /// Direct wire drags retain the existing detach policy; copies detach on remap.
+    pub fn transformed_in_group(
+        &self,
+        delta: Placement,
+        selected: &HashSet<ObjectId>,
+        grouped: bool,
+    ) -> Self {
+        let mut out = self.transformed(delta, selected);
+        if grouped {
+            for (source, target) in self.ends().into_iter().zip(out.ends_mut()) {
+                if source.target().is_some_and(|id| !selected.contains(&id)) {
+                    *target = source.clone();
+                }
+            }
+        }
+        out
+    }
     pub fn remap(&mut self, ids: &HashMap<ObjectId, ObjectId>) {
         for e in self.ends_mut() {
             if let Endpoint::Attached { object_id, .. } = e {

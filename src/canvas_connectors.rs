@@ -587,7 +587,13 @@ pub(super) fn preview_connector(
 ) -> Connector {
     let mut preview = if ids.contains(&c.id) {
         delta
-            .map(|d| c.transformed(d, ids))
+            .map(|d| {
+                c.transformed_in_group(
+                    d,
+                    ids,
+                    drawing.parent(c.id).is_some_and(|p| ids.contains(&p)),
+                )
+            })
             .unwrap_or_else(|| c.clone())
     } else {
         c.clone()

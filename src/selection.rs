@@ -7,6 +7,7 @@ use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SelectionCommand {
+    Align(crate::snapping::Align),
     Group,
     Ungroup,
     Lock,

@@ -16,6 +16,8 @@ move/proportional resize, clipboard operations and undo/redo are implemented.
 Rotation has a live group handle and 15-degree Shift snapping; Group/Ungroup, Lock
 and scoped Arrange commands are available in the Edit/context menus. Cut and arrow-key nudges are
 implemented alongside the existing clipboard and manipulation commands.
+Object edge/center/equal-spacing and grid snapping, visual guides, scoped canvas
+alignment and equal-gap distribution now share those gestures and commands.
 Stroke, Shape, Connector, Text and Group are implemented canvas-object content types. Shapes include
 rectangle, rounded rectangle, circle, ellipse, triangle, diamond, line and arrow.
 Sticky notes are Shape objects with note-specific appearance/auto-height options
@@ -529,9 +531,9 @@ is included by the private selection adapter via `#[path]`; it is not a second
 editor implementation. Tests assert cache Arc reuse, index pruning, exact history,
 legacy decoding, clip geometry, ownership, layout/focus and discard behavior.
 
-The M1.11 source has 273 Rust tests: 264 normally run and nine ignored
+The M1.12 source has 299 Rust tests: 289 normally run and ten ignored
 release benchmarks (whole erase, partial document, partial geometry, smoothing,
-indexed lasso, rectangle selection, multi-stroke rotation preview, multi-shape movement preview, and nested-group movement preview). Historical recorded results are in TEST_PLAN, not proof of hardware
+indexed lasso, rectangle selection, multi-stroke rotation preview, multi-shape movement preview, nested-group movement preview, and cached snapping queries). Historical recorded results are in TEST_PLAN, not proof of hardware
 latency or a fresh run of every platform. [scripts/test_release.py](../scripts/test_release.py)
 adds Python unittest fixtures for archive completeness, corruption/path safety,
 CPU headers, executable bits, manifest/tag matching and Cargo metadata discovery.
@@ -926,3 +928,29 @@ Single-selection shape handles now resolve their one ID through Drawing's index,
 including when the selected object is a Group; they do not scan the document on
 every hover/paint. Movement benchmarks explicitly capture their frozen move because
 dense magnetic-port fixtures otherwise measure connector gestures accidentally.
+
+## M1.12 snapping source map
+
+- `snapping.rs`: portable settings/sensitivity, target feature cache, axis latches,
+  equal-spacing neighbors, resize projection/reconciliation and pure align/distribute
+  planning. `snapping_tests.rs` covers geometry, thresholds, hysteresis, grid,
+  constraints, far coordinates and a release candidate-query benchmark.
+- `canvas_snapping.rs`: candidate capture and paint-only alignment/spacing overlays
+  on the existing Canvas. `canvas_selection.rs` applies corrections to original
+  DragSession proposals and local shape grips; `canvas_text.rs` uses the same
+  cache with the existing measured text-resize session. No second drag engine.
+- `alignment_commands.rs`: Drawing's scoped eligible/reference bounds and atomic
+  per-root translations with reverse-index connector updates and the shared journal.
+- `ui/snapping_controls.rs`: shared session/default controls. Settings schema 7
+  migrates old preferences; toolbar Snap is compact or placed inside View. Grid
+  drawing in `editor.rs` uses the same document origin/spacing on Pages/Whiteboards.
+- `alignment_tests.rs`: actual controller samples across zoom/pan, gesture undo,
+  locked refs, nested scope, rich text resizing, rotated grips, group/external
+  connectors, six alignments and two distributions. Legacy exact-drag fixtures
+  explicitly disable object snapping; separate regressions exercise it enabled.
+
+Group alignment bounds union non-connector descendants; target wires still use
+stable target IDs and affected routes update in one transaction. Direct wire
+movement and clipboard retain their separate existing detach/remap policies.
+Settings defaults and active-tab snapping controls never save canvas content;
+PDF persistence remains the M2 gate. See ARCHITECTURE/UI_DESIGN for policies.

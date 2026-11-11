@@ -1571,3 +1571,73 @@ initial press; both now explicitly start and assert a frozen move session so
 connector gestures cannot invalidate the comparison. No wall-time threshold is
 used as a cross-device guarantee. Kernel perf sampling was unavailable under the
 host's perf_event_paranoid=4 policy; temporary phase instrumentation was removed.
+
+## M1.12 — Alignment, smart snapping and distribution (2026-11-11)
+
+Executed checks: cargo fmt --all and --check, cargo clippy --all-targets with
+warnings denied, cargo test --all-targets -- --test-threads=4 (289 passed, ten
+ignored), native release build, wasm32-unknown-unknown check, and Trunk release
+build to target/snapping-dist. A timed eight-second Linux release startup stayed
+alive without emitted errors and was deliberately stopped by timeout.
+
+The release-only cached candidate benchmark was run separately: 10,000 targets /
+2,000 samples in 5.64 ms on this host during build load. Feature-storage pointers
+remain unchanged across samples. This measures the snap query, not rendering or
+device/display latency; no cross-device wall-time guarantee is claimed.
+
+New pure/controller regressions cover all edge-to-edge and center-to-center
+combinations on both axes, independent corrections, 4/8/12 screen-point thresholds
+at 50/100/200/400%, 1.5× hysteresis/release/target retention, rapid sample changes,
+unequal-size equal spacing and unsuitable rows/overlap rejection, grid/visibility/
+object-mode independence, Alt bypass, guide reconciliation, far-origin precision,
+six alignments and both distributions with fixed extremes/failure atomicity,
+nested groups/current scope/child locks/stationary locked references, all connector
+routes/manual settings/internal and external attachments, actual panned/offscreen
+drags and one release undo, axis-aligned and rotated local resizing, anchored group
+scaling, rich-run text reflow resizing, anchor crossing and near-parallel resize
+rails. Preference fixtures cover schema-5/6 migration, validation, storage round
+trip and default/session isolation. The existing pen/eraser/text/shape/selection/
+rotation/flip/clipboard/group/lock/order/PDF safety suite also passes.
+
+Legacy exact-displacement fixtures explicitly disable object snapping so they
+continue to test their original transform contract; new enabled fixtures exercise
+snapping through the same real Canvas controller. No drag engine or old safety
+regression was removed to obtain passing tests.
+
+Actual packaged Firefox checks used a temporary Whiteboard with five rectangles
+of different sizes. Verified left-edge snapping and its thin vertical guide,
+common-row equal spacing with two matching 158-point gap indicators, Align Objects
+menu/applicable commands, Align Left, equal-gap vertical distribution and undo/redo.
+Toggled Snap to Objects off, Snap to Grid on and Show Grid off; hidden-grid movement
+still snapped. Grouped two shapes, entered the group, created a magnetic wire,
+exited and moved the connected group near references. Inspected guide/attachment
+behavior through fast pointer jumps at displayed 200% and 400% zoom, with part of
+the 400% group offscreen. Alt removed the correction/guide during a held gesture;
+release restored snapping without changing selection. Captures/index are under
+screenshots/snapping. The browser export dialog was dismissed; no permanent-save
+claim is made. No detached endpoints or selection loss appeared in the captured previews; these
+observations do not establish physical input/display latency.
+
+Limits: physical pen/mouse latency, Windows/macOS/native interactive gestures,
+complete Page Note/themed/narrow GUI matrix, and every explicit alignment/resize
+combination were not manually executed. Those logical paths use automated coverage;
+actual browser observations above are a bounded smoke test. Content/snapping/group
+PDF round trips remain out of scope/M2, and no autosave/recovery claim is made.
+
+Manual review: create five differently sized rectangles plus rich text and a note.
+Move near left/right/top/bottom/center references and then between two neighbors;
+check guide stability and distance brackets. Hold Alt after drag start, then
+release it; Alt-click should still subtract selection. Use Edit/context → Align
+Objects for all six alignments, then distribute along each axis with enough space;
+repeat with insufficient room and verify no movement/history. Group/nest objects,
+connect internal and external shapes, lock references/children and verify scope,
+protection and attachments. Resize local/rotated/proportional/text grips without
+losing the opposite anchor or mixed font sizes. Toggle grid/display independently,
+change sensitivity/spacing through Snap, and defaults through Settings → Snapping.
+Repeat on Page Notes and at 50/100/200/400% after pan, with fast offscreen movement,
+Escape cancellation and exact one-step undo/redo. Confirm Explorer/tabs/top toolbar,
+pen, both erasers, styling, rich Text/Paragraph controls and save/discard guards.
+
+Final Page Note boundary regression: a pointer sample far above the page uses the
+clamped free proposal before solving snaps. Valid X/Y matches remain independent,
+including a small legal inward Y correction; undo restores the exact source.
