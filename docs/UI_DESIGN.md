@@ -556,7 +556,26 @@ contextual Text | Paragraph controls format retained character selections and
 paragraphs. Shape styling remains in its existing shape controls, clearly
 separate from text color and paragraph alignment. Paragraph offers horizontal
 alignment; a shape-text-only vertical alignment control offers Top, Middle, and
-Bottom, with centered/middle defaults. Text uses a conservative geometry-aware
+Bottom, with centered/middle defaults. Because it positions the complete
+container layout, those controls are enabled only at a caret, for empty text,
+or when all text is selected; a partial text selection remains selected and
+shows guidance that the whole text must be selected or the selection cleared.
+Text uses a conservative geometry-aware
 interior region; overflow is clipped with a visible marker while all content
 remains editable. The existing text editing overlay stays unrotated while the
 shape's rendered text follows rotation and remains readable when flipped.
+
+## M1.10 Sticky Notes
+
+Sticky Note appears in the TOP drawing toolbar when the responsive toolbar can
+fit its control. Click the canvas to create a 220×180 light-yellow note and
+begin editing immediately. Notes reuse the TextSession and keep Text | Paragraph
+formatting separate from their Note appearance menu. That menu offers the
+Yellow/Pink/Blue/Green/Purple/Orange/White palette, custom color, subtle shadow,
+and automatic height. Drawing Settings stores the default color for new notes;
+existing notes keep their fill. New notes choose a readable typing color for a
+dark custom background, and Note warns when existing rich text has low contrast.
+Manual resizing through any of eight rotated local grips disables auto-height;
+the user can re-enable it. Overflow is marked without removing text. Notes retain
+normal shape selection, rotation, flipping, duplication and connectors. No
+floating toolbar, separate text object, or PDF persistence is introduced.

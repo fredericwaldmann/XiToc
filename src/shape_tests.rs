@@ -155,6 +155,100 @@ fn shape_text_regions_stay_inside_supported_geometry_and_exclude_segments() {
 }
 
 #[test]
+fn sticky_note_defaults_autogrow_and_eight_rotated_handles_preserve_identity() {
+    use crate::{
+        document::DocumentData,
+        object::Placement,
+        shape::{STICKY_NOTE_PALETTE, Shape, StickyNoteOptions},
+        text::TextStylePatch,
+    };
+    let data = DocumentData::blank(DocumentKind::Whiteboard);
+    let mut drawing = Drawing::new(&data);
+    let mut note = Shape::create_sticky_note(
+        data.id(),
+        Surface::Canvas,
+        [100., 120.],
+        [220., 180.],
+        STICKY_NOTE_PALETTE[0].1,
+    )
+    .unwrap();
+    let id = note.id;
+    assert!(note.is_sticky_note());
+    assert_eq!(note.style.fill, Some([255, 244, 177]));
+    assert_eq!(note.text.as_ref().unwrap().content.style_at(0).size, 16.);
+    assert_eq!(note.sticky_note, Some(StickyNoteOptions::default()));
+    note.placement = Placement {
+        position: [100., 120.],
+        scale: 1.2,
+        rotation: 0.45,
+        reflected: [true, false],
+        ..Default::default()
+    };
+    assert!(drawing.add_shape(note.clone()));
+
+    let deltas = [
+        [-20., -18.],
+        [0., -18.],
+        [20., -18.],
+        [20., 0.],
+        [20., 18.],
+        [0., 18.],
+        [-20., 18.],
+        [-20., 0.],
+    ];
+    for (index, delta) in deltas.into_iter().enumerate() {
+        let handles = note.note_resize_handles().unwrap();
+        let local = note.placement.inverse(handles[index]);
+        let target = note
+            .placement
+            .apply([local[0] + delta[0], local[1] + delta[1]]);
+        let resized = note.with_note_handle(index, target).unwrap();
+        assert_eq!(resized.id, id);
+        assert!(!resized.sticky_note.unwrap().auto_height);
+        let after = resized.note_resize_handles().unwrap();
+        let opposite = handles[(index + 4) % 8];
+        let moved_opposite = after[(index + 4) % 8];
+        assert!((opposite[0] - moved_opposite[0]).abs() < 1e-5);
+        assert!((opposite[1] - moved_opposite[1]).abs() < 1e-5);
+    }
+
+    let mut adapter = crate::text::TextObject::new(data.id(), Surface::Canvas, [0.; 2], 192.);
+    adapter.id = id;
+    adapter.content = note.text.as_ref().unwrap().content.clone();
+    adapter.content_mut().text = "One\nTwo\nThree\nFour\nFive\nSix".into();
+    adapter.content_mut().format(
+        0..3,
+        &TextStylePatch {
+            size: Some(24.),
+            bold: Some(true),
+            ..Default::default()
+        },
+    );
+    adapter.height = 280.;
+    assert!(drawing.replace_text_adapters(vec![adapter], None, false));
+    let ObjectSnapshot::Shape(grown) = drawing.snapshot(id).unwrap() else {
+        panic!("note remains its canonical shape object")
+    };
+    let ShapeGeometry::Box { size, .. } = grown.geometry else {
+        panic!()
+    };
+    assert!(size[1] >= 308.);
+    assert_eq!(grown.text.as_ref().unwrap().content.style_at(0).size, 24.);
+    assert!(grown.text.as_ref().unwrap().content.style_at(0).bold);
+    drawing.undo();
+    let ObjectSnapshot::Shape(restored) = drawing.snapshot(id).unwrap() else {
+        panic!()
+    };
+    assert_eq!(restored.style.fill, Some([255, 244, 177]));
+    assert_eq!(restored.text.as_ref().unwrap().content.text, "");
+    drawing.redo();
+    assert!(matches!(
+        drawing.snapshot(id),
+        Some(ObjectSnapshot::Shape(_))
+    ));
+}
+
+#[test]
 fn shape_rich_text_is_same_object_through_style_resize_transform_clipboard_and_history() {
     use crate::{
         object::{ObjectSnapshot, Placement},

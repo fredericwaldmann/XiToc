@@ -591,13 +591,17 @@ impl Canvas {
                 *moved = true;
                 // Keep the initial grab offset: the hit target is larger than
                 // the visible handle, and must not snap its center to the pointer.
-                let handle = if *corner {
+                let handle = if source.is_sticky_note() {
+                    source.note_resize_handles().unwrap()[*index]
+                } else if *corner {
                     source.box_corners().unwrap()[*index]
                 } else {
                     source.endpoints().unwrap()[*index]
                 };
                 let target = std::array::from_fn(|i| handle[i] + (point[i] - start[i]));
-                let shape = if *corner {
+                let shape = if source.is_sticky_note() {
+                    source.with_note_handle(*index, target)
+                } else if *corner {
                     source.with_corner(*index, target, shift)
                 } else {
                     source.with_endpoint(*index, target, shift)
@@ -1226,6 +1230,20 @@ impl Canvas {
         self.text_format_controls(ui);
         self.connector_format_controls(ui);
         let shapes = self.selected_shapes();
+        let notes: Vec<_> = shapes
+            .iter()
+            .filter(|shape| shape.is_sticky_note())
+            .cloned()
+            .collect();
+        for (patch, id) in crate::ui::shape_controls::sticky_controls(ui, &notes) {
+            if self.apply_shape_style(patch, id, ui.input(|i| i.pointer.primary_down())) {
+                ui.ctx().request_repaint();
+            }
+        }
+        let shapes: Vec<_> = shapes
+            .into_iter()
+            .filter(|shape| !shape.is_sticky_note())
+            .collect();
         for (patch, id) in crate::ui::shape_controls::controls(ui, &shapes) {
             if self.apply_shape_style(patch, id, ui.input(|i| i.pointer.primary_down())) {
                 ui.ctx().request_repaint();

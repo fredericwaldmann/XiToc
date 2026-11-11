@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const STORAGE_KEY: &str = "XiToc/preferences";
-const VERSION: u32 = 5;
+const VERSION: u32 = 6;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Theme {
@@ -18,6 +18,7 @@ pub struct DrawingPreferences {
     pub presets: crate::pen::Presets,
     pub eraser_radius: f64,
     pub eraser_mode: crate::drawing::EraserMode,
+    pub sticky_note_color: [u8; 3],
 }
 impl Default for DrawingPreferences {
     fn default() -> Self {
@@ -26,6 +27,7 @@ impl Default for DrawingPreferences {
             presets: Default::default(),
             eraser_radius: 14.0,
             eraser_mode: Default::default(),
+            sticky_note_color: [255, 244, 177],
         }
     }
 }
@@ -153,6 +155,11 @@ impl Preferences {
                 serde_json::to_value(drawing).expect("serializable drawing defaults"),
             );
             object.insert("schema_version".into(), VERSION.into());
+        } else if version == 5 {
+            value
+                .as_object_mut()
+                .ok_or("Preferences must be an object.")?
+                .insert("schema_version".into(), VERSION.into());
         }
         let prefs: Self =
             serde_json::from_value(value).map_err(|e| format!("Cannot read preferences: {e}"))?;
@@ -185,6 +192,7 @@ impl Preferences {
         canvas.apply_pen(&self.drawing.presets.active().style);
         canvas.eraser_radius = self.drawing.eraser_radius;
         canvas.eraser_mode = self.drawing.eraser_mode;
+        canvas.sticky_note_color = self.drawing.sticky_note_color;
     }
 }
 
@@ -301,6 +309,35 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sticky_note_default_color_migrates_persists_and_applies_only_to_future_notes() {
+        let migrated = Preferences::decode(r#"{"schema_version":5,"drawing":{}}"#).unwrap();
+        assert_eq!(migrated.drawing.sticky_note_color, [255, 244, 177]);
+        let mut prefs = Preferences::default();
+        prefs.drawing.sticky_note_color = [205, 231, 255];
+        let mut storage = MemoryStorage::default();
+        assert!(prefs.store(&mut storage));
+        let loaded = Preferences::load(Some(&storage)).unwrap();
+        assert_eq!(loaded.drawing.sticky_note_color, [205, 231, 255]);
+        let data = crate::document::DocumentData::blank(crate::document::DocumentKind::Whiteboard);
+        let mut canvas = crate::canvas::Canvas::new(&data);
+        loaded.apply_drawing(&mut canvas);
+        assert_eq!(canvas.sticky_note_color, [205, 231, 255]);
+        let note = crate::shape::Shape::create_sticky_note(
+            data.id(),
+            crate::drawing::Surface::Canvas,
+            [40., 50.],
+            [180., 140.],
+            canvas.sticky_note_color,
+        )
+        .unwrap();
+        assert_eq!(note.style.fill, Some([205, 231, 255]));
+        let mut changed_default = loaded;
+        changed_default.drawing.sticky_note_color = [255, 218, 226];
+        assert_eq!(changed_default.drawing.sticky_note_color, [255, 218, 226]);
+        assert_eq!(note.style.fill, Some([205, 231, 255]));
+    }
+
+    #[test]
     fn smoothing_preferences_migrate_and_persist_every_strength() {
         let old = Preferences::decode(r#"{"schema_version":1,"drawing":{"width":6.0}}"#).unwrap();
         assert_eq!(old.schema_version, VERSION);
@@ -344,7 +381,7 @@ pub(crate) mod tests {
         assert_eq!(Preferences::load(Some(&storage)).unwrap(), prefs);
         for json in [
             "broken",
-            r#"{"schema_version":6}"#,
+            r#"{"schema_version":7}"#,
             r#"{"drawing":{"width":0.0}}"#,
             r#"{"drawing":{"eraser_radius":49.0}}"#,
             r#"{"drawing":{"color":[0,0,0,0]}}"#,

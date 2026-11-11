@@ -179,6 +179,45 @@ pub struct Shape {
     pub style: ShapeStyle,
     #[serde(default)]
     pub text: Option<ShapeText>,
+    /// Present only for first-class sticky-note shapes; colors use `style.fill`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sticky_note: Option<StickyNoteOptions>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct StickyNoteOptions {
+    pub shadow: bool,
+    pub auto_height: bool,
+}
+pub const STICKY_NOTE_PALETTE: [(&str, [u8; 3]); 8] = [
+    ("Yellow", [255, 244, 177]),
+    ("Pink", [255, 218, 226]),
+    ("Blue", [205, 231, 255]),
+    ("Green", [215, 241, 205]),
+    ("Purple", [231, 218, 255]),
+    ("Orange", [255, 224, 190]),
+    ("White", [255, 255, 255]),
+    ("Custom", [0, 0, 0]),
+];
+fn relative_luminance(color: [u8; 3]) -> f64 {
+    let channel = |value: u8| {
+        let value = f64::from(value) / 255.0;
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(color[0]) + 0.7152 * channel(color[1]) + 0.0722 * channel(color[2])
+}
+impl Default for StickyNoteOptions {
+    fn default() -> Self {
+        Self {
+            shadow: true,
+            auto_height: true,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -267,8 +306,69 @@ impl Shape {
             geometry,
             style: ShapeStyle::default(),
             text: None,
+            sticky_note: None,
         };
         shape.valid().then_some(shape)
+    }
+    pub fn create_sticky_note(
+        owner: Uuid,
+        surface: Surface,
+        position: Point,
+        size: Point,
+        color: [u8; 3],
+    ) -> Option<Self> {
+        let mut note = Self::create(
+            owner,
+            surface,
+            ShapeKind::RoundedRectangle,
+            position,
+            [position[0] + size[0], position[1] + size[1]],
+            false,
+        )?;
+        note.style.fill = Some(color);
+        note.style.fill_opacity = 255;
+        note.style.border = [174, 150, 81, 255];
+        note.style.border_width = 0.75;
+        note.geometry = match note.geometry {
+            ShapeGeometry::Box { corner_radius, .. } => ShapeGeometry::Box {
+                kind: ShapeKind::RoundedRectangle,
+                size,
+                corner_radius: corner_radius.min(8.),
+            },
+            _ => unreachable!(),
+        };
+        let mut text = ShapeText {
+            vertical_alignment: VerticalAlignment::Top,
+            ..ShapeText::default()
+        };
+        let content = std::sync::Arc::make_mut(&mut text.content);
+        content.style.alignment = crate::text::Alignment::Left;
+        content.style.size = 16.;
+        content.style.color = if relative_luminance(color) < 0.42 {
+            [255, 255, 255, 255]
+        } else {
+            [42, 39, 31, 255]
+        };
+        note.text = Some(text);
+        note.sticky_note = Some(StickyNoteOptions::default());
+        note.valid().then_some(note)
+    }
+    pub fn is_sticky_note(&self) -> bool {
+        self.sticky_note.is_some()
+    }
+    pub fn text_background_contrast_ok(&self) -> bool {
+        let Some(note) = &self.text else { return true };
+        let Some(background) = self.style.fill else {
+            return true;
+        };
+        let bg = relative_luminance(background);
+        std::iter::once(&note.content.style)
+            .chain(note.content.runs.iter().map(|run| &run.style))
+            .all(|style| {
+                let text = relative_luminance([style.color[0], style.color[1], style.color[2]]);
+                let (light, dark) = if bg >= text { (bg, text) } else { (text, bg) };
+                (light + 0.05) / (dark + 0.05) >= 4.5
+            })
     }
     pub fn kind(&self) -> ShapeKind {
         match self.geometry {
@@ -294,6 +394,15 @@ impl Shape {
                 .all(|v| v.abs() <= 1e15)
             && self.style.valid()
             && self.text.as_ref().is_none_or(ShapeText::valid)
+            && self.sticky_note.is_none_or(|_| {
+                matches!(
+                    self.geometry,
+                    ShapeGeometry::Box {
+                        kind: ShapeKind::RoundedRectangle,
+                        ..
+                    }
+                ) && self.text.is_some()
+            })
             && match self.geometry {
                 ShapeGeometry::Path {
                     ref points,
@@ -355,6 +464,13 @@ impl Shape {
             return None;
         };
         let pad = 8.0_f64.min(w * 0.1).min(h * 0.1);
+        if self.is_sticky_note() {
+            let pad = 14.0_f64.min(w * 0.2).min(h * 0.2);
+            return Some(ObjectBounds {
+                min: [pad, pad],
+                max: [(w - pad).max(pad), (h - pad).max(pad)],
+            });
+        }
         let (x, y, width, height) = match kind {
             ShapeKind::Rectangle => (pad, pad, w - 2. * pad, h - 2. * pad),
             ShapeKind::RoundedRectangle => {
@@ -386,6 +502,63 @@ impl Shape {
             min: [x.max(0.), y.max(0.)],
             max: [(x + width).max(x.max(0.)), (y + height).max(y.max(0.))],
         })
+    }
+    /// Local note grips ordered TL, T, TR, R, BR, B, BL, L.
+    pub fn note_resize_handles(&self) -> Option<[Point; 8]> {
+        let ShapeGeometry::Box { size: [w, h], .. } = self.geometry else {
+            return None;
+        };
+        self.is_sticky_note().then(|| {
+            [
+                [0., 0.],
+                [w * 0.5, 0.],
+                [w, 0.],
+                [w, h * 0.5],
+                [w, h],
+                [w * 0.5, h],
+                [0., h],
+                [0., h * 0.5],
+            ]
+            .map(|point| self.placement.apply(point))
+        })
+    }
+    pub fn with_note_handle(&self, index: usize, point: Point) -> Option<Self> {
+        let handles = self.note_resize_handles()?;
+        let opposite = self.placement.inverse(handles[(index + 4) % 8]);
+        let target = self.placement.inverse(point);
+        let ShapeGeometry::Box {
+            size: [w, h],
+            corner_radius,
+            ..
+        } = self.geometry
+        else {
+            return None;
+        };
+        let (mut min, mut max) = ([0., 0.], [w, h]);
+        if index.is_multiple_of(2) {
+            min = std::array::from_fn(|i| target[i].min(opposite[i]));
+            max = std::array::from_fn(|i| target[i].max(opposite[i]));
+        } else if index % 4 == 1 {
+            min[1] = target[1].min(opposite[1]);
+            max[1] = target[1].max(opposite[1]);
+        } else {
+            min[0] = target[0].min(opposite[0]);
+            max[0] = target[0].max(opposite[0]);
+        }
+        let size = [max[0] - min[0], max[1] - min[1]];
+        if size.iter().any(|v| !v.is_finite() || *v < 36.) {
+            return None;
+        }
+        let mut out = self.clone();
+        out.geometry = ShapeGeometry::Box {
+            kind: ShapeKind::RoundedRectangle,
+            size,
+            corner_radius: corner_radius.min(8.).min(size[0].min(size[1]) * 0.2),
+        };
+        out.placement.origin = [0.; 2];
+        out.placement.position = self.placement.apply(min);
+        out.sticky_note.as_mut()?.auto_height = false;
+        out.valid().then_some(out)
     }
     /// Closed convex boundaries or independent shaft/head paths. Curves use a
     /// bounded chord-error tolerance, shared by hits/regions and display caches.
@@ -921,6 +1094,8 @@ pub enum StylePatch {
     BorderEnabled(bool),
     Heads(bool, bool),
     Radius(f64),
+    StickyShadow(bool),
+    StickyAutoHeight(bool),
 }
 impl StylePatch {
     pub fn apply(self, shape: &mut Shape) {
@@ -961,6 +1136,16 @@ impl StylePatch {
                     && v.is_finite()
                 {
                     *corner_radius = v.clamp(0., size[0].min(size[1]) * 0.5);
+                }
+            }
+            Self::StickyShadow(value) => {
+                if let Some(note) = &mut shape.sticky_note {
+                    note.shadow = value;
+                }
+            }
+            Self::StickyAutoHeight(value) => {
+                if let Some(note) = &mut shape.sticky_note {
+                    note.auto_height = value;
                 }
             }
             _ => (),

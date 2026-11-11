@@ -8,6 +8,7 @@ pub enum Icon {
     Select,
     Shapes,
     Text,
+    StickyNote,
     Lasso,
     Duplicate,
     Delete,
@@ -47,6 +48,13 @@ pub fn paint(painter: &egui::Painter, center: Pos2, icon: Icon, color: Color32) 
             line(point(-5., -6.), point(5., -6.));
             line(point(0., -6.), point(0., 6.));
             line(point(-3., 6.), point(3., 6.));
+        }
+        Icon::StickyNote => {
+            let paper = Rect::from_center_size(center, Vec2::new(12., 12.));
+            painter.rect_filled(paper, 1.5, Color32::from_rgb(255, 231, 145));
+            painter.rect_stroke(paper, 1.5, stroke, StrokeKind::Inside);
+            painter.line_segment([point(-3.5, -2.), point(3.5, -2.)], stroke);
+            painter.line_segment([point(-3.5, 1.), point(2.5, 1.)], stroke);
         }
         Icon::Shapes => shape(painter, center, crate::shape::ShapeKind::Rectangle, color),
         Icon::Duplicate => {

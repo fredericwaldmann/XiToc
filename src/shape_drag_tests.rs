@@ -103,6 +103,72 @@ fn shape_handle_drag_preserves_grab_offset_within_hit_radius() {
         }
     }
 }
+
+#[test]
+fn sticky_note_eight_resize_handles_follow_rotation_zoom_and_disable_auto_height() {
+    let deltas = [
+        [-18., -14.],
+        [0., -14.],
+        [18., -14.],
+        [18., 0.],
+        [18., 14.],
+        [0., 14.],
+        [-18., 14.],
+        [-18., 0.],
+    ];
+    for scale in [0.5, 1., 2., 4.] {
+        for (index, delta) in deltas.into_iter().enumerate() {
+            let (mut c, surface) = setup(DocumentKind::Whiteboard);
+            let mut note = Shape::create_sticky_note(
+                c.drawing.owner(),
+                surface,
+                [200., 180.],
+                [180., 140.],
+                [255, 244, 177],
+            )
+            .unwrap();
+            note.placement.rotation = 0.23;
+            let id = note.id;
+            assert!(c.drawing.add_shape(note.clone()));
+            c.select(Tool::Select);
+            c.selection.change([id], Membership::Replace, &c.drawing);
+            let start = note.note_resize_handles().unwrap()[index];
+            let local = note.placement.inverse(start);
+            let target = note
+                .placement
+                .apply([local[0] + delta[0], local[1] + delta[1]]);
+            c.selection_gesture = Some(SelectionGesture::ShapeEdit {
+                surface,
+                source: std::sync::Arc::new(note.clone()),
+                preview: note.clone(),
+                index,
+                corner: true,
+                start,
+                moved: false,
+            });
+            c.selection_sample(surface, target, scale, false);
+            c.commit_selection();
+            let ObjectSnapshot::Shape(resized) = c.drawing.snapshot(id).unwrap() else {
+                panic!("resizing retains the same note object")
+            };
+            assert_eq!(resized.id, id);
+            assert!(
+                !resized.sticky_note.unwrap().auto_height,
+                "index {index} at zoom {scale}"
+            );
+            assert_eq!(
+                resized.text.as_ref().unwrap().content,
+                note.text.as_ref().unwrap().content
+            );
+            assert!(c.drawing.can_undo());
+            c.undo();
+            assert_eq!(
+                c.drawing.snapshot(id),
+                Some(&ObjectSnapshot::Shape(std::sync::Arc::new(note)))
+            );
+        }
+    }
+}
 #[test]
 fn translation_preview_reuses_original_shape_meshes() {
     let (mut c, s) = setup(DocumentKind::Whiteboard);

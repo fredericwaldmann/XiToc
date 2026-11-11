@@ -59,6 +59,9 @@ pub fn show(
                 ui.weak("Drag to create · Shift constrains · Escape cancels");
             });
             if icons::button(ui,Icon::Text,"Text · click to type, drag to set width",editor.canvas.tool==Tool::Text).clicked(){editor.canvas.select(Tool::Text);}
+            if width >= 420.0 && icons::button(ui, Icon::StickyNote, "Sticky Note · click to create and type", editor.canvas.tool == Tool::StickyNote).clicked() {
+                editor.canvas.select(Tool::StickyNote);
+            }
             let reserved = if width >= 1000.0 { 480.0 } else if width >= 800.0 { 380.0 } else if width >= 500.0 { 268.0 } else { 210.0 };
             let reserved=reserved+60.0+if width>=400.0{30.0}else{0.0};
             let strip_width = (width - reserved).max(24.0);

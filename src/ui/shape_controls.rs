@@ -372,6 +372,73 @@ pub fn controls(ui: &mut egui::Ui, shapes: &[Shape]) -> Edits {
     edits
 }
 
+/// Sticky-note appearance stays separate from the shared Text/Paragraph controls.
+pub fn sticky_controls(ui: &mut egui::Ui, notes: &[Shape]) -> Edits {
+    let mut edits = Vec::new();
+    let Some(first) = notes.first() else {
+        return edits;
+    };
+    menu(ui, "Note", |ui| {
+        ui.strong("Note appearance");
+        let mixed_color = notes
+            .iter()
+            .skip(1)
+            .any(|note| note.style.fill != first.style.fill);
+        ui.weak(if mixed_color {
+            "Mixed background colors"
+        } else {
+            "Background color"
+        });
+        ui.horizontal_wrapped(|ui| {
+            for (name, color) in crate::shape::STICKY_NOTE_PALETTE
+                .iter()
+                .filter(|(name, _)| *name != "Custom")
+            {
+                let selected = notes.iter().all(|note| note.style.fill == Some(*color));
+                if ui
+                    .add(
+                        egui::Button::new("  ")
+                            .fill(egui::Color32::from_rgb(color[0], color[1], color[2]))
+                            .selected(selected),
+                    )
+                    .on_hover_text(*name)
+                    .clicked()
+                {
+                    edits.push((
+                        StylePatch::Fill(Some(*color)),
+                        ui.make_persistent_id(("note-color", name)),
+                    ));
+                }
+            }
+        });
+        let mut color = first
+            .style
+            .fill
+            .unwrap_or(crate::shape::STICKY_NOTE_PALETTE[0].1);
+        if let Some(id) = color_control(ui, &mut color, 255) {
+            edits.push((StylePatch::Fill(Some(color)), id));
+        }
+        if notes.iter().any(|note| !note.text_background_contrast_ok()) {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                "Text color has low contrast on this background; adjust it in Text formatting.",
+            );
+        }
+        let mut shadow = first.sticky_note.unwrap_or_default().shadow;
+        let response = ui.checkbox(&mut shadow, "Subtle shadow");
+        if response.changed() {
+            edits.push((StylePatch::StickyShadow(shadow), response.id));
+        }
+        let mut auto_height = first.sticky_note.unwrap_or_default().auto_height;
+        let response = ui.checkbox(&mut auto_height, "Automatically grow height while typing");
+        if response.changed() {
+            edits.push((StylePatch::StickyAutoHeight(auto_height), response.id));
+        }
+        ui.weak("Manual resize turns automatic height off for that note.");
+    });
+    edits
+}
+
 pub fn defaults(ui: &mut egui::Ui, defaults: &mut crate::shape::ShapeDefaults) {
     ui.strong("Default shape style");
     ui.weak("Applies only to newly created shapes. Arrowheads configure new arrows.");

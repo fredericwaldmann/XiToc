@@ -206,6 +206,36 @@ pub(super) fn paint_shape_text(
         );
     }
 }
+pub(super) fn paint_sticky_shadow(
+    painter: &egui::Painter,
+    view: Transform,
+    shape: &crate::shape::Shape,
+    delta: crate::object::Placement,
+) {
+    if !shape.is_sticky_note() || !shape.sticky_note.is_some_and(|note| note.shadow) {
+        return;
+    }
+    let mut preview = shape.clone();
+    if !delta.is_identity() {
+        preview.placement = shape.placement.then(delta, [0.; 2]);
+    }
+    let contours = preview.contours(0.3);
+    let Some(contour) = contours.first() else {
+        return;
+    };
+    let points: Vec<_> = contour
+        .iter()
+        .map(|point| {
+            let point = view.to_screen(*point);
+            Pos2::new(point[0] as f32 + 2., point[1] as f32 + 3.)
+        })
+        .collect();
+    painter.add(egui::Shape::convex_polygon(
+        points,
+        Color32::from_black_alpha(34),
+        egui::Stroke::NONE,
+    ));
+}
 impl Canvas {
     pub(super) fn scale_selected_text_sizes(&mut self, factor: f64, ctx: &egui::Context) -> bool {
         self.finish_text();
@@ -320,6 +350,32 @@ impl Canvas {
     fn start_shape_text(&mut self, ui: &egui::Ui, shape: &crate::shape::Shape) {
         if let Some(text) = shape_text_adapter(shape) {
             self.start_text_target(ui, text, false, TextTarget::Shape);
+        }
+    }
+    fn create_sticky_note(&mut self, ui: &egui::Ui, surface: Surface, mut position: Point) {
+        let size = [220., 180.];
+        if let Some(bounds) = self.drawing.bounds(surface) {
+            if size[0] > bounds[0] || size[1] > bounds[1] {
+                self.notice = Some("This page is too small for a sticky note.".into());
+                return;
+            }
+            position[0] = position[0].clamp(0., bounds[0] - size[0]);
+            position[1] = position[1].clamp(0., bounds[1] - size[1]);
+        }
+        let Some(note) = crate::shape::Shape::create_sticky_note(
+            self.drawing.owner(),
+            surface,
+            position,
+            size,
+            self.sticky_note_color,
+        ) else {
+            return;
+        };
+        if self.drawing.add_shape(note.clone()) {
+            self.selection.scope(surface);
+            self.selection
+                .change([note.id], Membership::Replace, &self.drawing);
+            self.start_shape_text(ui, &note);
         }
     }
     fn start_text_target(
@@ -540,6 +596,10 @@ impl Canvas {
                             handle,
                         });
                         return self.text_surface(ui, bounds, surface, view);
+                    }
+                    if self.tool == Tool::StickyNote {
+                        self.create_sticky_note(ui, surface, p);
+                        return true;
                     }
                     if self.tool == Tool::Text {
                         if let Some(id) = self.pick(surface, p, 0.)
@@ -1137,6 +1197,24 @@ impl Canvas {
                 _ => None,
             })
             .unwrap_or_default();
+        // Vertical alignment moves the complete layout inside its container.
+        // Unlike horizontal paragraph formatting, it is unavailable when the
+        // editor selection covers only part of the active shape's text.
+        let vertical_enabled = self
+            .text_session
+            .as_ref()
+            .filter(|session| {
+                session.target == TextTarget::Shape
+                    && texts.iter().any(|text| text.id == session.value.id)
+            })
+            .is_none_or(|session| {
+                session.cursor.is_none_or(|range| {
+                    let [start, end] = range.sorted_cursors();
+                    start.index.0 == end.index.0
+                        || (start.index.0 == 0
+                            && end.index.0 == session.value.content.text.chars().count())
+                })
+            });
         let mut vertical_patch = None;
         let mut alignment_patch = None;
         let mut resize_patch = None;
@@ -1307,10 +1385,15 @@ impl Canvas {
                         ("Middle", crate::shape::VerticalAlignment::Middle),
                         ("Bottom", crate::shape::VerticalAlignment::Bottom),
                     ] {
-                        if ui
-                            .selectable_value(&mut vertical_alignment, value, label)
-                            .clicked()
-                        {
+                        let response = ui.add_enabled(
+                            vertical_enabled,
+                            egui::Button::selectable(vertical_alignment == value, label),
+                        );
+                        let response = response.on_disabled_hover_text(
+                            "Vertical alignment applies to the entire text. Select all text or clear the text selection.",
+                        );
+                        if response.clicked() {
+                            vertical_alignment = value;
                             vertical_patch = Some(value);
                             changed = true;
                         }

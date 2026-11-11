@@ -106,6 +106,7 @@ fn properties_batch_history_preserve_objects_and_skip_incompatible() {
                         assert_eq!(shape.geometry, source.geometry);
                     }
                 }
+                StylePatch::StickyShadow(_) | StylePatch::StickyAutoHeight(_) => {}
             }
             if !matches!(patch, StylePatch::Heads(..) | StylePatch::Radius(_)) {
                 assert_eq!(shape.geometry, source.geometry);

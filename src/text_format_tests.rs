@@ -4,7 +4,7 @@ use super::{
     *,
 };
 use crate::{
-    canvas::selection_ui::tests::setup,
+    canvas::selection_ui::tests::{moved, screen, setup},
     document::DocumentKind,
     text::{Alignment, TextStylePatch},
 };
@@ -69,6 +69,37 @@ impl Harness {
             galleys: Vec::new(),
         };
         harness.frame(vec![]);
+        harness
+    }
+    fn create_sticky_note() -> Self {
+        let (mut canvas, surface) = setup(DocumentKind::Whiteboard);
+        let ctx = egui::Context::default();
+        text_layout::install(&ctx);
+        canvas.sticky_note_color = [255, 218, 226];
+        canvas.select(Tool::StickyNote);
+        let mut harness = Self {
+            ctx,
+            canvas,
+            surface,
+            id: Uuid::nil(),
+            labels: HashMap::new(),
+            galleys: Vec::new(),
+        };
+        let view = crate::canvas::selection_ui::tests::t();
+        let at = [220., 240.];
+        let screen = screen(view, at);
+        let pos = egui::pos2(screen[0] as f32, screen[1] as f32);
+        harness.frame(vec![
+            moved(view, at),
+            Event::PointerButton {
+                pos,
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: Default::default(),
+            },
+        ]);
+        harness.id = harness.canvas.drawing.items()[0].id();
+        assert!(harness.canvas.text_session.is_some());
         harness
     }
     fn value(&self) -> &TextObject {
@@ -238,6 +269,177 @@ fn shape_text_is_one_shape_and_reuses_the_rich_editor_and_formatting_scope() {
     assert_eq!(content.style_at(8).size, 19.);
     assert_eq!(content.style_at(18).size, 18.);
     assert_eq!(h.canvas.text_session.as_ref().unwrap().value.id, h.id);
+}
+
+#[test]
+fn vertical_alignment_requires_container_scope_and_preserves_full_selection() {
+    use crate::shape::VerticalAlignment;
+
+    let mut h = Harness::with_shape_text();
+    h.frame(vec![Event::Text("Café Ω 🌍\nsecond line".into())]);
+    let all_text = h.value().content.text.chars().count();
+
+    // A caret is a container-level scope, so it can change alignment.
+    let caret = h.select(0, 0);
+    h.click("Paragraph", caret);
+    h.click("Top", caret);
+    let Some(ObjectSnapshot::Shape(shape)) = h.canvas.drawing.snapshot(h.id) else {
+        panic!("text shape disappeared")
+    };
+    assert_eq!(
+        shape.text.as_ref().unwrap().vertical_alignment,
+        VerticalAlignment::Top
+    );
+
+    // A selected word disables all container alignment actions and leaves the
+    // active selection, document revision, and undo history untouched.
+    let partial = h.select(1, 4);
+    h.frame(vec![]);
+    assert!(h.labels.contains_key("Top"));
+    h.click("Text", partial);
+    h.click("Paragraph", partial);
+    let before_revision = h.canvas.drawing.revision();
+    let before_history = h.canvas.history_available();
+    h.click("Bottom", partial);
+    let Some(ObjectSnapshot::Shape(shape)) = h.canvas.drawing.snapshot(h.id) else {
+        panic!("text shape disappeared")
+    };
+    assert_eq!(
+        shape.text.as_ref().unwrap().vertical_alignment,
+        VerticalAlignment::Top
+    );
+    assert_eq!(h.canvas.drawing.revision(), before_revision);
+    assert_eq!(h.canvas.history_available(), before_history);
+    h.highlight();
+
+    // A selection crossing paragraphs but omitting content at both ends is
+    // also partial, even though it intersects multiple complete paragraphs.
+    let multiple_partial = h.select(2, all_text - 2);
+    let before_revision = h.canvas.drawing.revision();
+    h.click("Bottom", multiple_partial);
+    let Some(ObjectSnapshot::Shape(shape)) = h.canvas.drawing.snapshot(h.id) else {
+        panic!("text shape disappeared")
+    };
+    assert_eq!(
+        shape.text.as_ref().unwrap().vertical_alignment,
+        VerticalAlignment::Top
+    );
+    assert_eq!(h.canvas.drawing.revision(), before_revision);
+    h.highlight();
+
+    // Full content selection enables the control and remains selected after
+    // the change. Mixed inline formatting is not touched by the container op.
+    let mut styled = h.value().clone();
+    styled.content_mut().format(
+        0..4,
+        &TextStylePatch {
+            size: Some(31.),
+            bold: Some(true),
+            ..Default::default()
+        },
+    );
+    h.canvas
+        .drawing
+        .replace_text_adapters(vec![styled], None, false);
+    let full = h.select(0, all_text);
+    let styles = h.value().content.runs.clone();
+    h.click("Middle", full);
+    let Some(ObjectSnapshot::Shape(shape)) = h.canvas.drawing.snapshot(h.id) else {
+        panic!("text shape disappeared")
+    };
+    assert_eq!(
+        shape.text.as_ref().unwrap().vertical_alignment,
+        VerticalAlignment::Middle
+    );
+    assert_eq!(shape.text.as_ref().unwrap().content.runs, styles);
+    h.canvas.undo();
+    h.frame(vec![]);
+    let Some(ObjectSnapshot::Shape(shape)) = h.canvas.drawing.snapshot(h.id) else {
+        panic!("undo must retain the shape")
+    };
+    assert_eq!(
+        shape.text.as_ref().unwrap().vertical_alignment,
+        VerticalAlignment::Top
+    );
+    h.canvas.redo();
+    h.frame(vec![]);
+    let Some(ObjectSnapshot::Shape(shape)) = h.canvas.drawing.snapshot(h.id) else {
+        panic!("redo must retain the shape")
+    };
+    assert_eq!(
+        shape.text.as_ref().unwrap().vertical_alignment,
+        VerticalAlignment::Middle
+    );
+}
+
+#[test]
+fn vertical_alignment_is_available_for_empty_and_object_selected_shape_text() {
+    use crate::shape::VerticalAlignment;
+
+    let mut h = Harness::create_sticky_note();
+    h.frame(vec![]);
+    h.click(
+        "Paragraph",
+        egui::text::CCursorRange::one(egui::text::CCursor::new(0)),
+    );
+    h.frame(vec![]);
+    assert!(h.labels.contains_key("Top"));
+    h.click(
+        "Bottom",
+        egui::text::CCursorRange::one(egui::text::CCursor::new(0)),
+    );
+    let Some(ObjectSnapshot::Shape(shape)) = h.canvas.drawing.snapshot(h.id) else {
+        panic!("empty text shape disappeared")
+    };
+    assert_eq!(
+        shape.text.as_ref().unwrap().vertical_alignment,
+        VerticalAlignment::Bottom
+    );
+
+    // Object mode has no character range and therefore permits container
+    // alignment without selecting or rewriting the text.
+    h.canvas.finish_text();
+    let before = h.canvas.drawing.revision();
+    h.frame(vec![]);
+    assert!(h.labels.contains_key("Middle"));
+    let middle = h.labels["Middle"];
+    for pressed in [true, false] {
+        h.frame(vec![
+            Event::PointerMoved(middle),
+            Event::PointerButton {
+                pos: middle,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            },
+        ]);
+    }
+    assert!(h.canvas.drawing.revision() > before);
+}
+
+#[test]
+fn sticky_note_tool_creates_pink_shape_and_edits_through_shared_rich_text_session() {
+    let mut h = Harness::create_sticky_note();
+    assert!(matches!(h.canvas.tool, Tool::Select));
+    assert_eq!(h.canvas.selection.ids, HashSet::from([h.id]));
+    let Some(ObjectSnapshot::Shape(note)) = h.canvas.drawing.snapshot(h.id) else {
+        panic!("sticky note is stored as one Shape object")
+    };
+    assert!(note.is_sticky_note());
+    assert_eq!(note.style.fill, Some([255, 218, 226]));
+    assert!(h.canvas.text_session.as_ref().unwrap().target == TextTarget::Shape);
+    h.frame(vec![Event::Text("Hello beautiful world".into())]);
+    let selected = h.select(6, 15);
+    h.click("Text", selected);
+    h.click("+", selected);
+    h.highlight();
+    let Some(ObjectSnapshot::Shape(note)) = h.canvas.drawing.snapshot(h.id) else {
+        panic!()
+    };
+    assert_eq!(note.text.as_ref().unwrap().content.style_at(0).size, 16.);
+    assert_eq!(note.text.as_ref().unwrap().content.style_at(8).size, 17.);
+    assert_eq!(note.text.as_ref().unwrap().content.style_at(18).size, 16.);
+    assert_eq!(note.style.fill, Some([255, 218, 226]));
 }
 #[test]
 fn font_preview_real_canvas_freezes_direction_and_highlights_cancel_and_commit() {

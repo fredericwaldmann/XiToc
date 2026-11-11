@@ -813,9 +813,27 @@ center while retaining readable glyphs. Page fitting preserves source even when
 the page clips the footprint; editing scrolls long content. Geometry beyond page
 limits remains subject to the existing page constraints.
 
-The same TextContent, ranges, paragraphs, font service and layout/editor APIs can
-host future shape text, sticky notes, connector/formula labels. None of those
-hosts is introduced. There is no PDF/schema/save change: editing remains memory
-only, dirty export stays blocked, and future PDFs must embed matching font assets,
-visible graphics and XiToc/document.json in one file. #26 stays open for its broader
-shape-text/platform verification requirements.
+The same TextContent, ranges, paragraphs, font service and layout/editor APIs now
+host ShapeText and sticky notes (M1.9/M1.10). Connector/formula labels remain
+future hosts. There is no PDF/schema/save change: editing remains memory-only,
+dirty export stays blocked, and future PDFs must embed matching font assets,
+visible graphics and XiToc/document.json in one file. The paragraphs below record
+the later M1.10 sticky-note model and its explicit grouping/persistence limits.
+
+## M1.10 sticky notes
+
+A sticky note is a Shape with rounded-rectangle geometry, normal ShapeStyle fill,
+shared ShapeText rich content, and optional `StickyNoteOptions` for shadow and
+automatic height. This reuses one canonical object for stable identity,
+placement, selection, transforms, clipboard, undo/redo, and magnetic connector
+anchors. Text input uses the existing Shape-target TextSession adapter.
+
+The top toolbar creates a default-size note at the pointer and starts that shared
+editor. Its Note appearance controls patch background/shadow/auto-height while
+Text | Paragraph remain independent; the per-device default color only affects
+future notes. Manual resizing through any of eight local grips disables
+auto-height for that note. The shape edit journal updates dependent connector
+routes in the same transaction. If Page bounds prevent growth, content remains
+unchanged and the overflow marker indicates the note needs more room. This model
+is group-compatible through the shared object protocol, but grouping is not
+implemented. No PDF payload or persistence change is part of M1.10.
