@@ -1197,6 +1197,24 @@ impl Canvas {
                 _ => None,
             })
             .unwrap_or_default();
+        // Vertical alignment moves the complete layout inside its container.
+        // Unlike horizontal paragraph formatting, it is unavailable when the
+        // editor selection covers only part of the active shape's text.
+        let vertical_enabled = self
+            .text_session
+            .as_ref()
+            .filter(|session| {
+                session.target == TextTarget::Shape
+                    && texts.iter().any(|text| text.id == session.value.id)
+            })
+            .is_none_or(|session| {
+                session.cursor.is_none_or(|range| {
+                    let [start, end] = range.sorted_cursors();
+                    start.index.0 == end.index.0
+                        || (start.index.0 == 0
+                            && end.index.0 == session.value.content.text.chars().count())
+                })
+            });
         let mut vertical_patch = None;
         let mut alignment_patch = None;
         let mut resize_patch = None;
@@ -1367,10 +1385,15 @@ impl Canvas {
                         ("Middle", crate::shape::VerticalAlignment::Middle),
                         ("Bottom", crate::shape::VerticalAlignment::Bottom),
                     ] {
-                        if ui
-                            .selectable_value(&mut vertical_alignment, value, label)
-                            .clicked()
-                        {
+                        let response = ui.add_enabled(
+                            vertical_enabled,
+                            egui::Button::selectable(vertical_alignment == value, label),
+                        );
+                        let response = response.on_disabled_hover_text(
+                            "Vertical alignment applies to the entire text. Select all text or clear the text selection.",
+                        );
+                        if response.clicked() {
+                            vertical_alignment = value;
                             vertical_patch = Some(value);
                             changed = true;
                         }
