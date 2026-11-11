@@ -294,11 +294,7 @@ impl Canvas {
         if self.selection.ids.len() != 1 {
             return None;
         }
-        let object = self
-            .drawing
-            .items()
-            .iter()
-            .find(|o| self.selection.ids.contains(&o.id()))?;
+        let object = self.drawing.snapshot(*self.selection.ids.iter().next()?)?;
         let ObjectSnapshot::Shape(shape) = object else {
             return None;
         };
@@ -319,15 +315,20 @@ impl Canvas {
     }
     pub(super) fn single_shape_handles(&self) -> bool {
         self.selection.ids.len() == 1
-            && self.drawing.items().iter().any(|o| {
-                self.selection.ids.contains(&o.id())
-                    && matches!(
+            && self
+                .selection
+                .ids
+                .iter()
+                .next()
+                .and_then(|id| self.drawing.snapshot(*id))
+                .is_some_and(|o| {
+                    matches!(
                         o,
                         ObjectSnapshot::Shape(_)
                             | ObjectSnapshot::Connector(_)
                             | ObjectSnapshot::Text(_)
                     )
-            })
+                })
     }
     pub(super) fn cancel_shape_draft(&mut self) {
         if let Some(d) = self.shape_draft.take() {
@@ -345,10 +346,11 @@ impl Canvas {
             return;
         }
         let Some(ObjectSnapshot::Shape(shape)) = self
-            .drawing
-            .items()
+            .selection
+            .ids
             .iter()
-            .find(|o| self.selection.ids.contains(&o.id()))
+            .next()
+            .and_then(|id| self.drawing.snapshot(*id))
         else {
             return;
         };

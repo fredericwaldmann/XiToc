@@ -39,6 +39,9 @@ impl ObjectBundle {
         if self.version != 1 || self.objects.is_empty() || self.objects.len() > MAX_OBJECTS {
             return Err("Unsupported object clipboard or exceeded object limit.".into());
         }
+        if !crate::group::validate(&self.objects) {
+            return Err("Invalid group ownership or cycle in clipboard.".into());
+        }
         let mut ids = std::collections::HashSet::new();
         let mut count = 0;
         for object in &self.objects {
@@ -46,6 +49,7 @@ impl ObjectBundle {
                 return Err("Duplicate object clipboard ID.".into());
             }
             let s = match object {
+                ClipboardObject::Group(_) => continue,
                 ClipboardObject::Text(t) => {
                     if !t.valid() {
                         return Err("Invalid text clipboard.".into());
@@ -173,20 +177,37 @@ impl ObjectBundle {
                 transformed.relocated(drawing.owner(), surface)
             })
             .collect();
-        let remap = self
+        let remap: std::collections::HashMap<Uuid, Uuid> = self
             .objects
             .iter()
             .zip(&objects)
             .map(|(old, new)| (old.id(), new.id()))
             .collect();
         for object in &mut objects {
+            if let ClipboardObject::Group(g) = object {
+                std::sync::Arc::make_mut(g).children =
+                    g.children.iter().map(|id| remap[id]).collect();
+            }
             if let ClipboardObject::Connector(c) = object {
                 let mut copy = (**c).clone();
                 copy.remap(&remap);
                 *object = copy.into();
             }
         }
-        let ids = objects.iter().map(ClipboardObject::id).collect();
+        let children: std::collections::HashSet<_> = objects
+            .iter()
+            .filter_map(|o| match o {
+                ClipboardObject::Group(g) => Some(&g.children),
+                _ => None,
+            })
+            .flatten()
+            .copied()
+            .collect();
+        let ids = objects
+            .iter()
+            .map(ClipboardObject::id)
+            .filter(|id| !children.contains(id))
+            .collect();
         if drawing.insert_snapshots(objects) {
             ids
         } else {

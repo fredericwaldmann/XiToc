@@ -3,6 +3,8 @@ use crate::{canvas::Canvas, selection::SelectionCommand};
 #[derive(Clone, Copy, Default)]
 pub struct MenuState {
     pub editable: bool,
+    pub can_group: bool,
+    pub can_ungroup: bool,
     pub selected: bool,
     pub can_undo: bool,
     pub can_redo: bool,
@@ -12,6 +14,13 @@ impl MenuState {
     pub fn for_canvas(canvas: &Canvas) -> Self {
         Self {
             editable: true,
+            can_group: canvas.selection.ids.len() >= 2,
+            can_ungroup: canvas.selection.ids.iter().any(|id| {
+                matches!(
+                    canvas.drawing.snapshot(*id),
+                    Some(crate::object::ObjectSnapshot::Group(_))
+                )
+            }),
             selected: !canvas.selection.ids.is_empty(),
             can_undo: canvas.history_available().0,
             can_redo: canvas.history_available().1,
@@ -44,7 +53,34 @@ pub fn menu(ui: &mut egui::Ui, state: MenuState) -> Option<SelectionCommand> {
             command = Some(value);
         }
     }
+    for (label, key, enabled, value) in [
+        ("Group", "Ctrl/Cmd+G", state.can_group, Group),
+        ("Ungroup", "Ctrl/Cmd+Shift+G", state.can_ungroup, Ungroup),
+        ("Lock", "", state.selected, Lock),
+    ] {
+        if ui
+            .add_enabled(
+                state.editable && enabled,
+                egui::Button::new(label).shortcut_text(key),
+            )
+            .clicked()
+        {
+            command = Some(value);
+        }
+    }
     ui.add_enabled_ui(state.editable && state.selected, |ui| {
+        ui.menu_button("Arrange", |ui| {
+            for (label, value) in [
+                ("Bring to Front", BringToFront),
+                ("Bring Forward", BringForward),
+                ("Send Backward", SendBackward),
+                ("Send to Back", SendToBack),
+            ] {
+                if ui.button(label).clicked() {
+                    command = Some(value);
+                }
+            }
+        });
         ui.menu_button("Transform", |ui| {
             for (label, value) in [
                 ("Rotate left 15°", RotateLeft),

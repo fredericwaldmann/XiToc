@@ -77,7 +77,52 @@ impl Canvas {
         if self.text_action(command, ctx) {
             return;
         }
+        if matches!(
+            command,
+            Cut | Delete
+                | Smaller
+                | Larger
+                | RotateLeft
+                | RotateRight
+                | FlipHorizontal
+                | FlipVertical
+        ) && self
+            .selection
+            .expanded
+            .iter()
+            .any(|id| self.drawing.is_locked(*id))
+        {
+            self.notice = Some(
+                "Selection contains a locked object. Enter the group and unlock it first.".into(),
+            );
+            return;
+        }
         match command {
+            Group => {
+                self.finish();
+                if let Some(id) = self.drawing.group_selection(&self.selection.ids) {
+                    self.selection
+                        .change([id], Membership::Replace, &self.drawing);
+                }
+            }
+            Ungroup => {
+                self.finish();
+                let ids = self.drawing.ungroup_selection(&self.selection.ids);
+                if !ids.is_empty() {
+                    self.selection
+                        .change(ids, Membership::Replace, &self.drawing);
+                }
+            }
+            Lock => {
+                self.finish();
+                self.drawing.lock_objects(&self.selection.ids, true);
+                self.selection.clear();
+            }
+            BringToFront | BringForward | SendBackward | SendToBack => {
+                self.finish();
+                self.drawing.arrange(&self.selection.ids, command);
+                self.selection.refresh(&self.drawing);
+            }
             Undo => self.undo(),
             Redo => self.redo(),
             SelectAll => {
@@ -85,7 +130,10 @@ impl Canvas {
                 let ids = self
                     .drawing
                     .objects()
-                    .filter(|s| s.surface() == self.selection.surface)
+                    .filter(|s| {
+                        s.surface() == self.selection.surface
+                            && self.drawing.in_scope(s.object_id())
+                    })
                     .map(|s| s.object_id())
                     .collect::<Vec<_>>();
                 self.selection
@@ -252,11 +300,12 @@ impl Canvas {
         if self.selection.ids.is_empty() {
             return None;
         }
+        let expanded = self.drawing.expanded(&self.selection.ids);
         match ObjectBundle::capture_objects(
             self.drawing
                 .items()
                 .iter()
-                .filter(|o| self.selection.ids.contains(&o.id()))
+                .filter(|o| expanded.contains(&o.id()))
                 .cloned(),
         ) {
             Ok(bundle) => Some(bundle),
@@ -346,12 +395,29 @@ impl Canvas {
                 }
             }
         }
+        for (mods, command) in [
+            (
+                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                SelectionCommand::Ungroup,
+            ),
+            (egui::Modifiers::COMMAND, SelectionCommand::Group),
+        ] {
+            if ui
+                .input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(mods, egui::Key::G)))
+            {
+                self.selection_action(command, ui.ctx());
+            }
+        }
         if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             // Cancel first so a later pointer release cannot commit a preview.
             self.selection_gesture = None;
             self.connection_gesture = None;
             self.cancel_shape_draft();
             self.selection.clear();
+            if let Some(id) = self.drawing.exit_group() {
+                self.selection
+                    .change([id], Membership::Replace, &self.drawing);
+            }
         }
         if matches!(self.tool, Tool::Select | Tool::Lasso)
             && ui.input_mut(|i| {
@@ -428,22 +494,15 @@ impl Canvas {
         let mut top = None;
         self.object_index
             .query(surface, point, point, tolerance, |index| {
-                if top.is_some_and(|(old, _)| {
-                    let previous = &self.drawing.items()[old];
-                    let current = &self.drawing.items()[index];
-                    (matches!(previous, ObjectSnapshot::Shape(_) | ObjectSnapshot::Text(_))
-                        && matches!(current, ObjectSnapshot::Connector(_)))
-                        || (old > index
-                            && !(matches!(previous, ObjectSnapshot::Connector(_))
-                                && matches!(
-                                    current,
-                                    ObjectSnapshot::Shape(_) | ObjectSnapshot::Text(_)
-                                )))
-                }) {
+                if top.is_some_and(|(old, _)| old > index) {
                     return;
                 }
                 let object = &self.drawing.items()[index];
+                if self.drawing.scoped_target(object.id()).is_none() {
+                    return;
+                }
                 let hit = match object {
+                    ObjectSnapshot::Group(_) => false,
                     ObjectSnapshot::Text(t) => t.hit_test(point, tolerance),
                     ObjectSnapshot::Stroke(stroke) => {
                         let cache = self
@@ -466,7 +525,35 @@ impl Canvas {
                     top = Some((index, object.id()));
                 }
             });
-        top.map(|(_, id)| id)
+        top.and_then(|(_, id)| self.drawing.scoped_target(id))
+    }
+    fn pick_locked(&self, surface: Surface, point: Point, tolerance: f64) -> Option<Uuid> {
+        for object in self.drawing.items().iter().rev() {
+            if object.as_object().surface() != surface
+                || !object.as_object().hit_test(point, tolerance)
+            {
+                continue;
+            }
+            if !self.drawing.is_locked(object.id()) {
+                continue;
+            }
+            let mut id = object.id();
+            let mut target = object.locked().then_some(id);
+            while let Some(parent) = self.drawing.parent(id) {
+                if self
+                    .drawing
+                    .snapshot(parent)
+                    .is_some_and(ObjectSnapshot::locked)
+                {
+                    target = Some(parent);
+                }
+                id = parent;
+            }
+            if target.is_some() {
+                return target;
+            }
+        }
+        None
     }
     fn display_bounds(mut bounds: ObjectBounds, scale: f64) -> ObjectBounds {
         let center = bounds.center();
@@ -503,6 +590,17 @@ impl Canvas {
             })
     }
     fn start_rotation(&mut self, surface: Surface, point: Point) {
+        if self
+            .selection
+            .expanded
+            .iter()
+            .any(|id| self.drawing.is_locked(*id))
+        {
+            self.notice = Some(
+                "Selection contains a locked object. Enter the group and unlock it first.".into(),
+            );
+            return;
+        }
         if let (Some(bounds), Some(geometry)) = (self.selection.bounds, self.selection.geometry) {
             let center = bounds.center();
             self.selection_gesture = Some(SelectionGesture::Rotate {
@@ -525,6 +623,14 @@ impl Canvas {
         scale: f64,
     ) {
         if let (Some(bounds), Some(geometry)) = (self.selection.bounds, self.selection.geometry) {
+            let expanded = self.selection.expanded.clone();
+            if expanded.iter().any(|id| self.drawing.is_locked(*id)) {
+                self.notice = Some(
+                    "Selection contains a locked object. Enter the group and unlock it first."
+                        .into(),
+                );
+                return;
+            }
             let extent = (bounds.max[0] - bounds.min[0]).max(bounds.max[1] - bounds.min[1]);
             let minimum_factor = if extent > 0.0 {
                 (1.0 / extent).min(1.0)
@@ -540,7 +646,7 @@ impl Canvas {
             for object in self
                 .drawing
                 .objects()
-                .filter(|o| self.selection.ids.contains(&o.object_id()))
+                .filter(|o| expanded.contains(&o.object_id()))
             {
                 limits.0 = limits.0.max(1e-4 / object.placement().scale);
                 limits.1 = limits.1.min(1e4 / object.placement().scale);
@@ -550,12 +656,12 @@ impl Canvas {
                 return;
             };
             let session = DragSession {
-                ids: self.selection.ids.clone(),
+                ids: expanded.clone(),
                 sources: self
                     .drawing
                     .items()
                     .iter()
-                    .filter(|o| self.selection.ids.contains(&o.id()))
+                    .filter(|o| expanded.contains(&o.id()))
                     .cloned()
                     .collect(),
                 view,
@@ -634,6 +740,7 @@ impl Canvas {
                         .query_rect(surface, bounds.min, bounds.max, |index| {
                             let object = &self.drawing.items()[index];
                             let hit = match object {
+                                ObjectSnapshot::Group(_) => false,
                                 ObjectSnapshot::Text(t) => {
                                     t.rectangle_matches(bounds, point[0] < start[0])
                                 }
@@ -662,6 +769,7 @@ impl Canvas {
                                 matches.push(object.id());
                             }
                         });
+                    *matches = self.drawing.area_targets(matches, point[0] < start[0]);
                 }
             }
             Some(SelectionGesture::Lasso {
@@ -826,6 +934,7 @@ impl Canvas {
                     .query_rect(surface, bounds.min, bounds.max, |index| {
                         let object = &self.drawing.items()[index];
                         let hit = match object {
+                            ObjectSnapshot::Group(_) => false,
                             ObjectSnapshot::Stroke(stroke) => {
                                 let cached = self
                                     .cache
@@ -846,6 +955,7 @@ impl Canvas {
                             selected.push(object.id());
                         }
                     });
+                let selected = self.drawing.area_targets(&selected, false);
                 self.selection.change(selected, mode, &self.drawing);
             }
             _ => {}
@@ -1043,6 +1153,15 @@ impl Canvas {
             .painter()
             .with_clip_rect(bounds.intersect(ui.clip_rect()));
         let p = crate::ui::style::palette(ui);
+        if self.drawing.editing_group.is_some() {
+            painter.text(
+                bounds.left_top() + egui::vec2(8., 8.),
+                egui::Align2::LEFT_TOP,
+                "Editing group · Double-click a child to edit · Esc to exit",
+                egui::FontId::proportional(13.),
+                p.text,
+            );
+        }
         let screen = |point: Point| {
             let point = transform.to_screen(point);
             egui::pos2(point[0] as f32, point[1] as f32)
@@ -1375,7 +1494,9 @@ impl Canvas {
             && let Some(pos) = response.interact_pointer_pos()
         {
             let point = transform.to_document([pos.x as f64, pos.y as f64]);
+            self.unlock_target = self.pick_locked(surface, point, 4.0 / transform.scale);
             if self.drawing.contains(surface, point)
+                && self.unlock_target.is_none()
                 && let Some(id) = self.pick(surface, point, 4.0 / transform.scale)
             {
                 self.finish();
@@ -1389,6 +1510,17 @@ impl Canvas {
         }
 
         response.context_menu(|ui| {
+            if let Some(id) = self.unlock_target {
+                if ui.button("Unlock").clicked() {
+                    self.drawing.lock_objects(&HashSet::from([id]), false);
+                    self.selection
+                        .change([id], Membership::Replace, &self.drawing);
+                    self.unlock_target = None;
+                    ui.close();
+                }
+                return;
+            }
+
             let compatible = self
                 .drawing
                 .items()
@@ -1457,3 +1589,7 @@ mod connector_tests;
 #[cfg(test)]
 #[path = "text_controller_tests.rs"]
 mod text_tests;
+
+#[cfg(test)]
+#[path = "group_tests.rs"]
+mod organization_tests;

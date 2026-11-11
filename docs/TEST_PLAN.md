@@ -1508,3 +1508,66 @@ color and verify the text styles stay unchanged. Resize from all eight grips,
 rotate/flip, test auto-height and overflow near a Page edge, duplicate/copy/paste,
 connect to a rectangle and move both objects. Repeat at 50%, 100%, 200%, and
 400%, then undo/redo creation, text, appearance and geometry changes.
+
+## M1.11 — Organization verification (2026-11-11)
+
+Automated controller/model regressions in `group_tests.rs` cover grouping and
+ungrouping with exact IDs/order/history, nested regrouping and edit scopes,
+world-space move/proportional resize/rotation/both flips, raw ink and rich mixed
+text/sticky content, internal links and links between different groups, clipboard
+remapping/external detachment, child and ancestor locks/unlocking, all four Arrange
+commands and multi-selection order, geometry hit priority, area-selection scope,
+actual Ctrl/Cmd+G/Shift+G, double-click then text editing/Escape, fragment order
+when partially erasing within a group, and frozen offscreen dragging at 50/100/200/
+400% zoom. Forest fixtures reject cycles, missing/duplicate children and ownership
+mismatch. Existing connector/text picking tests now check canonical z-order, with
+Arrange bringing a shape/text above a crossing wire.
+
+Executed: cargo fmt --all (and --check), Clippy all-targets with warnings denied,
+cargo test --all-targets -- --test-threads=4 (264 passed, nine ignored), native
+release build, wasm32-unknown-unknown compilation and Trunk release build to
+`target/grouping-dist`. Linux release stayed alive for an eight-second timed
+startup, with no emitted errors, and was deliberately terminated by timeout.
+The ignored nested-group movement benchmark was explicitly run in release mode;
+it asserts reuse of all 1,000 base shape meshes and no committed revisions during
+40 changed preview frames. Timings below are host CPU observations, not device
+latency guarantees.
+
+Actual packaged Firefox WASM checks: created a temporary session Whiteboard and
+three rectangles, Ctrl+A then Ctrl+G, moved/resized the group, inspected enabled
+Ungroup and disabled Group in its context menu, locked it and attempted a drag
+(geometry stayed fixed), targeted Unlock, unlocked/moved it, rotated it using the
+handle, duplicated it, double-clicked into the rotated group, double-clicked a
+child and typed text, then pressed Escape twice to leave text and group editing.
+The text remained on that rotated child. Captures are in `screenshots/grouping/`.
+Explorer/tabs/top toolbar stayed intact. The browser export dialog was dismissed;
+no durable note-save claim is made.
+
+Limits: this actual browser smoke did not execute the entire requested rich-text/
+three-magnetic-shape diagram sequence, Page Note workflows, 200/400% physical fast
+mouse movement, both themes or native interactive gestures. Those logical paths
+are covered by automated regressions, not claimed as physical GUI verification.
+Windows/macOS/stylus/device latency and the full manual matrix remain manual
+review work. No PDF organization round trip exists because PDF persistence remains
+out of scope/M2.
+
+Manual review: create three labeled rectangles, connect pairs magnetically, select
+shapes and wires, group, then move/resize/rotate/flip/duplicate/copy-paste at 100%,
+200%, 400%. Verify internal wires and a wire to an outside shape; repeat with that
+outside shape in another group. Enter groups one level at a time and edit text/
+sticky content; Escape exits text then one group level. Lock children and their
+parent, unlock the parent and confirm child locks remain. Right-click locked
+geometry to recover access. Overlap a new object and test all four Arrange actions
+at root and within a group; unrelated contexts retain order. Undo/redo each action,
+ungroup while retaining nested groups, and repeat on a Page Note. Confirm pen,
+both erasers, selection modifiers, font runs, Paragraph/Justify, zoom/pan and
+memory-only discard protections remain intact.
+
+Corrected paired release benchmark: 1,000 objects / 40 changed frames measured
+922.52 ms for nested groups and 1,112.82 ms for the flat multiple selection on
+this host during build load. Both preserved all 1,000 base mesh Arcs and the
+committed revision. The older flat fixture's magnetic ports could capture its
+initial press; both now explicitly start and assert a frozen move session so
+connector gestures cannot invalidate the comparison. No wall-time threshold is
+used as a cross-device guarantee. Kernel perf sampling was unavailable under the
+host's perf_event_paranoid=4 policy; temporary phase instrumentation was removed.

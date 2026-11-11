@@ -239,6 +239,11 @@ fn connector_selection_priority_region_modes_keyboard_creation_and_noop_click() 
     );
     let id = edge(&c).id;
     assert_eq!(c.pick(s, [220., 140.], 4.), Some(id));
+    assert_eq!(c.pick(s, [150., 140.], 4.), Some(id));
+    assert!(
+        c.drawing
+            .arrange(&HashSet::from([a.id]), SelectionCommand::BringToFront)
+    );
     assert_eq!(c.pick(s, [150., 140.], 4.), Some(a.id));
     let bounds = ObjectBounds::from_points([[190., 120.], [250., 160.]]).unwrap();
     assert!(edge(&c).as_shape().rectangle_matches(bounds, true));

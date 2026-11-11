@@ -277,3 +277,13 @@ pastel/custom backgrounds, optional shadow and automatic height. Eight local
 resize grips, transforms, clipboard/history and magnetic connectors stay on the
 canonical shape ID. Per-device defaults affect future notes only. No PDF
 persistence, grouping, or other planned tools are included in this slice.
+
+## M1.11 — Grouping, locking and stacking contexts
+
+Shared Group CanvasObjects own ordered child IDs; nested editing, proportional
+move/resize/rotate/flip, clipboard/duplicate/delete and journal restore hierarchy.
+Object/ancestor locks protect ordinary edits and offer right-click recovery.
+Arrange changes immediate sibling order with consistent geometry hit priority.
+Both layouts share the same implementation. See ARCHITECTURE/UI_DESIGN for exact
+ownership, text-entry, child-lock and connector policies. All content remains
+memory-only pending M2; Alignment & Smart Snapping is separate future work.

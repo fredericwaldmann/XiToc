@@ -835,5 +835,69 @@ future notes. Manual resizing through any of eight local grips disables
 auto-height for that note. The shape edit journal updates dependent connector
 routes in the same transaction. If Page bounds prevent growth, content remains
 unchanged and the overflow marker indicates the note needs more room. This model
-is group-compatible through the shared object protocol, but grouping is not
-implemented. No PDF payload or persistence change is part of M1.10.
+was group-compatible through the shared object protocol; M1.11 below implements
+grouping. No PDF payload or persistence change is part of M1.10.
+
+## M1.11 — Group ownership, locks and stacking contexts
+
+`ObjectSnapshot::Group(Arc<Group>)` participates in the shared CanvasObject store.
+A Group owns an ordered list of immediate child IDs, a stable ID, document/surface
+ownership and a lock flag. Children retain their IDs and editable world-space
+placements. No separate local group transform exists: a parent operation expands
+the forest once and applies the common delta to every descendant once. Cached
+union bounds are derived at commit and omitted from serde. The shared clipboard
+validator rejects missing children, cycles, repeated ownership, incompatible
+surfaces/documents and hierarchies deeper than 64 parent links.
+
+Group children define their stacking context; root order comes from the canonical
+object sequence. At transaction boundaries the same sequence is normalized into
+postorder blocks (children followed by their invisible container). Rendering walks
+that sequence; point picking chooses the highest matching leaf index and promotes
+to the immediate object in the current editing scope. This supersedes the older
+shape-over-wire priority. A group is inserted at the highest selected sibling's
+position; internal order is preserved, with nonselected siblings retaining their
+relative order. Arrange changes only the active sibling context, preserving the
+relative order of a multiple selection. Ungroup replaces just the container with
+its immediate children, preserving nested groups and effective visible order.
+
+`Drawing.parents` is a derived ownership index refreshed at commits/history;
+`editing_group` is transient. Double-click enters one group level, after which a
+second double-click edits a child text host or enters a nested group. Escape first
+leaves text editing, then exits one group level. The canvas labels group editing.
+Ordinary click/area/select-all operate on immediate unlocked siblings. Containment
+and lasso require all descendant leaves to match; crossing requires any leaf.
+Empty space inside a group's bounds is not a geometric hit. New objects/pasted
+roots join the active group through the same transaction.
+
+Every content variant has a default-false canonical `locked` flag. Effective locks
+include ancestors. Locked objects are omitted from ordinary selection, and domain
+mutators also reject protected changes. A parent cannot transform/delete a locked
+child indirectly; unlock that child first. Ungroup can release locked children
+without changing their lock flags or geometry. Right-click geometry explicitly
+targets the outermost locked ancestor for Unlock; repeated unlocks retain nested
+locks. Ink erasers edit only unlocked ink in the active context. Pen creation is
+independent of existing locked graphics. Duplication preserves individual locks.
+Locks are in-memory semantic state pending M2, not persisted PDF data.
+
+Transforms retain the persistent frozen drag session and cached layer previews;
+selection caches expanded descendant IDs until membership/revision changes.
+Uniform group scaling changes Placement, preserving raw ink and mixed text runs;
+readable text reflection follows the existing host policies. Attached connector
+ends resolve from transformed shape geometry using stable target IDs, including
+external incident connectors, in the existing reverse-index transaction. Internal
+attachments are remapped on copying; uncopied targets become free at resolved
+positions, following the existing safe clipboard policy. Orthogonal routes retain
+their documented document-axis policy.
+
+Organization normalizes once at command boundaries, never during drag samples.
+It compares Arc-backed before/after sequences and records only changed slots in
+the existing Replace journal. Undo/redo restores hierarchy, order, locks and linked
+fallbacks together; grouping/ungrouping retain distinct undo/redo selection intent.
+There is no second history, geometry store, PDF codec or save lifecycle. This
+provides ownership/scope and bounds seams for later Alignment & Smart Snapping;
+those tools still need their own candidate/gesture rules and performance tests.
+
+Attachment-derived geometry still follows an unlocked external target when a
+connector is locked; locking a connector does not lock its targets. Target deletion
+still safely detaches surviving references in the same undo transaction. Locks
+protect direct edits, not stale/dangling derived connector caches.

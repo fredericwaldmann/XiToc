@@ -6,6 +6,7 @@ mod document;
 mod drawing;
 mod editor;
 mod eraser_index;
+mod group;
 mod object;
 mod object_clipboard;
 mod partial_erase;

@@ -373,3 +373,9 @@ font browsing lists installed families; web uses bundled faces. Arrow keys previ
 fonts live, Enter commits once, Escape cancels. XiToc session paste preserves rich
 runs; external clipboard text enters as plain text. Escape returns to object manipulation.
 Text, like other drawing objects, remains in memory until M2 PDF persistence.
+
+Object organization: Ctrl/Cmd+G groups selected siblings; Ctrl/Cmd+Shift+G
+ungroups them. Double-click enters one group level, then double-click a child
+to edit it. Escape exits text editing before leaving a group. Right-click offers
+Lock/Unlock, Arrange and Transform. Grouping, locks and all canvas edits remain
+in memory until M2 PDF persistence. See [UI design](docs/UI_DESIGN.md) for policies.

@@ -269,6 +269,7 @@ impl Cached {
 const MESH_SEGMENTS: usize = 128;
 
 pub struct Canvas {
+    unlock_target: Option<Uuid>,
     pub drawing: Drawing,
     text_session: Option<text_ui::TextSession>,
     font_browser: Option<text_ui::FontBrowser>,
@@ -335,6 +336,7 @@ impl Canvas {
             pen_type: crate::pen::PenType::Pressure,
             color: [37, 99, 200, 255],
             width: 2.5,
+            unlock_target: None,
             eraser_radius: 14.0,
             smoothing_strength: 50,
             pressure_style: drawing::PressureStyle {
@@ -799,6 +801,11 @@ impl Canvas {
                 self.eraser_index
                     .query(surface, erase.previous, point, radius, |index| {
                         let stroke = &self.drawing.strokes()[index];
+                        if self.drawing.is_locked(stroke.id)
+                            || self.drawing.parent(stroke.id) != self.drawing.editing_group
+                        {
+                            return;
+                        }
                         if erase.mode == EraserMode::Stroke && erase.ids.contains(&stroke.id) {
                             return;
                         }
@@ -898,7 +905,7 @@ impl Canvas {
         let selection_preview = self.selection_preview(surface);
         let preview_ids = match &self.selection_gesture {
             Some(SelectionGesture::Transform { session, .. }) => &session.ids,
-            _ => &self.selection.ids,
+            _ => &self.selection.expanded,
         };
         let endpoint_preview = match &self.selection_gesture {
             Some(SelectionGesture::ShapeEdit { preview, .. }) => Some(preview),
@@ -917,6 +924,7 @@ impl Canvas {
                 continue;
             }
             let stroke = match object {
+                ObjectSnapshot::Group(_) => continue,
                 ObjectSnapshot::Text(t) => {
                     if self
                         .text_session

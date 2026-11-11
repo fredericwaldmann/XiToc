@@ -171,6 +171,8 @@ pub enum ShapeGeometry {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Shape {
+    #[serde(default)]
+    pub locked: bool,
     pub id: ObjectId,
     pub document_id: Uuid,
     pub surface: Surface,
@@ -295,6 +297,7 @@ impl Shape {
             }
         };
         let shape = Self {
+            locked: false,
             id: Uuid::new_v4(),
             document_id: owner,
             surface,

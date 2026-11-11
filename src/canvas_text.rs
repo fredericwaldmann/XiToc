@@ -72,6 +72,7 @@ fn shape_text_adapter(shape: &crate::shape::Shape) -> Option<TextObject> {
         .map(|text| text.content.clone())
         .unwrap_or_else(|| crate::shape::ShapeText::default().content);
     Some(TextObject {
+        locked: shape.locked,
         id: shape.id,
         document_id: shape.document_id,
         surface: shape.surface,
@@ -675,6 +676,12 @@ impl Canvas {
             && let Some(id) = self.pick(surface, view.to_document([pos.x as f64, pos.y as f64]), 0.)
         {
             match self.drawing.snapshot(id).cloned() {
+                Some(ObjectSnapshot::Group(_)) => {
+                    self.finish();
+                    self.drawing.enter_group(id);
+                    self.selection.clear();
+                    return true;
+                }
                 Some(ObjectSnapshot::Text(t)) => {
                     self.start_text(ui, (*t).clone(), false);
                     return true;

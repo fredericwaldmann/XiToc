@@ -628,3 +628,32 @@ session instead of a second snapshot. Use word-gap-only canonical glyph expansio
 for justification, with final/single-word rows left natural. Caret, decoration and
 screen geometry share the result. These choices supersede the decorative Box scope
 in the preceding entry; future shape text remains a distinct host.
+
+## 2026-11-11 — M1.11 containers own IDs, descendants retain world geometry
+
+Add Group to the established CanvasObject snapshot protocol with ordered immediate
+child IDs and default-false locks on every actual object variant. Keep world-space
+child placements instead of introducing another affine transform hierarchy. This
+reuses the frozen common-delta drag and relationship-aware connector pipeline,
+avoids double-transforming attachments, preserves editable raw content and allows
+ungrouping without numerical decomposition. Tradeoff: a group transform replaces
+its affected descendants at commit; derived bounds/forest order normalize once per
+command. It does not rebuild the hierarchy during pointer sampling.
+
+A forest validator rejects cycles/missing children/multiple owners/incompatible
+surfaces and bounds ancestor depth to 64. Canonical postorder blocks provide
+contiguous group stacking; ordered immediate child IDs are authoritative within
+groups. Root positions remain in Drawing's existing sequence. Geometry picking
+now follows that same order, superseding type-specific shape/text-over-wire
+priority. Scoped editing is transient, one double-click per nesting boundary;
+text starts on the next double-click inside the group. Escape unwinds text first.
+
+Locks protect both direct edits and ancestor transform/delete operations; ungroup
+preserves locked descendants without moving/modifying them. Explicit geometric
+right-click Unlock targets the outermost locked ancestor and never clears nested
+locks. Clipboard keeps individual locks, remaps the forest and internal links,
+and detaches external targets. Existing Replace history restores organization and
+connector fallbacks atomically. No PDF, sidecar, alignment or snapping is added.
+The requested GitHub issue was absent from the repository's open/closed issue list;
+the user confirmed no issue reference is needed. Implementation follows the
+supplied task specification without creating an issue or adding a Fixes reference.

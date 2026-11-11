@@ -546,6 +546,9 @@ fn shape_drag_preview_performance() {
         .map(|(id, c)| (*id, c.meshes[0].clone()))
         .collect();
     assert_eq!(meshes.len(), 1000);
+    // Dense neighboring magnetic ports overlap these tiny bodies. Capture the
+    // intended move explicitly so this benchmark cannot measure a wire gesture.
+    c.start_transform(s, [24., 24.], None, 1.);
     frame(
         &ctx,
         &mut c,
@@ -555,6 +558,10 @@ fn shape_drag_preview_performance() {
         0.1,
         true,
     );
+    assert!(matches!(
+        c.selection_gesture,
+        Some(SelectionGesture::Transform { corner: None, .. })
+    ));
     let revision = c.drawing.revision();
     let start = std::time::Instant::now();
     for i in 0..40 {
