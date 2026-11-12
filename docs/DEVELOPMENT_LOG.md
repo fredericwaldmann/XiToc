@@ -726,6 +726,8 @@ separate these observations from unperformed physical/platform/theme checks.
 ## M1.13 — Editable standalone formula objects
 
 Implements existing issue #27 (`[M1.8] LaTeX Formula Boxes`; no comments were present).
+PR #47 targets `main` and references #27 without an auto-closing Fixes directive;
+bounded synchronous rendering and the broader visual matrix remain explicit follow-up.
 Added a stable FormulaObject that retains the exact LaTeX source and uses derived
 math layout bounds. The top-toolbar Formula tool opens a live source editor; committed
 objects render as cached vector geometry with the bundled STIX Two Math font. Formula
