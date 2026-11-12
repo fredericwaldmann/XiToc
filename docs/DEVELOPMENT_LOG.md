@@ -722,3 +722,24 @@ smoke verified five-size rectangle edge/equal-spacing guides, Align Left, vertic
 distribution/undo/redo, hidden-grid snapping and a magnetically connected group
 at displayed 200/400% with Alt bypass/resume. TEST_PLAN and screenshots/snapping
 separate these observations from unperformed physical/platform/theme checks.
+
+## M1.13 — Editable standalone formula objects
+
+Implements existing issue #27 (`[M1.8] LaTeX Formula Boxes`; no comments were present).
+Added a stable FormulaObject that retains the exact LaTeX source and uses derived
+math layout bounds. The top-toolbar Formula tool opens a live source editor; committed
+objects render as cached vector geometry with the bundled STIX Two Math font. Formula
+objects use existing selection, placement, grouping, locking, clipboard and history
+infrastructure. Invalid drafts preserve source and the last valid preview. Rendering
+input is bounded by bytes, token count and nesting depth. Formula content remains
+memory-only; PDF payload serialization is still the M2 gate. See
+FORMULA_RENDERER_EVALUATION.md for library/license/platform trade-offs and the known
+egui adapter/MSRV cost.
+
+All-target tests pass (296 passed, 10 ignored), denied-warning Clippy and formatting
+pass, native release and WASM checks pass, and Trunk release output totals 17 MB
+uncompressed. Firefox verified toolbar creation, live `E=mc^2` preview, commit and
+double-click reopening at 100%; broader GUI checks are listed in TEST_PLAN. A release
+stress check reduced the source cap from 2,048 to 128 tokens after a generated long
+expression took 223 ms; the largest accepted 127-token chain took 17.19 ms on this
+host. Rendering remains synchronous and this timing is not a cross-platform guarantee.

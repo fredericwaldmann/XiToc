@@ -1641,3 +1641,28 @@ pen, both erasers, styling, rich Text/Paragraph controls and save/discard guards
 Final Page Note boundary regression: a pointer sample far above the page uses the
 clamped free proposal before solving snaps. Valid X/Y matches remain independent,
 including a small legal inward Y correction; undo restores the exact source.
+
+## M1.13 editable formula objects
+
+Automated coverage: renderer fixtures for fractions, roots, superscripts/subscripts,
+summations, integrals, limits, matrices, cases and aligned equations; malformed,
+unsupported, deeply nested and over-limit source errors; formula source preservation,
+edit undo/redo, clipboard fresh IDs, group transformation, locks, Page ownership,
+color history merging, geometry bounds and readable flipping. Run the standard Rust
+suite and native/WASM/Trunk checks; feature behavior does not establish PDF round-trip
+support, which remains an M2 requirement.
+
+Manual verification: use Formula (∑) in the top toolbar, enter and correct a formula,
+check the retained preview/error behavior, finish then double-click to edit. Move,
+resize, rotate, flip, recolor, reset scale, duplicate and copy/paste; group with shapes
+and notes; verify locks, alignment/snapping, undo/redo and sharp vector output at
+50/100/200/400% on Whiteboards and Page Notes. Check source copy/paste while the editor
+has focus, Escape cancellation, matrices/aligned equations, and partially offscreen
+placement. Do not infer persistent PDF formula storage from this in-memory milestone.
+
+Executed in Firefox against the Trunk release build: created a browser-session
+Whiteboard, used the TOP Formula tool, typed `E=mc^2`, observed the live typeset
+preview, committed the formula, and double-clicked it to confirm the exact source and
+preview reopen. This smoke test was at 100% zoom. Invalid-source visual recovery,
+editing clipboard, styling, transforms, Page Notes, themes, and 50–400% visual sharpness
+were not manually exercised. The browser-session document was not claimed as saved.

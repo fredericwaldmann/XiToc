@@ -954,3 +954,24 @@ stable target IDs and affected routes update in one transaction. Direct wire
 movement and clipboard retain their separate existing detach/remap policies.
 Settings defaults and active-tab snapping controls never save canvas content;
 PDF persistence remains the M2 gate. See ARCHITECTURE/UI_DESIGN for policies.
+
+## M1.13 formula source map
+
+- `formula.rs`: standalone semantic FormulaObject with stable identity, owner/surface,
+  placement, exact UTF-8 LaTeX source, color and derived layout/baseline. Bounds feed
+  normal selection, grouping, transforms, locks, alignment and clipboard.
+- `formula_render.rs`: bounded LaTeX-Rust parsing/layout and conversion of its egui
+  0.36 vector output to the application egui 0.37 shapes. STIX Two Math is initialized
+  once. This source is authoritative; vector shapes are derived and never serialized.
+- `canvas_formula.rs`: tool creation, double-click source editing, per-object preview
+  cache, contextual color/scale controls and Escape/commit behavior. Preview drafts
+  are UI state; one committed creation/edit is one Drawing journal command.
+- `formula_tests.rs`: model identity, undo, clipboard, grouping, lock, ownership and
+  source validation coverage. Renderer fixtures cover fractions, roots, scripts,
+  sums, integrals, limits, matrices, cases, aligned equations and invalid input.
+
+Supported math syntax is the renderer's math-mode subset; arbitrary packages, text
+documents, scripts and TikZ are not supported. Source is limited to 16 KiB and 128
+tokens, with parser depth 32. Rendering is synchronous but input-size/depth bounded;
+UI caches retain the previous valid preview during invalid edits. Editable PDF storage
+remains M2 work; this milestone adds no saved formula payload.

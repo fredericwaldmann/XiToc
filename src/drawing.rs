@@ -456,6 +456,16 @@ impl Drawing {
                     && t.document_id == self.owner
                     && t.corners().iter().all(|p| self.contains(t.surface, *p))
             }
+            ObjectSnapshot::Formula(f) => {
+                f.valid()
+                    && f.document_id == self.owner
+                    && f.world_bounds().is_some_and(|bounds| {
+                        bounds
+                            .corners()
+                            .iter()
+                            .all(|p| self.contains(f.surface, *p))
+                    })
+            }
             ObjectSnapshot::Connector(c) => self.valid_connector(c, |id| self.snapshot(id)),
             ObjectSnapshot::Stroke(s) => self.valid_stroke(s),
             ObjectSnapshot::Shape(s) => {
@@ -645,6 +655,9 @@ impl Drawing {
     }
     pub fn add_shape(&mut self, shape: crate::shape::Shape) -> bool {
         self.add_snapshot(shape.into())
+    }
+    pub fn add_formula(&mut self, formula: crate::formula::FormulaObject) -> bool {
+        self.add_snapshot(formula.into())
     }
     fn add_snapshot(&mut self, object: ObjectSnapshot) -> bool {
         if !self.valid_object(&object) || self.live_ids.contains(&object.id()) {
@@ -979,6 +992,74 @@ impl Drawing {
                 let i = next;
                 next += 1;
                 i
+            };
+            after.push((index, object));
+        }
+        if after.is_empty() {
+            return false;
+        }
+        before.sort_by_key(|(i, _)| *i);
+        after.sort_by_key(|(i, _)| *i);
+        let original = if merge && self.cursor == self.history.len() {
+            match self.history.last().map(|entry| &entry.command) {
+                Some(Command::Replace {
+                    before: original,
+                    after: previous,
+                }) if *previous == before => Some(original.clone()),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if let Some(original) = original {
+            self.history.pop();
+            self.cursor -= 1;
+            self.execute(Command::Replace { before, after });
+            if let Command::Replace { before, .. } = &mut self.history.last_mut().unwrap().command {
+                *before = original;
+            }
+        } else {
+            self.execute(Command::Replace { before, after });
+        }
+        true
+    }
+    /// Formula source/appearance/layout edits share the same object journal as
+    /// geometry and grouping. The editor previews never call this method.
+    pub fn replace_formulas(
+        &mut self,
+        formulas: Vec<crate::formula::FormulaObject>,
+        merge: bool,
+    ) -> bool {
+        if formulas.is_empty() {
+            return false;
+        }
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut next = self.items.len();
+        for formula in formulas {
+            let object = ObjectSnapshot::from(formula);
+            let id = object.id();
+            if self.is_locked(id) || !seen.insert(id) || !self.valid_object(&object) {
+                return false;
+            }
+            let index = if let Some(old) = self.snapshot(id) {
+                if !matches!(
+                    (old, &object),
+                    (ObjectSnapshot::Formula(_), ObjectSnapshot::Formula(_))
+                ) {
+                    return false;
+                }
+                if old == &object {
+                    continue;
+                }
+                let index = self.object_slots[&id];
+                before.push((index, old.clone()));
+                index
+            } else {
+                let index = next;
+                next += 1;
+                index
             };
             after.push((index, object));
         }

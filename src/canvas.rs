@@ -18,6 +18,8 @@ use crate::object::{CanvasObject, ObjectSnapshot};
 use selection_ui::SelectionGesture;
 #[path = "canvas_connectors.rs"]
 mod connectors_ui;
+#[path = "canvas_formula.rs"]
+mod formula_ui;
 #[path = "canvas_shapes.rs"]
 mod shapes_ui;
 #[path = "canvas_text.rs"]
@@ -33,6 +35,7 @@ pub enum Tool {
     Shape,
     Text,
     StickyNote,
+    Formula,
 }
 
 struct Erasing {
@@ -280,6 +283,8 @@ pub struct Canvas {
     pub text_resize_default: crate::text::ResizeBehavior,
     text_creation: Option<text_ui::TextCreation>,
     text_resize: Option<text_ui::TextResize>,
+    formula_session: Option<formula_ui::FormulaSession>,
+    formula_cache: HashMap<Uuid, formula_ui::FormulaCache>,
     text_cache: HashMap<Uuid, text_ui::TextCache>,
     text_font_state: Option<(f32, f32)>,
     pub tool: Tool,
@@ -333,6 +338,8 @@ impl Canvas {
             text_resize_default: Default::default(),
             text_creation: None,
             text_resize: None,
+            formula_session: None,
+            formula_cache: Default::default(),
             text_cache: Default::default(),
             text_font_state: None,
             tool: Tool::Pen,
@@ -400,6 +407,7 @@ impl Canvas {
         self.snap_session = None;
         self.font_browser = None;
         self.finish_text();
+        self.formula_session = None;
         self.text_creation = None;
         self.text_resize = None;
         self.drawing.clear_routing_hints();
@@ -489,6 +497,7 @@ impl Canvas {
                 .map(ObjectSnapshot::id)
                 .collect();
             self.text_cache.retain(|id, _| ids.contains(id));
+            self.formula_cache.retain(|id, _| ids.contains(id));
             self.shape_cache.retain(|id, _| ids.contains(id));
             self.route_cache.retain(|id, _| ids.contains(id));
         }
@@ -521,6 +530,7 @@ impl Canvas {
         self.selection.refresh(&self.drawing);
         if self.font_browser.is_none()
             && self.text_session.is_none()
+            && self.formula_session.is_none()
             && self.text_creation.is_none()
             && self.text_resize.is_none()
             && !ui.ctx().text_edit_focused()
@@ -589,6 +599,12 @@ impl Canvas {
             self.paint_text_editor(ui, bounds, surface, transform);
             self.paint_selection(ui, bounds, surface, transform);
             self.paint_text_handles(ui, transform, surface);
+            self.selection_controls(ui, bounds, surface, transform);
+            return;
+        }
+        if self.formula_surface(ui, bounds, surface, transform) {
+            self.paint(ui, bounds, surface, transform);
+            self.paint_selection(ui, bounds, surface, transform);
             self.selection_controls(ui, bounds, surface, transform);
             return;
         }
@@ -933,6 +949,26 @@ impl Canvas {
             }
             let stroke = match object {
                 ObjectSnapshot::Group(_) => continue,
+                ObjectSnapshot::Formula(formula) => {
+                    if self
+                        .formula_session
+                        .as_ref()
+                        .is_some_and(|session| session.id == formula.id)
+                    {
+                        continue;
+                    }
+                    let delta = selection_preview
+                        .filter(|_| preview_ids.contains(&formula.id))
+                        .unwrap_or_default();
+                    Canvas::paint_formula(
+                        &mut self.formula_cache,
+                        &painter,
+                        transform,
+                        formula,
+                        delta,
+                    );
+                    continue;
+                }
                 ObjectSnapshot::Text(t) => {
                     if self
                         .text_session

@@ -6,6 +6,10 @@ mod document;
 mod drawing;
 mod editor;
 mod eraser_index;
+mod formula;
+mod formula_render;
+#[cfg(test)]
+mod formula_tests;
 mod group;
 mod object;
 mod object_clipboard;

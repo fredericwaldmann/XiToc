@@ -297,3 +297,13 @@ group scopes/locks. TOP Snap and Settings provide independent object/grid/guide
 controls, sensitivity and grid spacing on both layouts. This does not implement
 automatic diagram layout, constraint solving or PDF persistence. Exact policies
 and verification are in ARCHITECTURE, UI_DESIGN and TEST_PLAN.
+
+## M1.13 — Editable standalone LaTeX formulas
+
+Implemented as a source-preserving Formula CanvasObject with top-toolbar creation,
+live math preview, color/scale controls, and compatibility with selection, transforms,
+groups, clipboard, locks, alignment and snapping. This in-memory feature does not
+alter the blank PDF codec or claim formula persistence. Full package loading, inline
+formulas and automatic equation solving remain out of scope. See
+FORMULA_RENDERER_EVALUATION.md and TEST_PLAN for dependency constraints, syntax
+coverage and verification.

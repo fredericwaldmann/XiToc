@@ -652,3 +652,22 @@ screen point. At most one relevant guide per axis appears, with small brackets
 and document-point gap numbers for equal spacing. They are painter overlays with
 no input allocation or canonical objects, and disappear on release/cancellation.
 Explorer, horizontal tabs, drawing toolbar placement and light/dark styles remain.
+
+## M1.13 formula editing
+
+Formula (∑) lives with the drawing tools in the TOP toolbar. Choose it and click the
+canvas to open the source editor for a new formula. The multiline field updates its
+math preview as source changes. Finish or Ctrl/Cmd+Enter commits; Cancel or Escape
+discards a new formula or restores an existing formula's prior committed source.
+Double-click a selected formula to edit it. The source editor owns keyboard focus,
+so caret movement and text copy/paste remain normal editor operations. Invalid or
+incomplete source stays visible with an error, disables Finish, and leaves the last
+valid preview visible with an invalid marker. A normal single click continues to
+select/move the formula; its contextual Formula menu offers Edit LaTeX, Reset Size
+and the shared color picker. Formula backgrounds are transparent.
+
+The standalone object preserves exact source and scales uniformly with resize
+handles. Flip keeps mathematical glyphs readable while reflecting their position;
+rotation remains available through the existing Transform menu. Grouping, locks,
+z-order, alignment and snapping use the formula's measured bounds. Inline math in
+rich text and formula PDF persistence are not part of this milestone.

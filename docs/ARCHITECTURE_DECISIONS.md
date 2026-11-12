@@ -686,3 +686,21 @@ drags/copies retain their documented detach policies. Schema 7 stores only devic
 snapping defaults; per-editor controls, grid display, latches and guides remain
 session state. The dot grid and snapping share document origin/spacing while
 visibility stays independent. No PDF persistence or constraint/layout solver.
+
+## 2026-11-12 — M1.13 use LaTeX-Rust math vectors
+
+Use `latex-rust` 3.0.3 with bundled STIX Two Math for standalone formula objects.
+It parses a useful math-mode LaTeX subset into TeX-style layout and vector geometry
+without system TeX, shell, network, or platform-specific MathML. Preserve source as
+canonical document data; keep layout metadata and cached shapes derived. Source is
+limited to 16 KiB/128 tokens and parser depth 32. Invalid drafts retain source and
+the prior valid preview. Current rendering is synchronous and bounded, not a worker;
+measure responsiveness before raising limits or claiming large-input responsiveness.
+
+Accepted cost: upstream egui output is 0.36.2, so XiToc's 0.37 adapter converts
+vector shapes and includes a duplicate egui version. Upstream 3.0.3 requires Rust
+1.99 (the workspace MSRV is raised accordingly). The license/font/alternatives and
+platform gate are detailed in `FORMULA_RENDERER_EVALUATION.md`. No PDF writer change
+is included; M2 must embed both editable source/state and visible formula graphics in
+the canonical single PDF. Inline formulas remain a future extension of the same
+renderer and baseline-bearing object geometry.

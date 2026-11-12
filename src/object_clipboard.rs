@@ -60,6 +60,16 @@ impl ObjectBundle {
                     }
                     continue;
                 }
+                ClipboardObject::Formula(formula) => {
+                    if !formula.valid() {
+                        return Err("Invalid formula clipboard object.".into());
+                    }
+                    count += formula.latex_source.len();
+                    if count > MAX_BYTES {
+                        return Err("Formula clipboard limit exceeded.".into());
+                    }
+                    continue;
+                }
                 ClipboardObject::Connector(c) => {
                     if !c.valid() || c.ends().iter().any(|e| e.target().is_some_and(|id| self.objects.iter().find(|o|o.id()==id).is_some_and(|target| !matches!(target,ClipboardObject::Shape(s) if !s.kind().segment() && s.surface==c.surface && s.document_id==c.document_id)))) {return Err("Invalid connector clipboard relationship.".into());}
                     continue;

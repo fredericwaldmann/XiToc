@@ -9,6 +9,7 @@ pub enum Icon {
     Shapes,
     Text,
     StickyNote,
+    Formula,
     Lasso,
     Duplicate,
     Delete,
@@ -48,6 +49,15 @@ pub fn paint(painter: &egui::Painter, center: Pos2, icon: Icon, color: Color32) 
             line(point(-5., -6.), point(5., -6.));
             line(point(0., -6.), point(0., 6.));
             line(point(-3., 6.), point(3., 6.));
+        }
+        Icon::Formula => {
+            painter.text(
+                center,
+                egui::Align2::CENTER_CENTER,
+                "∑",
+                egui::FontId::proportional(17.0),
+                color,
+            );
         }
         Icon::StickyNote => {
             let paper = Rect::from_center_size(center, Vec2::new(12., 12.));

@@ -59,6 +59,23 @@ pub fn show(
                 ui.weak("Drag to create · Shift constrains · Escape cancels");
             });
             if icons::button(ui,Icon::Text,"Text · click to type, drag to set width",editor.canvas.tool==Tool::Text).clicked(){editor.canvas.select(Tool::Text);}
+            if icons::button(ui, Icon::Formula, "Formula · click the canvas to enter LaTeX", editor.canvas.tool == Tool::Formula).clicked() { editor.canvas.select(Tool::Formula); }
+            let formula_selection = if editor.canvas.selection.ids.len() == 1 {
+                editor.canvas.selection.ids.iter().next().and_then(|id| match editor.canvas.drawing.snapshot(*id) {
+                    Some(crate::object::ObjectSnapshot::Formula(formula)) => Some(( *id, formula.color, !editor.canvas.drawing.is_locked(*id) )),
+                    _ => None,
+                })
+            } else { None };
+            if let Some((id, color, unlocked)) = formula_selection {
+                ui.menu_button("Formula", |ui| {
+                    if ui.add_enabled(unlocked, egui::Button::new("Edit LaTeX…")).clicked() { editor.canvas.edit_formula(id); ui.close(); }
+                    if ui.add_enabled(unlocked, egui::Button::new("Reset Formula Size")).clicked() { editor.canvas.reset_formula_scale(id); ui.close(); }
+                    let mut rgb = [color[0], color[1], color[2]];
+                    if unlocked && super::shape_controls::color_control(ui, &mut rgb, 255).is_some() {
+                        editor.canvas.set_formula_color(id, rgb);
+                    }
+                });
+            }
             if width >= 420.0 && icons::button(ui, Icon::StickyNote, "Sticky Note · click to create and type", editor.canvas.tool == Tool::StickyNote).clicked() {
                 editor.canvas.select(Tool::StickyNote);
             }
