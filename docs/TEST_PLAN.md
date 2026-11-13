@@ -1714,3 +1714,20 @@ covered by the physical-resolution renderer regression; Firefox DPR emulation wa
 not treated as physical display evidence. The final renderer remains memory-only.
 Reference captures are in `docs/screenshots/latex-quality/`. The release WASM is
 approximately 18 MB before HTTP compression, a material distribution cost.
+
+### Computer Modern font follow-up
+
+The formula fixture suite now runs with bundled New Computer Modern Math Regular,
+including fractions, roots, scripts, sums, integrals, Greek and scalable delimiters.
+Additional regressions verify the bundled font has an OpenType MATH table and the
+required mathematical glyphs, and that saved STIX preferences migrate to Computer
+Modern while preserving size, color and preamble. Existing source, history,
+configuration, cache/DPI and PDF safety tests continue unchanged.
+The typography review sheet is regenerated for Computer Modern; the earlier global
+settings screenshot records the initial STIX enhancement, before this font change.
+
+Computer Modern validation: 304 tests passed (12 intentionally ignored), formatting,
+denied-warning Clippy and wasm32 compilation passed. The explicitly run typography
+review-sheet fixture was inspected with the Computer Modern face and retained as
+`docs/screenshots/latex-quality/typography.png`. Trunk packaging uses the same
+embedded font; no system font installation or note persistence is introduced.

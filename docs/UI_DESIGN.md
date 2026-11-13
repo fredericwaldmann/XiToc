@@ -674,7 +674,7 @@ rich text and formula PDF persistence are not part of this milestone.
 
 ### M1.13 LaTeX settings
 
-Settings adds a LaTeX tab with a supported STIX Two Math preset selector, creation
+Settings adds a LaTeX tab with a supported Computer Modern (New Computer Modern Math Regular) preset selector, creation
 size/color defaults, high-quality checkbox, Global Preamble/Postamble code editors,
 Reset to Defaults and Apply. This tab uses explicit Apply, unlike automatic
 preferences elsewhere; its subtitle states that distinction. Validation errors

@@ -1,10 +1,11 @@
-//! Math layout and original STIX outlines; physical-pixel rasterization is cached separately.
+//! Math layout and original Computer Modern outlines; physical-pixel rasterization is cached separately.
 use latex_rust::{
     Color, Dim, MathFont, MathStyle, ParseOptions, SvgOptions, layout_with_em_size_pt,
     parse_with_options, render_svg_with_metrics, tokenize,
 };
 use std::sync::OnceLock;
 pub const MAX_PARSE_DEPTH: usize = 32;
+const MATH_FONT: &[u8] = include_bytes!("../assets/fonts/NewCMMath-Regular.otf");
 static FONT: OnceLock<Result<MathFont, String>> = OnceLock::new();
 #[derive(Clone, Debug)]
 pub struct RenderedFormula {
@@ -25,7 +26,7 @@ pub fn render(source: &str, color: [u8; 4]) -> Result<RenderedFormula, String> {
         return Err("Formula complexity is limited to 128 math tokens.".into());
     }
     let font = FONT
-        .get_or_init(|| MathFont::stix_two_math().map_err(|e| e.to_string()))
+        .get_or_init(|| MathFont::from_bytes(MATH_FONT).map_err(|e| e.to_string()))
         .as_ref()
         .map_err(Clone::clone)?;
     let (ast, _) = parse_with_options(source, &ParseOptions::new().with_max_depth(MAX_PARSE_DEPTH))
@@ -153,6 +154,19 @@ impl FormulaTexture {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bundled_computer_modern_contains_math_metrics_and_required_glyphs() {
+        let count = u16::from_be_bytes([MATH_FONT[4], MATH_FONT[5]]) as usize;
+        assert!((0..count).any(|i| &MATH_FONT[12 + i * 16..16 + i * 16] == b"MATH"));
+        let font = MathFont::from_bytes(MATH_FONT).unwrap();
+        for ch in ['𝑥', 'α', 'β', '∫', '∑', '√', '(', ')'] {
+            assert!(
+                font.glyph(ch).is_ok(),
+                "Missing Computer Modern glyph: {ch}"
+            );
+        }
+    }
+
     #[test]
     fn supported_math_fixtures_produce_cached_vector_geometry() {
         for source in [

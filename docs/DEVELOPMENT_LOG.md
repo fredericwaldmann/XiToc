@@ -758,3 +758,11 @@ bounded math-only custom macros, explicit unsupported-command errors, inherited
 wrappers, license notices and LATEX_CONFIGURATION.md. PDF persistence remains M2;
 nondefault document configuration is explicitly rejected by the blank encoder.
 Executed validation and visual limits are recorded in TEST_PLAN.md below.
+
+### Computer Modern font follow-up
+
+Switched all LaTeX rendering to bundled New Computer Modern Math Regular at the
+user's request. The font uses OpenType MATH through the existing renderer; sharp
+SVG/resolution caching, editable source, configuration and PDF boundaries stay
+unchanged. Settings show Computer Modern and migrate saved STIX preferences.
+Bundled official GUST/LPPL license texts, package attribution and font provenance.

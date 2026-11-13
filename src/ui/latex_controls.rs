@@ -28,16 +28,16 @@ impl GlobalLatexDraft {
         let value = self.value.get_or_insert_with(|| prefs.clone());
         ui.strong("Rendering");
         egui::ComboBox::from_id_salt("math-preset")
-            .selected_text("STIX Two Math · OpenType MATH")
+            .selected_text("Computer Modern · OpenType MATH")
             .show_ui(ui, |ui| {
                 ui.selectable_value(
                     &mut value.preset,
-                    "stix-two-math".into(),
-                    "STIX Two Math · OpenType MATH",
+                    "computer-modern-math".into(),
+                    "Computer Modern · OpenType MATH",
                 );
             });
-        if value.preset != "stix-two-math" {
-            ui.weak("Unavailable saved preset: using bundled STIX Two Math.");
+        if value.preset != "computer-modern-math" {
+            ui.weak("Unavailable saved preset: using bundled Computer Modern.");
         }
         ui.horizontal(|ui| {
             ui.label("Default formula size (pt)");

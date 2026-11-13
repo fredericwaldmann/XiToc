@@ -726,3 +726,12 @@ undo restores its captured effective settings without rewriting global preferenc
 No sidecars or PDF persistence are added; the blank codec rejects nondefault fields.
 See LATEX_CONFIGURATION.md for supported syntax/order/limits and the renderer
 evaluation for source evidence and alternatives.
+
+## 2026-11-13 — Computer Modern mathematical typography
+
+At the user's request, replace the selected STIX face with New Computer Modern Math
+Regular, a Computer Modern OpenType MATH font supported by `MathFont::from_bytes`.
+Keep SVG outlines, physical-resolution texture caching and formula semantics.
+Bundle the unmodified font and GUST/LPPL attribution; upstream package license
+exceptions for other text faces do not apply to this math face. Migrate saved
+STIX preset IDs to Computer Modern and use it for unavailable-preset fallback.

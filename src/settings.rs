@@ -165,7 +165,7 @@ impl Preferences {
                 .ok_or("Preferences must be an object.")?
                 .insert("schema_version".into(), VERSION.into());
         }
-        let prefs: Self =
+        let mut prefs: Self =
             serde_json::from_value(value).map_err(|e| format!("Cannot read preferences: {e}"))?;
         if prefs.schema_version != VERSION {
             return Err("Unsupported preferences version.".into());
@@ -177,6 +177,9 @@ impl Preferences {
             || !(4.0..=48.0).contains(&prefs.drawing.eraser_radius)
         {
             return Err("Invalid drawing preferences.".into());
+        }
+        if prefs.latex.preset == "stix-two-math" {
+            prefs.latex.preset = "computer-modern-math".into();
         }
         prefs.latex.validate()?;
         Ok(prefs)

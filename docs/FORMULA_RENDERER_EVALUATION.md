@@ -2,6 +2,11 @@
 
 ## Investigation and decision
 
+Current font: New Computer Modern Math Regular, requested after the initial STIX
+quality enhancement. It loads through `MathFont::from_bytes` with original outlines
+and OpenType MATH tables; STIX is no longer selected. The investigation below
+records the original rendering defect, which was independent of that font choice.
+
 The original display path already used the genuine STIX Two Math font and
 `latex-rust` 3.0.3 OpenType MATH layout. It did not use UI fonts, fallback glyphs,
 or a low-resolution image cache. Inspection of the installed upstream source
@@ -34,7 +39,7 @@ source/token/depth bounds. Extreme sizes reach documented texture limits.
 | Current LaTeX-Rust egui meshes | Genuine math layout, but fixed outline approximation and un-antialiased edges; replaced display adapter. |
 | LaTeX-Rust SVG + resvg | Selected: original outlines, self-contained output, shared Rust native/WASM path, mature antialiasing. |
 | Latin Modern Math | Genuine math font, but no need to replace STIX's compatible bundled MATH metrics; defer another preset until all glyph/assembly fixtures are verified with it. |
-| STIX Two Math | Selected, bundled reliable coverage and tested MATH constants/italic corrections/variants; no UI-font substitution. |
+| STIX Two Math | Initially selected, bundled reliable coverage and tested MATH constants/italic corrections/variants; no UI-font substitution. |
 | KaTeX/MathJax HTML or MathML | Would need separate browser/native layout integration; no shared egui drawing path. |
 | Typst | Larger compiler footprint and a different source language; conversion creates additional syntax/semantic maintenance. |
 | Full TeX installation | Violates no-system-installation requirement and complicates WASM/offline distribution. |
@@ -57,3 +62,16 @@ Local upstream source files inspected: `font/math.rs`, `layout/engine.rs`,
 See [LATEX_CONFIGURATION.md](LATEX_CONFIGURATION.md) for configuration semantics,
 unsupported commands, limits, caching, fallback and persistence boundaries.
 See [TEST_PLAN.md](TEST_PLAN.md) for executed checks and manual limits.
+
+## Computer Modern follow-up (current font)
+
+The selected `NewCMMath-Regular.otf` provides Computer Modern mathematical typography
+in a single OpenType MATH face supported by the existing engine, including italic
+variables, operators and stretchy constructions. It replaces STIX across preview,
+canvas and all effective configurations. Classic TeX Type 1/TFM font loading is not
+introduced. Unknown/old preset IDs resolve/migrate to Computer Modern.
+
+The official NewComputerModern package's License.txt explicitly places this math
+face under GUST, with its GPL exceptions confined to other, unbundled text faces.
+GUST/LPPL texts, package attribution and source checksum are included; see
+assets/fonts/README.md. No system font or online runtime resource is needed.
