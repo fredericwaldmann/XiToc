@@ -13,20 +13,38 @@ pub(super) struct FormulaSession {
     attempted: Option<(String, [u8; 4])>,
     error: Option<String>,
     focus: bool,
+    config: (
+        crate::latex_config::LatexPreferences,
+        crate::latex_config::LatexConfig,
+    ),
+    texture: crate::formula_render::FormulaTexture,
 }
 pub(super) struct FormulaCache {
     source: String,
     color: [u8; 4],
-    rendered: Result<Arc<Vec<egui::Shape>>, String>,
+    config: (
+        crate::latex_config::LatexPreferences,
+        crate::latex_config::LatexConfig,
+    ),
+    rendered: Result<RenderedFormula, String>,
+    texture: crate::formula_render::FormulaTexture,
 }
 
 fn make_session(
     surface: Surface,
     position: [f64; 2],
     original: Option<FormulaObject>,
+    global: &crate::latex_config::LatexPreferences,
+    doc: &crate::latex_config::LatexConfig,
 ) -> FormulaSession {
     let (id, source, color) = original.as_ref().map_or_else(
-        || (Uuid::new_v4(), String::new(), [32, 39, 49, 255]),
+        || {
+            (
+                Uuid::new_v4(),
+                String::new(),
+                [global.color[0], global.color[1], global.color[2], 255],
+            )
+        },
         |formula| (formula.id, formula.latex_source.clone(), formula.color),
     );
     let mut session = FormulaSession {
@@ -40,6 +58,8 @@ fn make_session(
         attempted: None,
         error: None,
         focus: true,
+        config: (global.clone(), doc.clone()),
+        texture: Default::default(),
     };
     session.update_preview();
     session
@@ -50,8 +70,11 @@ impl FormulaSession {
             return;
         }
         self.attempted = Some((self.source.clone(), self.color));
-        match crate::formula_render::render(&self.source, self.color) {
+        match crate::latex_config::assemble(&self.config.0.config, &self.config.1, &self.source)
+            .and_then(|source| crate::formula_render::render(&source, self.color))
+        {
             Ok(rendered) => {
+                self.texture = Default::default();
                 self.preview = Some(rendered);
                 self.error = None;
             }
@@ -73,6 +96,11 @@ impl Canvas {
             formula.surface,
             formula.placement.position,
             Some(formula),
+            &crate::latex_config::LatexPreferences {
+                config: self.drawing.latex_global.clone(),
+                ..self.latex.clone()
+            },
+            &self.drawing.latex,
         ));
     }
 
@@ -133,6 +161,11 @@ impl Canvas {
                         surface,
                         view.to_document([pos.x as f64, pos.y as f64]),
                         None,
+                        &crate::latex_config::LatexPreferences {
+                            config: self.drawing.latex_global.clone(),
+                            ..self.latex.clone()
+                        },
+                        &self.drawing.latex,
                     ));
                     self.tool = self.selection_mode;
                     break;
@@ -153,6 +186,11 @@ impl Canvas {
                 surface,
                 formula.placement.position,
                 Some((**formula).clone()),
+                &crate::latex_config::LatexPreferences {
+                    config: self.drawing.latex_global.clone(),
+                    ..self.latex.clone()
+                },
+                &self.drawing.latex,
             ));
         }
         if self.formula_session.is_some() {
@@ -222,11 +260,12 @@ impl Canvas {
                     )
                 };
                 let mut map = map;
-                ui.painter().extend(
-                    preview
-                        .shapes
-                        .iter()
-                        .map(|shape| crate::formula_render::map_to_screen(shape, &mut map)),
+                session.texture.paint(
+                    ui.painter(),
+                    preview,
+                    fit * ui.ctx().pixels_per_point(),
+                    session.config.0.high_quality,
+                    &mut map,
                 );
                 let _ = (w, h);
             } else {
@@ -272,6 +311,10 @@ impl Canvas {
                         session.color,
                     )
                 });
+                if !was_editing {
+                    formula.placement.scale =
+                        session.config.0.size / crate::formula::FORMULA_FONT_SIZE;
+                }
                 formula.latex_source = session.source.clone();
                 formula.color = session.color;
                 formula.layout = crate::formula::FormulaLayout {
@@ -291,7 +334,9 @@ impl Canvas {
                         FormulaCache {
                             source: session.attempted.map(|v| v.0).unwrap_or_default(),
                             color: session.color,
-                            rendered: Ok(Arc::new(rendered.shapes)),
+                            config: session.config.clone(),
+                            rendered: Ok(rendered),
+                            texture: session.texture,
                         },
                     );
                     self.selection.scope(session.surface);
@@ -317,19 +362,25 @@ impl Canvas {
         view: Transform,
         source: &FormulaObject,
         delta: crate::object::Placement,
+        global: &crate::latex_config::LatexPreferences,
+        doc: &crate::latex_config::LatexConfig,
     ) {
         let cached = cache.get(&source.id);
-        if cached
-            .is_none_or(|cache| cache.source != source.latex_source || cache.color != source.color)
-        {
-            let result = crate::formula_render::render(&source.latex_source, source.color)
-                .map(|rendered| Arc::new(rendered.shapes));
+        if cached.is_none_or(|cache| {
+            cache.source != source.latex_source
+                || cache.color != source.color
+                || cache.config != (global.clone(), doc.clone())
+        }) {
+            let result = crate::latex_config::assemble(&global.config, doc, &source.latex_source)
+                .and_then(|s| crate::formula_render::render(&s, source.color));
             cache.insert(
                 source.id,
                 FormulaCache {
                     source: source.latex_source.clone(),
                     color: source.color,
+                    config: (global.clone(), doc.clone()),
                     rendered: result,
+                    texture: Default::default(),
                 },
             );
         }
@@ -337,22 +388,23 @@ impl Canvas {
         if !delta.is_identity() {
             formula = formula.transformed(delta);
         }
-        if let Some(Ok(shapes)) = cache.get(&source.id).map(|cache| &cache.rendered) {
-            let scale = formula.placement.scale * view.scale;
-            let paint = painter.with_clip_rect(painter.clip_rect());
+        if let Some(FormulaCache {
+            rendered: Ok(rendered),
+            texture,
+            ..
+        }) = cache.get_mut(&source.id)
+        {
             let mut map = |p: Pos2| {
                 let world = formula.placement.apply([p.x as f64, p.y as f64]);
                 let screen = view.to_screen(world);
                 Pos2::new(screen[0] as f32, screen[1] as f32)
             };
-            paint.extend(
-                shapes
-                    .iter()
-                    .map(|shape| crate::formula_render::map_to_screen(shape, &mut map))
-                    .map(|mut shape| {
-                        scale_formula_strokes(&mut shape, scale as f32);
-                        shape
-                    }),
+            texture.paint(
+                painter,
+                rendered,
+                (formula.placement.scale * view.scale) as f32 * painter.ctx().pixels_per_point(),
+                global.high_quality,
+                &mut map,
             );
         } else if let Some(bounds) = formula.world_bounds() {
             let p = view.to_screen(bounds.min);
@@ -367,15 +419,6 @@ impl Canvas {
     }
 }
 
-fn scale_formula_strokes(shape: &mut egui::Shape, scale: f32) {
-    match shape {
-        egui::Shape::LineSegment { stroke, .. } => stroke.width *= scale,
-        egui::Shape::Vec(shapes) => shapes
-            .iter_mut()
-            .for_each(|shape| scale_formula_strokes(shape, scale)),
-        _ => {}
-    }
-}
 fn ui_error_color(_painter: &egui::Painter) -> egui::Color32 {
     egui::Color32::from_rgb(196, 64, 64)
 }

@@ -1666,3 +1666,51 @@ preview, committed the formula, and double-clicked it to confirm the exact sourc
 preview reopen. This smoke test was at 100% zoom. Invalid-source visual recovery,
 editing clipboard, styling, transforms, Page Notes, themes, and 50–400% visual sharpness
 were not manually exercised. The browser-session document was not claimed as saved.
+
+### M1.13 typography/configuration enhancement verification
+
+Executed: `cargo fmt --all -- --check`, denied-warning Clippy, native shared-code
+compilation, wasm32-unknown-unknown compilation and Trunk release packaging.
+`cargo test --all-targets`: 302 passed, 12 intentionally ignored. New regressions
+cover configuration order, custom-command overrides, exact source/newlines, unused
+unsupported definitions, recursion/expansion/field limits, unknown preset fallback,
+preferences persistence/migration, document isolation on both layouts, atomic
+validation failure, configuration/geometry undo/redo, serde round trip, PDF encode
+rejection, and real global Settings Apply with invalid-draft retention.
+
+Texture regression paints at 50/100/200/400/800% and 1×/2× DPI, checks unchanged
+frames issue no texture uploads, and checks textures respect the active GPU's
+maximum side as well as the application cap. The test caught and fixed an actual
+2048-pixel backend-limit violation; texture dimensions are now capped accordingly.
+The ignored typography review-sheet fixture was run explicitly and visually
+inspected: italic variables, upright sin/cos, Greek, fractions, quadratic radical,
+summation limits, integrals, nested stretchy delimiters and matrix glyphs look
+smooth and use real STIX outlines. This is a direct resvg/output inspection,
+not a claim of physical monitor/input verification.
+
+Manual recipe: open Edit → Settings → LaTeX, define a custom macro, Apply and
+restart to confirm global preference storage. Enter an unsupported package command
+and verify the error retains its text. Create one Page Note and two Whiteboards;
+add formulas using the global macro. Open top Document Settings → LaTeX (inside
+View on narrow layouts), override the macro in one tab, add paired wrappers, Validate
+and Apply. Other tabs retain their configuration. Undo/redo restores configuration
+and formula/group bounds in one operation; cancel an invalid draft without changing
+objects. Verify source editing, recolor, move, resize/rotate, group/clipboard, and
+sharpness at 50–800% on standard/high DPI. Verify default size/color changes affect
+new formulas, quality changes rebuild textures, and dirty documents cannot export
+an incomplete blank PDF. Formula/document edits remain memory-only until M2.
+
+Remaining manual matrix: physical high-DPI screens and pens, Windows/macOS,
+native interactive zoom/resize, and exhaustive Page/theme/narrow configuration
+combinations. Build/unit evidence does not establish real-time device latency.
+
+Additional executed checks: native `cargo build --release` passed. Firefox against
+the packaged WASM app verified Settings → LaTeX layout, entering/applying
+`\newcommand{\RR}{\mathbb{R}}`, creating a temporary Whiteboard, previewing
+`\int_0^\infty e^{-x^2}\,dx=\frac{\sqrt{\pi}}{2},\quad x\in\RR`
+and committing the editable formula. Browser export was cancelled; no saved-note
+claim was made. Standard-DPI output was visually inspected. High-DPI behavior is
+covered by the physical-resolution renderer regression; Firefox DPR emulation was
+not treated as physical display evidence. The final renderer remains memory-only.
+Reference captures are in `docs/screenshots/latex-quality/`. The release WASM is
+approximately 18 MB before HTTP compression, a material distribution cost.

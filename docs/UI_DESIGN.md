@@ -671,3 +671,19 @@ handles. Flip keeps mathematical glyphs readable while reflecting their position
 rotation remains available through the existing Transform menu. Grouping, locks,
 z-order, alignment and snapping use the formula's measured bounds. Inline math in
 rich text and formula PDF persistence are not part of this milestone.
+
+### M1.13 LaTeX settings
+
+Settings adds a LaTeX tab with a supported STIX Two Math preset selector, creation
+size/color defaults, high-quality checkbox, Global Preamble/Postamble code editors,
+Reset to Defaults and Apply. This tab uses explicit Apply, unlike automatic
+preferences elsewhere; its subtitle states that distinction. Validation errors
+retain drafts. Code editors preserve backslashes/newlines and normal copy/paste.
+All content uses existing theme/spacing/dialog-width tokens and vertical scrolling.
+
+Document Settings → LaTeX sits with view/document controls in the TOP toolbar and
+moves inside View on compact layouts. Both layouts share a per-document modal with
+Global configuration: Enabled, preamble/postamble code fields, Validate, Apply and
+Cancel/Escape. Applying updates one document and one undo entry. The UI identifies
+the math-only supported subset and memory-only document lifecycle. No bottom tools,
+placeholder fonts, package loader or PDF-save controls are introduced.

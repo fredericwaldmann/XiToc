@@ -189,6 +189,14 @@ impl Transform {
 // New object commands can extend this enum with their inverse state.
 #[derive(Debug)]
 enum Command {
+    Latex {
+        before_global: crate::latex_config::LatexConfig,
+        after_global: crate::latex_config::LatexConfig,
+        before: crate::latex_config::LatexConfig,
+        after: crate::latex_config::LatexConfig,
+        objects_before: Vec<(usize, ObjectSnapshot)>,
+        objects_after: Vec<(usize, ObjectSnapshot)>,
+    },
     Erase(Vec<(usize, ObjectSnapshot)>),
     Replace {
         before: Vec<(usize, ObjectSnapshot)>,
@@ -239,8 +247,25 @@ fn insert_at(strokes: &mut Vec<ObjectSnapshot>, removed: &[(usize, ObjectSnapsho
     }
 }
 impl Command {
-    fn apply(&self, strokes: &mut Vec<ObjectSnapshot>) {
+    fn apply(
+        &self,
+        strokes: &mut Vec<ObjectSnapshot>,
+        latex: &mut crate::latex_config::LatexConfig,
+        global: &mut crate::latex_config::LatexConfig,
+    ) {
         match self {
+            Self::Latex {
+                after_global,
+                after,
+                objects_before,
+                objects_after,
+                ..
+            } => {
+                *global = after_global.clone();
+                *latex = after.clone();
+                remove_at(strokes, objects_before);
+                insert_at(strokes, objects_after);
+            }
             Self::Erase(removed) => remove_at(strokes, removed),
             Self::Replace { before, after } => {
                 remove_at(strokes, before);
@@ -248,8 +273,25 @@ impl Command {
             }
         }
     }
-    fn revert(&self, strokes: &mut Vec<ObjectSnapshot>) {
+    fn revert(
+        &self,
+        strokes: &mut Vec<ObjectSnapshot>,
+        latex: &mut crate::latex_config::LatexConfig,
+        global: &mut crate::latex_config::LatexConfig,
+    ) {
         match self {
+            Self::Latex {
+                before_global,
+                before,
+                objects_before,
+                objects_after,
+                ..
+            } => {
+                *global = before_global.clone();
+                *latex = before.clone();
+                remove_at(strokes, objects_after);
+                insert_at(strokes, objects_before);
+            }
             Self::Erase(removed) => insert_at(strokes, removed),
             Self::Replace { before, after } => {
                 remove_at(strokes, after);
@@ -266,7 +308,11 @@ struct HistoryEntry {
     undo_selection: Option<Vec<Uuid>>,
 }
 
+type LatexReplacements = (Vec<(usize, ObjectSnapshot)>, Vec<(usize, ObjectSnapshot)>);
+
 pub struct Drawing {
+    pub latex: crate::latex_config::LatexConfig,
+    pub latex_global: crate::latex_config::LatexConfig,
     owner: Uuid,
     layout: Layout,
     items: Vec<ObjectSnapshot>,
@@ -286,6 +332,8 @@ pub struct Drawing {
 impl Drawing {
     pub fn new(data: &DocumentData) -> Self {
         Self {
+            latex: data.latex.clone(),
+            latex_global: Default::default(),
             owner: data.id(),
             layout: data.layout().clone(),
             items: Vec::new(),
@@ -300,6 +348,62 @@ impl Drawing {
             cursor: 0,
             revision: 0,
         }
+    }
+    fn latex_replacements(
+        &self,
+        config: &crate::latex_config::LatexConfig,
+        global: &crate::latex_config::LatexConfig,
+    ) -> Result<LatexReplacements, String> {
+        crate::latex_config::validate(global, config)?;
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        for (index, object) in self.items.iter().enumerate() {
+            if let ObjectSnapshot::Formula(formula) = object {
+                let source = crate::latex_config::assemble(global, config, &formula.latex_source)?;
+                let rendered = crate::formula_render::render(&source, formula.color)?;
+                let mut next = (**formula).clone();
+                next.layout = crate::formula::FormulaLayout {
+                    width: rendered.width as f64,
+                    height: rendered.height as f64,
+                    baseline: rendered.baseline,
+                };
+                let next = ObjectSnapshot::Formula(Arc::new(next));
+                if !self.valid_object(&next) {
+                    return Err(
+                        "Configuration would place a formula outside its page bounds.".into(),
+                    );
+                }
+                before.push((index, object.clone()));
+                after.push((index, next));
+            }
+        }
+        Ok((before, after))
+    }
+    pub fn validate_latex_change(
+        &self,
+        config: &crate::latex_config::LatexConfig,
+        global: &crate::latex_config::LatexConfig,
+    ) -> Result<(), String> {
+        self.latex_replacements(config, global).map(|_| ())
+    }
+    pub fn set_latex(
+        &mut self,
+        config: crate::latex_config::LatexConfig,
+        global: &crate::latex_config::LatexConfig,
+    ) -> Result<(), String> {
+        if config == self.latex && *global == self.latex_global {
+            return Ok(());
+        }
+        let (before, after) = self.latex_replacements(&config, global)?;
+        self.execute(Command::Latex {
+            before_global: self.latex_global.clone(),
+            after_global: global.clone(),
+            before: self.latex.clone(),
+            after: config,
+            objects_before: before,
+            objects_after: after,
+        });
+        Ok(())
     }
     /// Changes only when committed objects change; invalidates derived spatial data.
     pub fn revision(&self) -> u64 {
@@ -1254,7 +1358,7 @@ impl Drawing {
         self.clear_routing_hints();
         self.history.truncate(self.cursor);
         let append = matches!(&command,Command::Replace {before,after} if before.is_empty()&&after.iter().enumerate().all(|(i,(index,_))|*index==self.items.len()+i));
-        command.apply(&mut self.items);
+        command.apply(&mut self.items, &mut self.latex, &mut self.latex_global);
         if let Some(original) = original {
             if let Some(scope) = self.editing_group {
                 let old: std::collections::HashSet<_> =
@@ -1313,7 +1417,17 @@ impl Drawing {
                 .filter(|(i, o)| original.get(*i) != Some(*o))
                 .map(|(i, o)| (i, o.clone()))
                 .collect();
-            command = Command::Replace { before, after };
+            match &mut command {
+                Command::Latex {
+                    objects_before,
+                    objects_after,
+                    ..
+                } => {
+                    *objects_before = before;
+                    *objects_after = after;
+                }
+                _ => command = Command::Replace { before, after },
+            }
             self.refresh_ink_view();
         } else if append {
             let Command::Replace { after, .. } = &command else {
@@ -1350,11 +1464,12 @@ impl Drawing {
         self.revision += 1;
         let entry = &self.history[self.cursor];
         let command = &entry.command;
-        command.revert(&mut self.items);
+        command.revert(&mut self.items, &mut self.latex, &mut self.latex_global);
         let ids = entry
             .undo_selection
             .clone()
             .unwrap_or_else(|| match command {
+                Command::Latex { .. } => Vec::new(),
                 Command::Erase(objects)
                 | Command::Replace {
                     before: objects, ..
@@ -1370,9 +1485,9 @@ impl Drawing {
         }
         let entry = &self.history[self.cursor];
         let command = &entry.command;
-        command.apply(&mut self.items);
+        command.apply(&mut self.items, &mut self.latex, &mut self.latex_global);
         let ids = entry.selection.clone().unwrap_or_else(|| match command {
-            Command::Erase(_) => Vec::new(),
+            Command::Erase(_) | Command::Latex { .. } => Vec::new(),
             Command::Replace { after, .. } => after.iter().map(|(_, s)| s.id()).collect(),
         });
         self.cursor += 1;

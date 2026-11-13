@@ -1013,3 +1013,22 @@ adapter converts vector primitives at the UI boundary; this also means two egui
 versions are linked. The crate currently requires Rust 1.99. Fonts are bundled and
 initialized once. There is no formula PDF serialization in M1; M2 must store source,
 color, placement and matching visible vector output inside the same PDF payload/page.
+
+## M1.13 typography and LaTeX configuration enhancement
+
+`latex_config.rs` adds portable serde settings, bounded custom-command expansion
+and effective math-fragment assembly. Global settings use existing Preferences;
+DocumentData owns document additions. Drawing holds current document settings and
+an effective global snapshot alongside objects; a Latex journal command restores
+both configuration and measured formula bounds atomically, including group bounds.
+Applied global changes preflight all open documents; each document can undo its
+own change without mutating application preferences or other tabs.
+
+`formula_render.rs` retains LaTeX-Rust/STIX OpenType MATH layout but uses original
+SVG paths and resvg antialiasing instead of upstream egui meshes. Layout is cached
+by source/color/effective settings; physical-resolution textures are separately
+bucketed by DPI × zoom × object scale × quality. Movement only changes quad
+coordinates. `ui/latex_controls.rs` shares validated draft editors. No PDF formula
+persistence is added; the blank encoder rejects nondefault document LaTeX settings.
+See LATEX_CONFIGURATION.md and FORMULA_RENDERER_EVALUATION.md for syntax, limits,
+font licenses, alternatives and resolution/memory tradeoffs.

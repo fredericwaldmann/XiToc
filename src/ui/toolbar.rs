@@ -80,7 +80,7 @@ pub fn show(
                 editor.canvas.select(Tool::StickyNote);
             }
             let reserved = if width >= 1000.0 { 480.0 } else if width >= 800.0 { 380.0 } else if width >= 500.0 { 268.0 } else { 210.0 };
-            let reserved=reserved+120.0+if width>=400.0{30.0}else{0.0};
+            let reserved=reserved+184.0+if formula_selection.is_some(){72.0}else{0.0}+if width>=400.0{30.0}else{0.0};
             let strip_width = (width - reserved).max(24.0);
             ui.allocate_ui(egui::vec2(strip_width, style::CONTROL), |ui| {
                 egui::ScrollArea::horizontal().id_salt("pen-presets").min_scrolled_width(24.0).auto_shrink([false, false])
@@ -184,6 +184,15 @@ fn view(ui: &mut egui::Ui, doc: &Document, editor: &mut Editor) {
         ui.label("Read-only · preview unavailable");
         return;
     }
+    let settings = icons::button(ui, Icon::Settings, "Document Settings", false);
+    egui::Popup::from_toggle_button_response(&settings).show(|ui| {
+        ui.strong("Document Settings");
+        if ui.button("LaTeX…").clicked() {
+            editor.canvas.finish();
+            editor.canvas.latex_dialog.open = true;
+            ui.close();
+        }
+    });
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         if icons::button(ui, Icon::Minus, "Zoom out", false).clicked() {

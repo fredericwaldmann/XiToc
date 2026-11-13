@@ -71,6 +71,7 @@ pub struct Preferences {
     pub drawing: DrawingPreferences,
     pub middle_button_pan: bool,
     pub text_resize: crate::text::ResizeBehavior,
+    pub latex: crate::latex_config::LatexPreferences,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -81,6 +82,7 @@ impl Default for Preferences {
             drawing: DrawingPreferences::default(),
             middle_button_pan: true,
             text_resize: Default::default(),
+            latex: Default::default(),
         }
     }
 }
@@ -176,6 +178,7 @@ impl Preferences {
         {
             return Err("Invalid drawing preferences.".into());
         }
+        prefs.latex.validate()?;
         Ok(prefs)
     }
     pub fn load(storage: Option<&dyn eframe::Storage>) -> Result<Self, String> {
@@ -190,6 +193,8 @@ impl Preferences {
         storage.get_string(STORAGE_KEY).as_deref() == Some(json.as_str())
     }
     pub fn apply_drawing(&self, canvas: &mut crate::canvas::Canvas) {
+        canvas.latex = self.latex.clone();
+        canvas.drawing.latex_global = self.latex.config.clone();
         canvas.snapping = self.drawing.snapping;
         canvas.text_resize_default = self.text_resize;
         canvas.shape_defaults = self.drawing.shape_defaults.clone();

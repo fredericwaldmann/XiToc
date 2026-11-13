@@ -307,3 +307,9 @@ alter the blank PDF codec or claim formula persistence. Full package loading, in
 formulas and automatic equation solving remain out of scope. See
 FORMULA_RENDERER_EVALUATION.md and TEST_PLAN for dependency constraints, syntax
 coverage and verification.
+
+M1.13 enhancement adds antialiased original-outline STIX rendering, zoom/DPI/resize
+texture resolution caching, persistent global LaTeX preferences and independent
+undoable document preambles/postambles. These are supported math-only fragments
+and bounded custom commands, not a full package/document compiler. Formula and
+document configuration PDF persistence remain outside this task/M2.

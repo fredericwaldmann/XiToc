@@ -1,62 +1,59 @@
 # M1.13 math renderer evaluation
 
-## Decision
+## Investigation and decision
 
-XiToc uses `latex-rust` 3.0.3 for math parsing, TeX-style layout and vector shape
-generation, with its bundled STIX Two Math font. It is MIT OR Apache-2.0. The bundled
-STIX Two Math font is SIL OFL 1.1; the crate's color-name table follows LPPL-1.3c-or-later
-and carries upstream attribution in its NOTICE. There is no system TeX, shell process,
-service or network rendering dependency. Font initialization is lazy and shared.
+The original display path already used the genuine STIX Two Math font and
+`latex-rust` 3.0.3 OpenType MATH layout. It did not use UI fonts, fallback glyphs,
+or a low-resolution image cache. Inspection of the installed upstream source
+identified two display defects: the egui adapter emits raw filled triangle meshes
+without antialiased contour fringes, and its outline tessellator flattens every
+curve to exactly eight segments regardless of magnification. XiToc then scales
+those meshes with object/camera transforms. These defects make small math strokes
+look uneven and enlarged curves faceted, despite valid math layout/font metrics.
+The adapter also required a second egui version (0.36 alongside XiToc's 0.37).
 
-The optional upstream egui adapter emits egui 0.36.2 geometry; XiToc uses egui 0.37.0.
-XiToc converts mesh/line/rect primitives at the renderer boundary. Both egui versions
-therefore compile into the application. Version 3.0.3 requires Rust 1.99; this raised
-the declared MSRV from 1.95. Native and WASM compilation are required gates for this
-integration. The feature is vector-based, preserving sharp zoom and offering a future
-path to PDF paths, although the current M1 PDF codec does not serialize formulas.
+Retain the bounded parser/layout engine, replace its egui adapter with
+`render_svg_with_metrics` and `resvg` 0.50.0. Original Bézier glyph outlines remain
+vector data; display uses antialiased textures regenerated from those paths for
+physical pixel density, zoom and object resizing. Ink-containing SVG metrics fix
+overhang/clipping and supply the matching baseline. The duplicate egui dependency
+is removed. Shared native/WASM rendering has no system TeX, network, JavaScript
+math engine or platform font requirement.
 
-## Candidates considered
+The raster display is a deliberate tradeoff: egui's built-in painter does not fill
+arbitrary compound Bézier glyph paths with holes and robust antialiasing. Using a
+mature pure-Rust SVG rasterizer avoids maintaining a custom glyph tessellator.
+Bucketed textures cost bounded per-object memory and occasional resize/zoom
+rasterization; original SVG is retained. Rendering remains synchronous with existing
+source/token/depth bounds. Extreme sizes reach documented texture limits.
 
-| Candidate | License / output | Evaluation |
-| --- | --- | --- |
-| [LaTeX-Rust](https://github.com/jscarr64/latex-rust) | MIT OR Apache-2.0; math AST, TeX layout, vector shapes and optional egui output | Selected: native/WASM-compatible pure Rust math renderer, bundled math font and geometry suitable for existing painter/PDF direction. Limitation: math mode only, no full LaTeX documents/packages; egui 0.36 adapter adds conversion and duplicate dependency. |
-| [KaTeX Rust](https://github.com/katex-rs/katex-rs) | MIT; HTML and MathML | Rejected: browser-oriented output requires a separate native layout/rendering stack and would produce inconsistent native/web paths. |
-| [tex2math](https://github.com/twn39/tex2math) | LGPL-3.0-only; MathML | Rejected: parser output requires platform-specific MathML renderers and does not directly provide shared vector geometry. |
-| [Typst](https://docs.rs/typst/latest/typst/) | Apache-2.0; Typst language and vector/PDF output | Rejected: not original LaTeX syntax, broad compiler footprint, and conversion would not preserve/edit the exact requested source semantics. |
+## Alternatives
 
-Primary API/license references: [LaTeX-Rust docs](https://docs.rs/latex-rust/latest/latex_rust/),
-[LICENSE-MIT](https://github.com/jscarr64/latex-rust/blob/main/LICENSE-MIT),
-[LICENSE-APACHE](https://github.com/jscarr64/latex-rust/blob/main/LICENSE-APACHE),
-[NOTICE](https://github.com/jscarr64/latex-rust/blob/main/NOTICE).
+| Candidate | Assessment |
+| --- | --- |
+| Current LaTeX-Rust egui meshes | Genuine math layout, but fixed outline approximation and un-antialiased edges; replaced display adapter. |
+| LaTeX-Rust SVG + resvg | Selected: original outlines, self-contained output, shared Rust native/WASM path, mature antialiasing. |
+| Latin Modern Math | Genuine math font, but no need to replace STIX's compatible bundled MATH metrics; defer another preset until all glyph/assembly fixtures are verified with it. |
+| STIX Two Math | Selected, bundled reliable coverage and tested MATH constants/italic corrections/variants; no UI-font substitution. |
+| KaTeX/MathJax HTML or MathML | Would need separate browser/native layout integration; no shared egui drawing path. |
+| Typst | Larger compiler footprint and a different source language; conversion creates additional syntax/semantic maintenance. |
+| Full TeX installation | Violates no-system-installation requirement and complicates WASM/offline distribution. |
 
-## Supported subset and limits
+## Licenses and sources
 
-The math-mode parser supports common variables, numbers, operators, fractions, roots,
-superscripts/subscripts, Greek and relation symbols, accents, large operators,
-matrices/arrays, cases and aligned equations. The automated fixtures cover fractions,
-roots, scripts, summation, integral, limit, bmatrix, cases and aligned equations.
-Commands requiring arbitrary package definitions, document preambles, text-mode prose,
-TikZ, chemistry or custom macros are not supported. Unknown/malformed expressions are
-reported without replacing the user's source or the last valid preview.
+LaTeX-Rust is MIT OR Apache-2.0; resvg is Apache-2.0 OR MIT. STIX Two Math is
+SIL OFL 1.1. Font/license and upstream color-table notice are distributed under
+`assets/licenses/`. Font bytes are embedded unmodified by LaTeX-Rust. Its color
+name table carries LPPL-1.3c-or-later attribution in the upstream NOTICE.
 
-The application bounds input to 16 KiB and 128 math tokens and configures parser
-nesting depth to 32. Rendering is synchronous, not dispatched to a worker; bounded
-inputs and per-object source/color caches avoid reparsing unchanged formulas, but a
-large valid expression still occupies the UI thread during its parse/layout. The
-release stress fixture measures the maximum accepted token expression before any
-future increase to this bound.
+Primary references: [LaTeX-Rust API](https://docs.rs/latex-rust/3.0.3/latex_rust/),
+[SVG metrics](https://docs.rs/latex-rust/3.0.3/latex_rust/fn.render_svg_with_metrics.html),
+[resvg](https://github.com/linebender/resvg),
+[STIX project](https://github.com/stipub/stixfonts).
+Local upstream source files inspected: `font/math.rs`, `layout/engine.rs`,
+`render/egui/emit.rs`, `render/egui/tessellate.rs`, `render/svg/render.rs`,
+`render/svg/outline.rs`, `fonts/stix-two-math/OFL.txt`, and `NOTICE`.
 
-On this development host, a generated 2,047-token expression took 223 ms in an
-optimized build. After reducing the guard to 128 tokens, the release stress fixture's
-127-token additive chain rendered in 17.19 ms. This is one host/compiler measurement,
-not a cross-platform latency guarantee; rendering remains synchronous.
-
-## Verification record
-
-Native and WASM app builds and the Trunk release package pass. The observed raw Trunk
-distribution is 17 MB (WASM), before HTTP compression; this is a material cost of the
-math/font and duplicate-egui dependency and should be watched. Renderer output is
-converted directly to painter meshes/lines/rectangles, not a bitmap, so object zoom
-does not resample a texture. Browser smoke inspection verified the toolbar tool, live
-`E=mc^2` preview, commit and double-click source reopening at 100%; the full zoom,
-theme, Page Note and high-complexity visual matrix remains manual follow-up.
+See [LATEX_CONFIGURATION.md](LATEX_CONFIGURATION.md) for configuration semantics,
+unsupported commands, limits, caching, fallback and persistence boundaries.
+See [TEST_PLAN.md](TEST_PLAN.md) for executed checks and manual limits.

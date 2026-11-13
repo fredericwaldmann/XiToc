@@ -11,6 +11,7 @@ mod formula_render;
 #[cfg(test)]
 mod formula_tests;
 mod group;
+mod latex_config;
 mod object;
 mod object_clipboard;
 mod partial_erase;

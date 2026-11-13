@@ -274,6 +274,8 @@ impl Cached {
 const MESH_SEGMENTS: usize = 128;
 
 pub struct Canvas {
+    pub latex: crate::latex_config::LatexPreferences,
+    pub latex_dialog: crate::ui::latex_controls::DocumentLatexDialog,
     pub snapping: crate::snapping::SnapSettings,
     snap_session: Option<crate::snapping::SnapSession>,
     unlock_target: Option<Uuid>,
@@ -332,6 +334,8 @@ impl Canvas {
 
     pub fn new(data: &DocumentData) -> Self {
         Self {
+            latex: Default::default(),
+            latex_dialog: Default::default(),
             drawing: Drawing::new(data),
             text_session: None,
             font_browser: None,
@@ -966,6 +970,11 @@ impl Canvas {
                         transform,
                         formula,
                         delta,
+                        &crate::latex_config::LatexPreferences {
+                            config: self.drawing.latex_global.clone(),
+                            ..self.latex.clone()
+                        },
+                        &self.drawing.latex,
                     );
                     continue;
                 }

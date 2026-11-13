@@ -704,3 +704,25 @@ platform gate are detailed in `FORMULA_RENDERER_EVALUATION.md`. No PDF writer ch
 is included; M2 must embed both editable source/state and visible formula graphics in
 the canonical single PDF. Inline formulas remain a future extension of the same
 renderer and baseline-bearing object geometry.
+
+## 2026-11-13 — Retain MATH layout, replace formula display adapter
+
+Inspection showed STIX/OpenType MATH was already used correctly; the quality defect
+came from raw non-antialiased glyph meshes and fixed eight-step outline flattening
+in the upstream egui adapter. Retain latex-rust 3.0.3 parser/layout; use its original
+SVG outlines plus resvg 0.50.0 physical-resolution antialiased textures. This removes
+the duplicate egui version. Texture density includes camera zoom, object resizing
+and DPI, bucketed to avoid frame-by-frame rerenders. Bounded raster memory is a
+tradeoff against arbitrary extreme magnification; original SVG remains vector.
+Latin Modern Math is deferred until engine/glyph fixtures support another preset.
+Font OFL and upstream notices are included under assets/licenses.
+
+Preambles/postambles are explicitly math-only custom commands and math wrappers,
+not full TeX compilation. Unsupported commands (including unused macro bodies)
+return errors. Global Preferences reuse existing local persistence; document
+serde fields and effective global snapshots use the shared undo lifecycle. Global
+Apply preflights every open document, avoiding partial changes. Each document's
+undo restores its captured effective settings without rewriting global preferences.
+No sidecars or PDF persistence are added; the blank codec rejects nondefault fields.
+See LATEX_CONFIGURATION.md for supported syntax/order/limits and the renderer
+evaluation for source evidence and alternatives.

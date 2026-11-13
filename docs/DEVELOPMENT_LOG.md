@@ -745,3 +745,16 @@ double-click reopening at 100%; broader GUI checks are listed in TEST_PLAN. A re
 stress check reduced the source cap from 2,048 to 128 tokens after a generated long
 expression took 223 ms; the largest accepted 127-token chain took 17.19 ms on this
 host. Rendering remains synchronous and this timing is not a cross-platform guarantee.
+
+## M1.13 enhancement — mathematical typography and configuration
+
+Continued the open Formula Boxes PR #47 on feature/latex-formula-boxes. Root-cause
+inspection found correct STIX MATH layout feeding an un-antialiased, fixed-curve
+mesh adapter. Replaced that display adapter with original SVG outlines and resvg
+physical-resolution texture caching, removing egui 0.36. New Settings → LaTeX stores
+global defaults/configuration in existing Preferences; Document Settings → LaTeX
+adds isolated document drafts and one-command configuration/geometry undo. Added
+bounded math-only custom macros, explicit unsupported-command errors, inherited
+wrappers, license notices and LATEX_CONFIGURATION.md. PDF persistence remains M2;
+nondefault document configuration is explicitly rejected by the blank encoder.
+Executed validation and visual limits are recorded in TEST_PLAN.md below.
