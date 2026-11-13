@@ -192,3 +192,12 @@ Canonical object sequence supplies z-order; display contours/meshes/handles are
 transient. M2 must version/validate these variants and emit matching conventional
 vector paths, curves, arrowheads, dash patterns and opacity inside the same PDF.
 No changes to the blank schema/codec or saved-note lifecycle are introduced here.
+
+## Formula payload preparation (M1.13)
+
+FormulaObject currently exists only in the in-memory object model. The original LaTeX
+source, RGBA color, placement, ownership and stable ID are the semantic information M2
+must preserve; rendered vector geometry is derived from source/font/version and should
+be emitted as conventional visible PDF graphics in the same file. Include enough
+version/font metadata for stable re-editing or explicitly handle a renderer-version
+migration. The blank-only codec remains unchanged and does not serialize formulas.

@@ -979,3 +979,56 @@ and memory-only save/discard safeguards remain unchanged.
 Page movement clamps the free proposal before adding snap corrections and
 reconciles feedback per axis against the final legal result. A rejected correction
 on one axis does not discard a valid independent correction on the other.
+
+## M1.13 — standalone editable formula objects
+
+`FormulaObject` is a regular shared `CanvasObject` with stable UUID, document and
+surface owner, `Placement`, original UTF-8 LaTeX, RGBA color, and derived local
+width/height/baseline. Source is canonical; layout metadata and render shapes are
+rebuildable. Bounds participate in existing picking, area selection, transform,
+group, lock, stacking, alignment, and clipboard flows. Uniform scale preserves the
+math layout proportions; reflections relocate the formula while keeping glyphs
+readable. Rotation and group transforms continue through Placement.
+
+The top-toolbar ∑ tool starts a source session at the clicked document point.
+Double-click on a selected formula opens the same editor. The multiline source field
+previews on change; Finish commits, while Escape/Cancel discards the draft. A source
+edit is one replace-history operation, and repeated contextual color samples merge
+into one history entry. Object copy/paste stores source and formatting in the bounded
+clipboard envelope and gives the pasted object a new ID.
+
+`formula_render.rs` uses LaTeX-Rust's math parser and layout with bundled STIX Two Math,
+then translates its vector shapes into XiToc's egui painter. A session-local cache is
+keyed by object ID/source/color; only changed formulas re-render. Limits are 16 KiB,
+128 tokens and parser depth 32. This renderer is bounded and synchronous; it does
+not create background worker jobs. Invalid input remains available in the editor,
+shows an error/invalid marker, and retains the last valid preview. No source is
+executed and no external files/services are accessed. Supported syntax follows the
+library's math-mode subset (fractions, roots, scripts, symbols, large operators,
+matrices/cases and aligned math); full LaTeX documents/packages, text mode and TikZ
+are outside scope.
+
+The dependency's optional egui adapter targets 0.36 while XiToc pins 0.37, so the
+adapter converts vector primitives at the UI boundary; this also means two egui
+versions are linked. The crate currently requires Rust 1.99. Fonts are bundled and
+initialized once. There is no formula PDF serialization in M1; M2 must store source,
+color, placement and matching visible vector output inside the same PDF payload/page.
+
+## M1.13 typography and LaTeX configuration enhancement
+
+`latex_config.rs` adds portable serde settings, bounded custom-command expansion
+and effective math-fragment assembly. Global settings use existing Preferences;
+DocumentData owns document additions. Drawing holds current document settings and
+an effective global snapshot alongside objects; a Latex journal command restores
+both configuration and measured formula bounds atomically, including group bounds.
+Applied global changes preflight all open documents; each document can undo its
+own change without mutating application preferences or other tabs.
+
+`formula_render.rs` retains LaTeX-Rust OpenType MATH layout with the bundled Latin Modern Math face but uses original
+SVG paths and resvg antialiasing instead of upstream egui meshes. Layout is cached
+by source/color/effective settings; physical-resolution textures are separately
+bucketed by DPI × zoom × object scale × quality. Movement only changes quad
+coordinates. `ui/latex_controls.rs` shares validated draft editors. No PDF formula
+persistence is added; the blank encoder rejects nondefault document LaTeX settings.
+See LATEX_CONFIGURATION.md and FORMULA_RENDERER_EVALUATION.md for syntax, limits,
+font licenses, alternatives and resolution/memory tradeoffs.

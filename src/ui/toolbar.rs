@@ -59,11 +59,28 @@ pub fn show(
                 ui.weak("Drag to create · Shift constrains · Escape cancels");
             });
             if icons::button(ui,Icon::Text,"Text · click to type, drag to set width",editor.canvas.tool==Tool::Text).clicked(){editor.canvas.select(Tool::Text);}
+            if icons::button(ui, Icon::Formula, "Formula · click the canvas to enter LaTeX", editor.canvas.tool == Tool::Formula).clicked() { editor.canvas.select(Tool::Formula); }
+            let formula_selection = if editor.canvas.selection.ids.len() == 1 {
+                editor.canvas.selection.ids.iter().next().and_then(|id| match editor.canvas.drawing.snapshot(*id) {
+                    Some(crate::object::ObjectSnapshot::Formula(formula)) => Some(( *id, formula.color, !editor.canvas.drawing.is_locked(*id) )),
+                    _ => None,
+                })
+            } else { None };
+            if let Some((id, color, unlocked)) = formula_selection {
+                ui.menu_button("Formula", |ui| {
+                    if ui.add_enabled(unlocked, egui::Button::new("Edit LaTeX…")).clicked() { editor.canvas.edit_formula(id); ui.close(); }
+                    if ui.add_enabled(unlocked, egui::Button::new("Reset Formula Size")).clicked() { editor.canvas.reset_formula_scale(id); ui.close(); }
+                    let mut rgb = [color[0], color[1], color[2]];
+                    if unlocked && super::shape_controls::color_control(ui, &mut rgb, 255).is_some() {
+                        editor.canvas.set_formula_color(id, rgb);
+                    }
+                });
+            }
             if width >= 420.0 && icons::button(ui, Icon::StickyNote, "Sticky Note · click to create and type", editor.canvas.tool == Tool::StickyNote).clicked() {
                 editor.canvas.select(Tool::StickyNote);
             }
             let reserved = if width >= 1000.0 { 480.0 } else if width >= 800.0 { 380.0 } else if width >= 500.0 { 268.0 } else { 210.0 };
-            let reserved=reserved+120.0+if width>=400.0{30.0}else{0.0};
+            let reserved=reserved+184.0+if formula_selection.is_some(){72.0}else{0.0}+if width>=400.0{30.0}else{0.0};
             let strip_width = (width - reserved).max(24.0);
             ui.allocate_ui(egui::vec2(strip_width, style::CONTROL), |ui| {
                 egui::ScrollArea::horizontal().id_salt("pen-presets").min_scrolled_width(24.0).auto_shrink([false, false])
@@ -167,6 +184,15 @@ fn view(ui: &mut egui::Ui, doc: &Document, editor: &mut Editor) {
         ui.label("Read-only · preview unavailable");
         return;
     }
+    let settings = icons::button(ui, Icon::Settings, "Document Settings", false);
+    egui::Popup::from_toggle_button_response(&settings).show(|ui| {
+        ui.strong("Document Settings");
+        if ui.button("LaTeX…").clicked() {
+            editor.canvas.finish();
+            editor.canvas.latex_dialog.open = true;
+            ui.close();
+        }
+    });
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         if icons::button(ui, Icon::Minus, "Zoom out", false).clicked() {

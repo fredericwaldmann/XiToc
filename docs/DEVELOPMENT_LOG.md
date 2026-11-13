@@ -722,3 +722,55 @@ smoke verified five-size rectangle edge/equal-spacing guides, Align Left, vertic
 distribution/undo/redo, hidden-grid snapping and a magnetically connected group
 at displayed 200/400% with Alt bypass/resume. TEST_PLAN and screenshots/snapping
 separate these observations from unperformed physical/platform/theme checks.
+
+## M1.13 — Editable standalone formula objects
+
+Implements existing issue #27 (`[M1.8] LaTeX Formula Boxes`; no comments were present).
+PR #47 targets `main` and references #27 without an auto-closing Fixes directive;
+bounded synchronous rendering and the broader visual matrix remain explicit follow-up.
+Added a stable FormulaObject that retains the exact LaTeX source and uses derived
+math layout bounds. The top-toolbar Formula tool opens a live source editor; committed
+objects render as cached vector geometry with the bundled STIX Two Math font. Formula
+objects use existing selection, placement, grouping, locking, clipboard and history
+infrastructure. Invalid drafts preserve source and the last valid preview. Rendering
+input is bounded by bytes, token count and nesting depth. Formula content remains
+memory-only; PDF payload serialization is still the M2 gate. See
+FORMULA_RENDERER_EVALUATION.md for library/license/platform trade-offs and the known
+egui adapter/MSRV cost.
+
+All-target tests pass (296 passed, 10 ignored), denied-warning Clippy and formatting
+pass, native release and WASM checks pass, and Trunk release output totals 17 MB
+uncompressed. Firefox verified toolbar creation, live `E=mc^2` preview, commit and
+double-click reopening at 100%; broader GUI checks are listed in TEST_PLAN. A release
+stress check reduced the source cap from 2,048 to 128 tokens after a generated long
+expression took 223 ms; the largest accepted 127-token chain took 17.19 ms on this
+host. Rendering remains synchronous and this timing is not a cross-platform guarantee.
+
+## M1.13 enhancement — mathematical typography and configuration
+
+Continued the open Formula Boxes PR #47 on feature/latex-formula-boxes. Root-cause
+inspection found correct STIX MATH layout feeding an un-antialiased, fixed-curve
+mesh adapter. Replaced that display adapter with original SVG outlines and resvg
+physical-resolution texture caching, removing egui 0.36. New Settings → LaTeX stores
+global defaults/configuration in existing Preferences; Document Settings → LaTeX
+adds isolated document drafts and one-command configuration/geometry undo. Added
+bounded math-only custom macros, explicit unsupported-command errors, inherited
+wrappers, license notices and LATEX_CONFIGURATION.md. PDF persistence remains M2;
+nondefault document configuration is explicitly rejected by the blank encoder.
+Executed validation and visual limits are recorded in TEST_PLAN.md below.
+
+### Computer Modern font follow-up
+
+Switched all LaTeX rendering to bundled New Computer Modern Math Regular at the
+user's request. The font uses OpenType MATH through the existing renderer; sharp
+SVG/resolution caching, editable source, configuration and PDF boundaries stay
+unchanged. Settings show Computer Modern and migrate saved STIX preferences.
+Bundled official GUST/LPPL license texts, package attribution and font provenance.
+
+### Latin Modern Math font follow-up
+
+Replaced New Computer Modern with Latin Modern Math 1.959 at the user's request.
+Updated the renderer resource, Settings label/default/fallback and migration of
+both prior preset IDs. Reused the GUST/LPPL notices, added upstream attribution,
+and removed the superseded font/package resources. Source editing, configuration,
+resolution caching and PDF boundaries remain the same.

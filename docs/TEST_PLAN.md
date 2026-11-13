@@ -1641,3 +1641,103 @@ pen, both erasers, styling, rich Text/Paragraph controls and save/discard guards
 Final Page Note boundary regression: a pointer sample far above the page uses the
 clamped free proposal before solving snaps. Valid X/Y matches remain independent,
 including a small legal inward Y correction; undo restores the exact source.
+
+## M1.13 editable formula objects
+
+Automated coverage: renderer fixtures for fractions, roots, superscripts/subscripts,
+summations, integrals, limits, matrices, cases and aligned equations; malformed,
+unsupported, deeply nested and over-limit source errors; formula source preservation,
+edit undo/redo, clipboard fresh IDs, group transformation, locks, Page ownership,
+color history merging, geometry bounds and readable flipping. Run the standard Rust
+suite and native/WASM/Trunk checks; feature behavior does not establish PDF round-trip
+support, which remains an M2 requirement.
+
+Manual verification: use Formula (∑) in the top toolbar, enter and correct a formula,
+check the retained preview/error behavior, finish then double-click to edit. Move,
+resize, rotate, flip, recolor, reset scale, duplicate and copy/paste; group with shapes
+and notes; verify locks, alignment/snapping, undo/redo and sharp vector output at
+50/100/200/400% on Whiteboards and Page Notes. Check source copy/paste while the editor
+has focus, Escape cancellation, matrices/aligned equations, and partially offscreen
+placement. Do not infer persistent PDF formula storage from this in-memory milestone.
+
+Executed in Firefox against the Trunk release build: created a browser-session
+Whiteboard, used the TOP Formula tool, typed `E=mc^2`, observed the live typeset
+preview, committed the formula, and double-clicked it to confirm the exact source and
+preview reopen. This smoke test was at 100% zoom. Invalid-source visual recovery,
+editing clipboard, styling, transforms, Page Notes, themes, and 50–400% visual sharpness
+were not manually exercised. The browser-session document was not claimed as saved.
+
+### M1.13 typography/configuration enhancement verification
+
+Executed: `cargo fmt --all -- --check`, denied-warning Clippy, native shared-code
+compilation, wasm32-unknown-unknown compilation and Trunk release packaging.
+`cargo test --all-targets`: 302 passed, 12 intentionally ignored. New regressions
+cover configuration order, custom-command overrides, exact source/newlines, unused
+unsupported definitions, recursion/expansion/field limits, unknown preset fallback,
+preferences persistence/migration, document isolation on both layouts, atomic
+validation failure, configuration/geometry undo/redo, serde round trip, PDF encode
+rejection, and real global Settings Apply with invalid-draft retention.
+
+Texture regression paints at 50/100/200/400/800% and 1×/2× DPI, checks unchanged
+frames issue no texture uploads, and checks textures respect the active GPU's
+maximum side as well as the application cap. The test caught and fixed an actual
+2048-pixel backend-limit violation; texture dimensions are now capped accordingly.
+The ignored typography review-sheet fixture was run explicitly and visually
+inspected: italic variables, upright sin/cos, Greek, fractions, quadratic radical,
+summation limits, integrals, nested stretchy delimiters and matrix glyphs look
+smooth and use real STIX outlines. This is a direct resvg/output inspection,
+not a claim of physical monitor/input verification.
+
+Manual recipe: open Edit → Settings → LaTeX, define a custom macro, Apply and
+restart to confirm global preference storage. Enter an unsupported package command
+and verify the error retains its text. Create one Page Note and two Whiteboards;
+add formulas using the global macro. Open top Document Settings → LaTeX (inside
+View on narrow layouts), override the macro in one tab, add paired wrappers, Validate
+and Apply. Other tabs retain their configuration. Undo/redo restores configuration
+and formula/group bounds in one operation; cancel an invalid draft without changing
+objects. Verify source editing, recolor, move, resize/rotate, group/clipboard, and
+sharpness at 50–800% on standard/high DPI. Verify default size/color changes affect
+new formulas, quality changes rebuild textures, and dirty documents cannot export
+an incomplete blank PDF. Formula/document edits remain memory-only until M2.
+
+Remaining manual matrix: physical high-DPI screens and pens, Windows/macOS,
+native interactive zoom/resize, and exhaustive Page/theme/narrow configuration
+combinations. Build/unit evidence does not establish real-time device latency.
+
+Additional executed checks: native `cargo build --release` passed. Firefox against
+the packaged WASM app verified Settings → LaTeX layout, entering/applying
+`\newcommand{\RR}{\mathbb{R}}`, creating a temporary Whiteboard, previewing
+`\int_0^\infty e^{-x^2}\,dx=\frac{\sqrt{\pi}}{2},\quad x\in\RR`
+and committing the editable formula. Browser export was cancelled; no saved-note
+claim was made. Standard-DPI output was visually inspected. High-DPI behavior is
+covered by the physical-resolution renderer regression; Firefox DPR emulation was
+not treated as physical display evidence. The final renderer remains memory-only.
+Reference captures are in `docs/screenshots/latex-quality/`. The release WASM is
+approximately 18 MB before HTTP compression, a material distribution cost.
+
+### Computer Modern font follow-up
+
+The formula fixture suite now runs with bundled New Computer Modern Math Regular,
+including fractions, roots, scripts, sums, integrals, Greek and scalable delimiters.
+Additional regressions verify the bundled font has an OpenType MATH table and the
+required mathematical glyphs, and that saved STIX preferences migrate to Computer
+Modern while preserving size, color and preamble. Existing source, history,
+configuration, cache/DPI and PDF safety tests continue unchanged.
+The typography review sheet is regenerated for Computer Modern; the earlier global
+settings screenshot records the initial STIX enhancement, before this font change.
+
+Computer Modern validation: 304 tests passed (12 intentionally ignored), formatting,
+denied-warning Clippy and wasm32 compilation passed. The explicitly run typography
+review-sheet fixture was inspected with the Computer Modern face and retained as
+`docs/screenshots/latex-quality/typography.png`. Trunk packaging uses the same
+embedded font; no system font installation or note persistence is introduced.
+
+### Latin Modern Math font selection
+
+The renderer now uses bundled Latin Modern Math 1.959. The MATH-table/glyph fixture
+and all math examples run against that exact font. Migration covers both STIX and
+Computer Modern preset IDs without losing other settings. Full suite: 304 passed,
+12 intentionally ignored; formatting, denied-warning Clippy and wasm32 checks
+pass. The explicitly run typography review sheet was visually inspected and
+replaced with Latin Modern Math output. GUST/LPPL attribution remains bundled;
+obsolete New Computer Modern assets are removed. PDF persistence is unchanged.

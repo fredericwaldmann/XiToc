@@ -11,9 +11,15 @@ Technical orientation: [Codebase guide](docs/CODEBASE_GUIDE.md),
 [Architecture decisions](docs/ARCHITECTURE_DECISIONS.md),
 [Development log](docs/DEVELOPMENT_LOG.md).
 
+Editable Formula Boxes use Latin Modern Math with antialiased, zoom/DPI-aware rendering.
+Edit → Settings → LaTeX configures global defaults and preambles/postambles;
+Document Settings → LaTeX configures the active note. See
+[LaTeX configuration](docs/LATEX_CONFIGURATION.md) for supported math-only syntax.
+Formula objects and document configuration remain memory-only until M2.
+
 ## Run
 
-Install current stable Rust (minimum 1.95), then:
+Install current stable Rust (minimum 1.99), then:
 
 ```sh
 cargo run --locked

@@ -223,6 +223,32 @@ impl XiTocApp {
             }
         }
         self.discard_dialog(ui.ctx());
+        if self.preferences.latex.config != before.latex.config {
+            let config = &self.preferences.latex.config;
+            let valid = self.documents.iter().try_for_each(|opened| {
+                let drawing = &opened.editor.canvas.drawing;
+                drawing.validate_latex_change(&drawing.latex, config)?;
+                Ok::<_, String>(())
+            });
+            match valid {
+                Ok(()) => {
+                    for opened in &mut self.documents {
+                        if !opened.loaded.document.external {
+                            let drawing = &mut opened.editor.canvas.drawing;
+                            if let Err(e) = drawing.set_latex(drawing.latex.clone(), config) {
+                                self.preferences_warning = Some(e);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    self.preferences.latex.config = before.latex.config.clone();
+                    self.preferences_warning = Some(format!(
+                        "LaTeX configuration was not applied: {e}. Your draft is retained."
+                    ));
+                }
+            }
+        }
         if self.preferences != before {
             self.preferences_writable = true;
             self.preferences_changed_at = Some(ui.input(|i| i.time));
@@ -366,8 +392,11 @@ impl XiTocApp {
                             ui.label("PDF preview is not available yet. The original file is preserved and will not be rewritten.");
                         });
                     } else {
+                        opened.editor.canvas.latex = self.preferences.latex.clone();
                         opened.editor.canvas.text_resize_default = self.preferences.text_resize;
                         opened.editor.middle_button_pan = self.preferences.middle_button_pan;
+                        opened.editor.canvas.latex_dialog.show(ui.ctx(), &mut opened.editor.canvas.drawing, &self.preferences.latex);
+                        opened.loaded.document.data.latex = opened.editor.canvas.drawing.latex.clone();
                         opened.editor.show(ui, &opened.loaded.document.data);
                         if let Some(notice)=opened.editor.canvas.notice.take(){self.status=notice;}
                     }

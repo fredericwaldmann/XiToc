@@ -101,6 +101,7 @@ fn rotate([x, y]: Point, angle: f64) -> Point {
 pub enum ObjectType {
     Group,
     Text,
+    Formula,
     Stroke,
     Shape,
     Connector,
@@ -113,6 +114,7 @@ pub enum ObjectType {
 pub enum ObjectSnapshot {
     Group(std::sync::Arc<crate::group::Group>),
     Text(std::sync::Arc<crate::text::TextObject>),
+    Formula(std::sync::Arc<crate::formula::FormulaObject>),
     Stroke(std::sync::Arc<Stroke>),
     Shape(std::sync::Arc<crate::shape::Shape>),
     Connector(std::sync::Arc<crate::connector::Connector>),
@@ -670,6 +672,11 @@ impl From<crate::connector::Connector> for ObjectSnapshot {
         Self::Connector(std::sync::Arc::new(c))
     }
 }
+impl From<crate::formula::FormulaObject> for ObjectSnapshot {
+    fn from(value: crate::formula::FormulaObject) -> Self {
+        Self::Formula(std::sync::Arc::new(value))
+    }
+}
 impl ObjectSnapshot {
     pub fn locked(&self) -> bool {
         match self {
@@ -677,6 +684,7 @@ impl ObjectSnapshot {
             Self::Stroke(o) => o.locked,
             Self::Shape(o) => o.locked,
             Self::Text(o) => o.locked,
+            Self::Formula(o) => o.locked,
             Self::Connector(o) => o.locked,
         }
     }
@@ -686,6 +694,7 @@ impl ObjectSnapshot {
             Self::Stroke(o) => std::sync::Arc::make_mut(o).locked = value,
             Self::Shape(o) => std::sync::Arc::make_mut(o).locked = value,
             Self::Text(o) => std::sync::Arc::make_mut(o).locked = value,
+            Self::Formula(o) => std::sync::Arc::make_mut(o).locked = value,
             Self::Connector(o) => std::sync::Arc::make_mut(o).locked = value,
         }
     }
@@ -694,6 +703,7 @@ impl ObjectSnapshot {
         match self {
             Self::Group(g) => g.as_ref(),
             Self::Text(t) => t.as_ref(),
+            Self::Formula(f) => f.as_ref(),
             Self::Stroke(s) => s.as_ref(),
             Self::Shape(s) => s.as_ref(),
             Self::Connector(c) => c.as_ref(),
@@ -703,6 +713,7 @@ impl ObjectSnapshot {
         match self {
             Self::Group(g) => g.id,
             Self::Text(t) => t.id,
+            Self::Formula(f) => f.id,
             Self::Stroke(s) => s.id,
             Self::Shape(s) => s.id,
             Self::Connector(c) => c.id,
@@ -712,6 +723,7 @@ impl ObjectSnapshot {
         match self {
             Self::Group(_) => self.clone(),
             Self::Text(t) => t.transformed(delta).into(),
+            Self::Formula(f) => f.transformed(delta).into(),
             Self::Connector(c) => c.transformed(delta, &Default::default()).into(),
             Self::Stroke(s) => {
                 let mut t = (**s).clone();
@@ -740,6 +752,13 @@ impl ObjectSnapshot {
                 t.document_id = owner;
                 t.surface = surface;
                 t.into()
+            }
+            Self::Formula(f) => {
+                let mut f = (**f).clone();
+                f.id = Uuid::new_v4();
+                f.document_id = owner;
+                f.surface = surface;
+                f.into()
             }
             Self::Connector(c) => {
                 let mut c = (**c).clone();

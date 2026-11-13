@@ -62,12 +62,18 @@ pub struct DocumentData {
     schema_version: u32,
     document_id: Uuid,
     layout: Layout,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::latex_config::LatexConfig::is_default"
+    )]
+    pub latex: crate::latex_config::LatexConfig,
 }
 
 impl DocumentData {
     pub fn blank(kind: DocumentKind) -> Self {
         Self {
             schema_version: 1,
+            latex: Default::default(),
             document_id: Uuid::new_v4(),
             layout: match kind {
                 DocumentKind::Page => Layout::Page {

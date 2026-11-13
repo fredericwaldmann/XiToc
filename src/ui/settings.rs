@@ -11,11 +11,13 @@ enum Section {
     Input,
     Text,
     Snapping,
+    Latex,
 }
 #[derive(Default)]
 pub struct SettingsDialog {
     pub open: bool,
     section: Section,
+    latex: super::latex_controls::GlobalLatexDraft,
 }
 impl SettingsDialog {
     pub fn show(&mut self, ctx: &egui::Context, prefs: &mut Preferences, warning: Option<&str>) {
@@ -26,11 +28,11 @@ impl SettingsDialog {
         egui::Modal::new(egui::Id::unique("application-settings")).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 48.0).clamp(180.0, style::SETTINGS_WIDTH));
             ui.heading("Settings");
-            ui.weak("Application preferences · changes apply automatically");
+            ui.weak(if self.section == Section::Latex { "Application preferences · LaTeX changes require Apply" } else { "Application preferences · changes apply automatically" });
             ui.add_space(style::GAP);
             ui.horizontal_wrapped(|ui| {
                 for (section, label) in [(Section::General, "General"), (Section::Appearance, "Appearance"),
-                    (Section::Drawing, "Drawing"), (Section::Snapping, "Snapping"), (Section::Text, "Text"), (Section::Input, "Input Devices")] {
+                    (Section::Drawing, "Drawing"), (Section::Snapping, "Snapping"), (Section::Text, "Text"), (Section::Latex, "LaTeX"), (Section::Input, "Input Devices")] {
                     ui.selectable_value(&mut self.section, section, label);
                 }
             });
@@ -40,6 +42,7 @@ impl SettingsDialog {
                 .show(ui, |ui| {
                     ui.add_space(style::GAP);
                     match self.section {
+                        Section::Latex => self.latex.show(ui, &mut prefs.latex),
                         Section::General => {
                             ui.strong("Editor behavior");
                             ui.checkbox(&mut prefs.explorer_visible, "Show Explorer");

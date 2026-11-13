@@ -512,6 +512,7 @@ impl Canvas {
                 let hit = match object {
                     ObjectSnapshot::Group(_) => false,
                     ObjectSnapshot::Text(t) => t.hit_test(point, tolerance),
+                    ObjectSnapshot::Formula(f) => f.hit_test(point, tolerance),
                     ObjectSnapshot::Stroke(stroke) => {
                         let cache = self
                             .cache
@@ -804,6 +805,9 @@ impl Canvas {
                                 ObjectSnapshot::Text(t) => {
                                     t.rectangle_matches(bounds, point[0] < start[0])
                                 }
+                                ObjectSnapshot::Formula(f) => {
+                                    f.rectangle_matches(bounds, point[0] < start[0])
+                                }
                                 ObjectSnapshot::Stroke(stroke) => {
                                     let cached = self
                                         .cache
@@ -1038,6 +1042,7 @@ impl Canvas {
                                 )
                             }
                             ObjectSnapshot::Text(t) => t.lasso_matches(&region),
+                            ObjectSnapshot::Formula(f) => f.lasso_matches(&region),
                             ObjectSnapshot::Shape(shape) => shape.lasso_matches(&region),
                             ObjectSnapshot::Connector(c) => c.as_shape().lasso_matches(&region),
                         };

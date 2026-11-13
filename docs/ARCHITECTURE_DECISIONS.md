@@ -686,3 +686,60 @@ drags/copies retain their documented detach policies. Schema 7 stores only devic
 snapping defaults; per-editor controls, grid display, latches and guides remain
 session state. The dot grid and snapping share document origin/spacing while
 visibility stays independent. No PDF persistence or constraint/layout solver.
+
+## 2026-11-12 — M1.13 use LaTeX-Rust math vectors
+
+Use `latex-rust` 3.0.3 with bundled STIX Two Math for standalone formula objects.
+It parses a useful math-mode LaTeX subset into TeX-style layout and vector geometry
+without system TeX, shell, network, or platform-specific MathML. Preserve source as
+canonical document data; keep layout metadata and cached shapes derived. Source is
+limited to 16 KiB/128 tokens and parser depth 32. Invalid drafts retain source and
+the prior valid preview. Current rendering is synchronous and bounded, not a worker;
+measure responsiveness before raising limits or claiming large-input responsiveness.
+
+Accepted cost: upstream egui output is 0.36.2, so XiToc's 0.37 adapter converts
+vector shapes and includes a duplicate egui version. Upstream 3.0.3 requires Rust
+1.99 (the workspace MSRV is raised accordingly). The license/font/alternatives and
+platform gate are detailed in `FORMULA_RENDERER_EVALUATION.md`. No PDF writer change
+is included; M2 must embed both editable source/state and visible formula graphics in
+the canonical single PDF. Inline formulas remain a future extension of the same
+renderer and baseline-bearing object geometry.
+
+## 2026-11-13 — Retain MATH layout, replace formula display adapter
+
+Inspection showed STIX/OpenType MATH was already used correctly; the quality defect
+came from raw non-antialiased glyph meshes and fixed eight-step outline flattening
+in the upstream egui adapter. Retain latex-rust 3.0.3 parser/layout; use its original
+SVG outlines plus resvg 0.50.0 physical-resolution antialiased textures. This removes
+the duplicate egui version. Texture density includes camera zoom, object resizing
+and DPI, bucketed to avoid frame-by-frame rerenders. Bounded raster memory is a
+tradeoff against arbitrary extreme magnification; original SVG remains vector.
+Latin Modern Math is deferred until engine/glyph fixtures support another preset.
+Font OFL and upstream notices are included under assets/licenses.
+
+Preambles/postambles are explicitly math-only custom commands and math wrappers,
+not full TeX compilation. Unsupported commands (including unused macro bodies)
+return errors. Global Preferences reuse existing local persistence; document
+serde fields and effective global snapshots use the shared undo lifecycle. Global
+Apply preflights every open document, avoiding partial changes. Each document's
+undo restores its captured effective settings without rewriting global preferences.
+No sidecars or PDF persistence are added; the blank codec rejects nondefault fields.
+See LATEX_CONFIGURATION.md for supported syntax/order/limits and the renderer
+evaluation for source evidence and alternatives.
+
+## 2026-11-13 — Computer Modern mathematical typography
+
+At the user's request, replace the selected STIX face with New Computer Modern Math
+Regular, a Computer Modern OpenType MATH font supported by `MathFont::from_bytes`.
+Keep SVG outlines, physical-resolution texture caching and formula semantics.
+Bundle the unmodified font and GUST/LPPL attribution; upstream package license
+exceptions for other text faces do not apply to this math face. Migrate saved
+STIX preset IDs to Computer Modern and use it for unavailable-preset fallback.
+
+## 2026-11-13 — Latin Modern Math selection
+
+The user changed the requested math font to Latin Modern Math. Bundle the official
+1.959 OpenType face and its GUST/LPPL attribution, replacing New Computer Modern.
+Use the existing `MathFont::from_bytes`/SVG renderer and high-resolution cache.
+Migrate both earlier preset names to `latin-modern-math` without changing source
+or other preferences. This is a font-resource change, with no PDF persistence.
