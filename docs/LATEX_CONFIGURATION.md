@@ -6,17 +6,17 @@ are used. All math processing runs locally in Rust on native and WASM.
 
 ## Rendering
 
-The bundled Computer Modern preset (New Computer Modern Math Regular) uses the engine's OpenType MATH constants,
+The bundled Latin Modern Math preset uses the engine's OpenType MATH constants,
 italic corrections and stretchy glyph variants/assemblies. Variables are math
 italic; named operators such as `\sin`, `\cos` and `\lim` are upright. Greek,
 fractions, roots, scripts, integrals, large operators, matrices and scalable
 `\left`/`\right` delimiters share the same baseline/layout engine.
 
-Settings → LaTeX offers the supported Computer Modern preset, default size (6–144 pt), default
+Settings → LaTeX offers the supported Latin Modern Math preset, default size (6–144 pt), default
 color and high-quality rendering (on). Size/color initialize future formulas;
 existing objects keep their captured size/color. An unavailable stored preset
-falls back to bundled Computer Modern. Saved STIX preset preferences migrate to
-Computer Modern without changing source or other settings. Ordinary system/UI fonts are not offered as math fonts.
+falls back to bundled Latin Modern Math. Saved STIX and Computer Modern preset preferences migrate to
+Latin Modern Math without changing source or other settings. Ordinary system/UI fonts are not offered as math fonts.
 
 Original glyph outlines become self-contained SVG paths. The display rasterizer
 renders these at physical resolution: canvas zoom × object scale × device pixel

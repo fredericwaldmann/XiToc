@@ -28,16 +28,16 @@ impl GlobalLatexDraft {
         let value = self.value.get_or_insert_with(|| prefs.clone());
         ui.strong("Rendering");
         egui::ComboBox::from_id_salt("math-preset")
-            .selected_text("Computer Modern · OpenType MATH")
+            .selected_text("Latin Modern Math · OpenType MATH")
             .show_ui(ui, |ui| {
                 ui.selectable_value(
                     &mut value.preset,
-                    "computer-modern-math".into(),
-                    "Computer Modern · OpenType MATH",
+                    "latin-modern-math".into(),
+                    "Latin Modern Math · OpenType MATH",
                 );
             });
-        if value.preset != "computer-modern-math" {
-            ui.weak("Unavailable saved preset: using bundled Computer Modern.");
+        if value.preset != "latin-modern-math" {
+            ui.weak("Unavailable saved preset: using bundled Latin Modern Math.");
         }
         ui.horizontal(|ui| {
             ui.label("Default formula size (pt)");

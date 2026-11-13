@@ -1,11 +1,11 @@
-//! Math layout and original Computer Modern outlines; physical-pixel rasterization is cached separately.
+//! Math layout and original Latin Modern Math outlines; physical-pixel rasterization is cached separately.
 use latex_rust::{
     Color, Dim, MathFont, MathStyle, ParseOptions, SvgOptions, layout_with_em_size_pt,
     parse_with_options, render_svg_with_metrics, tokenize,
 };
 use std::sync::OnceLock;
 pub const MAX_PARSE_DEPTH: usize = 32;
-const MATH_FONT: &[u8] = include_bytes!("../assets/fonts/NewCMMath-Regular.otf");
+const MATH_FONT: &[u8] = include_bytes!("../assets/fonts/latinmodern-math.otf");
 static FONT: OnceLock<Result<MathFont, String>> = OnceLock::new();
 #[derive(Clone, Debug)]
 pub struct RenderedFormula {
@@ -155,14 +155,14 @@ impl FormulaTexture {
 mod tests {
     use super::*;
     #[test]
-    fn bundled_computer_modern_contains_math_metrics_and_required_glyphs() {
+    fn bundled_latin_modern_math_contains_math_metrics_and_required_glyphs() {
         let count = u16::from_be_bytes([MATH_FONT[4], MATH_FONT[5]]) as usize;
         assert!((0..count).any(|i| &MATH_FONT[12 + i * 16..16 + i * 16] == b"MATH"));
         let font = MathFont::from_bytes(MATH_FONT).unwrap();
         for ch in ['𝑥', 'α', 'β', '∫', '∑', '√', '(', ')'] {
             assert!(
                 font.glyph(ch).is_ok(),
-                "Missing Computer Modern glyph: {ch}"
+                "Missing Latin Modern Math glyph: {ch}"
             );
         }
     }

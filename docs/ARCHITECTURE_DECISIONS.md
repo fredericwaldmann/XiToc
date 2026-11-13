@@ -735,3 +735,11 @@ Keep SVG outlines, physical-resolution texture caching and formula semantics.
 Bundle the unmodified font and GUST/LPPL attribution; upstream package license
 exceptions for other text faces do not apply to this math face. Migrate saved
 STIX preset IDs to Computer Modern and use it for unavailable-preset fallback.
+
+## 2026-11-13 — Latin Modern Math selection
+
+The user changed the requested math font to Latin Modern Math. Bundle the official
+1.959 OpenType face and its GUST/LPPL attribution, replacing New Computer Modern.
+Use the existing `MathFont::from_bytes`/SVG renderer and high-resolution cache.
+Migrate both earlier preset names to `latin-modern-math` without changing source
+or other preferences. This is a font-resource change, with no PDF persistence.

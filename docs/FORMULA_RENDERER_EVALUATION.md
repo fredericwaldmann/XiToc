@@ -2,7 +2,7 @@
 
 ## Investigation and decision
 
-Current font: New Computer Modern Math Regular, requested after the initial STIX
+Current font: Latin Modern Math 1.959, requested after the initial STIX
 quality enhancement. It loads through `MathFont::from_bytes` with original outlines
 and OpenType MATH tables; STIX is no longer selected. The investigation below
 records the original rendering defect, which was independent of that font choice.
@@ -38,7 +38,7 @@ source/token/depth bounds. Extreme sizes reach documented texture limits.
 | --- | --- |
 | Current LaTeX-Rust egui meshes | Genuine math layout, but fixed outline approximation and un-antialiased edges; replaced display adapter. |
 | LaTeX-Rust SVG + resvg | Selected: original outlines, self-contained output, shared Rust native/WASM path, mature antialiasing. |
-| Latin Modern Math | Genuine math font, but no need to replace STIX's compatible bundled MATH metrics; defer another preset until all glyph/assembly fixtures are verified with it. |
+| Latin Modern Math | Current selection: bundled OpenType MATH font; glyph/assembly fixtures verified through the shared renderer. |
 | STIX Two Math | Initially selected, bundled reliable coverage and tested MATH constants/italic corrections/variants; no UI-font substitution. |
 | KaTeX/MathJax HTML or MathML | Would need separate browser/native layout integration; no shared egui drawing path. |
 | Typst | Larger compiler footprint and a different source language; conversion creates additional syntax/semantic maintenance. |
@@ -63,7 +63,7 @@ See [LATEX_CONFIGURATION.md](LATEX_CONFIGURATION.md) for configuration semantics
 unsupported commands, limits, caching, fallback and persistence boundaries.
 See [TEST_PLAN.md](TEST_PLAN.md) for executed checks and manual limits.
 
-## Computer Modern follow-up (current font)
+## Computer Modern follow-up (historical)
 
 The selected `NewCMMath-Regular.otf` provides Computer Modern mathematical typography
 in a single OpenType MATH face supported by the existing engine, including italic
@@ -75,3 +75,13 @@ The official NewComputerModern package's License.txt explicitly places this math
 face under GUST, with its GPL exceptions confined to other, unbundled text faces.
 GUST/LPPL texts, package attribution and source checksum are included; see
 assets/fonts/README.md. No system font or online runtime resource is needed.
+
+## Latin Modern Math follow-up (current font)
+
+At the user's request, `latinmodern-math.otf` 1.959 replaces New Computer Modern
+Math for every preview and formula. It uses the same original-outline/MATH-table
+path and physical-resolution cache. Both older preset identifiers migrate to
+`latin-modern-math`, and unavailable presets resolve to Latin Modern Math.
+The unmodified font is bundled with GUST/LPPL licensing and upstream attribution;
+obsolete New Computer Modern assets are removed. See assets/fonts/README.md for
+provenance and checksum. PDF persistence remains outside scope.

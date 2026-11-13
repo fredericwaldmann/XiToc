@@ -178,8 +178,11 @@ impl Preferences {
         {
             return Err("Invalid drawing preferences.".into());
         }
-        if prefs.latex.preset == "stix-two-math" {
-            prefs.latex.preset = "computer-modern-math".into();
+        if matches!(
+            prefs.latex.preset.as_str(),
+            "stix-two-math" | "computer-modern-math"
+        ) {
+            prefs.latex.preset = "latin-modern-math".into();
         }
         prefs.latex.validate()?;
         Ok(prefs)

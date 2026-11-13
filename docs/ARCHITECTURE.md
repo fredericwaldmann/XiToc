@@ -1024,7 +1024,7 @@ both configuration and measured formula bounds atomically, including group bound
 Applied global changes preflight all open documents; each document can undo its
 own change without mutating application preferences or other tabs.
 
-`formula_render.rs` retains LaTeX-Rust OpenType MATH layout with the bundled Computer Modern face but uses original
+`formula_render.rs` retains LaTeX-Rust OpenType MATH layout with the bundled Latin Modern Math face but uses original
 SVG paths and resvg antialiasing instead of upstream egui meshes. Layout is cached
 by source/color/effective settings; physical-resolution textures are separately
 bucketed by DPI × zoom × object scale × quality. Movement only changes quad

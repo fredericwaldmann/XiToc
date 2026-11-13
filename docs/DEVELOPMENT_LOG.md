@@ -766,3 +766,11 @@ user's request. The font uses OpenType MATH through the existing renderer; sharp
 SVG/resolution caching, editable source, configuration and PDF boundaries stay
 unchanged. Settings show Computer Modern and migrate saved STIX preferences.
 Bundled official GUST/LPPL license texts, package attribution and font provenance.
+
+### Latin Modern Math font follow-up
+
+Replaced New Computer Modern with Latin Modern Math 1.959 at the user's request.
+Updated the renderer resource, Settings label/default/fallback and migration of
+both prior preset IDs. Reused the GUST/LPPL notices, added upstream attribution,
+and removed the superseded font/package resources. Source editing, configuration,
+resolution caching and PDF boundaries remain the same.

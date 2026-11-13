@@ -16,7 +16,7 @@ impl LatexConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LatexPreferences {
-    /// Unknown saved preset names resolve to the bundled Computer Modern preset.
+    /// Unknown saved preset names resolve to the bundled Latin Modern Math preset.
     pub preset: String,
     pub size: f64,
     pub color: [u8; 3],
@@ -26,7 +26,7 @@ pub struct LatexPreferences {
 impl Default for LatexPreferences {
     fn default() -> Self {
         Self {
-            preset: "computer-modern-math".into(),
+            preset: "latin-modern-math".into(),
             size: 24.,
             color: [32, 39, 49],
             high_quality: true,
@@ -330,18 +330,20 @@ mod tests {
         );
     }
     #[test]
-    fn computer_modern_is_default_and_saved_stix_settings_migrate() {
-        let mut previous = crate::settings::Preferences::default();
-        previous.latex.preset = "stix-two-math".into();
-        previous.latex.size = 32.;
-        previous.latex.color = [20, 40, 60];
-        previous.latex.config.preamble = r"\newcommand{\R}{\mathbb{R}}".into();
-        let restored =
-            crate::settings::Preferences::decode(&serde_json::to_string(&previous).unwrap())
-                .unwrap();
-        previous.latex.preset = "computer-modern-math".into();
-        assert_eq!(restored, previous);
-        assert_eq!(LatexPreferences::default().preset, "computer-modern-math");
+    fn latin_modern_math_is_default_and_previous_presets_migrate() {
+        for preset in ["stix-two-math", "computer-modern-math"] {
+            let mut previous = crate::settings::Preferences::default();
+            previous.latex.preset = preset.into();
+            previous.latex.size = 32.;
+            previous.latex.color = [20, 40, 60];
+            previous.latex.config.preamble = r"\newcommand{\R}{\mathbb{R}}".into();
+            let restored =
+                crate::settings::Preferences::decode(&serde_json::to_string(&previous).unwrap())
+                    .unwrap();
+            previous.latex.preset = "latin-modern-math".into();
+            assert_eq!(restored, previous);
+        }
+        assert_eq!(LatexPreferences::default().preset, "latin-modern-math");
     }
 
     #[test]

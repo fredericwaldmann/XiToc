@@ -979,7 +979,7 @@ remains M2 work; this milestone adds no saved formula payload.
 ### M1.13 typography/configuration enhancement
 
 `latex_config.rs` owns global defaults/document additions, bounded custom commands
-and math-only inheritance. `formula_render.rs` now emits Computer Modern SVG with ink/baseline
+and math-only inheritance. `formula_render.rs` now emits Latin Modern Math SVG with ink/baseline
 metrics and paints cached, antialiased resvg textures at physical pixel density;
 the old egui 0.36 conversion and duplicate dependency are removed. `canvas_formula.rs`
 keeps formula source editing and per-object layout/texture caches. Defaults size/color
@@ -994,7 +994,7 @@ memory-only protections. `pdf.rs` rejects nondefault LaTeX document configuratio
 no PDF schema/graphics persistence is implemented. Configuration documentation:
 [LATEX_CONFIGURATION.md](LATEX_CONFIGURATION.md).
 
-The Computer Modern font follow-up embeds `assets/fonts/NewCMMath-Regular.otf`
-through `MathFont::from_bytes`. Source, layout, object and texture interfaces stay
-the same. Old STIX preference identifiers migrate to `computer-modern-math`;
-unknown presets resolve to the same bundled Computer Modern face.
+The current font is `assets/fonts/latinmodern-math.otf` (Latin Modern Math),
+loaded through `MathFont::from_bytes`. Source, layout, object and texture interfaces
+stay the same. Old STIX and Computer Modern preference identifiers migrate to
+`latin-modern-math`; unknown presets resolve to the same bundled Latin Modern face.

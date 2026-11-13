@@ -1731,3 +1731,13 @@ denied-warning Clippy and wasm32 compilation passed. The explicitly run typograp
 review-sheet fixture was inspected with the Computer Modern face and retained as
 `docs/screenshots/latex-quality/typography.png`. Trunk packaging uses the same
 embedded font; no system font installation or note persistence is introduced.
+
+### Latin Modern Math font selection
+
+The renderer now uses bundled Latin Modern Math 1.959. The MATH-table/glyph fixture
+and all math examples run against that exact font. Migration covers both STIX and
+Computer Modern preset IDs without losing other settings. Full suite: 304 passed,
+12 intentionally ignored; formatting, denied-warning Clippy and wasm32 checks
+pass. The explicitly run typography review sheet was visually inspected and
+replaced with Latin Modern Math output. GUST/LPPL attribution remains bundled;
+obsolete New Computer Modern assets are removed. PDF persistence is unchanged.
