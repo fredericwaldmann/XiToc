@@ -1756,3 +1756,5 @@ Executed: cargo fmt --all -- --check; denied-warning all-target Clippy;
 cargo test --all-targets (307 passed, 12 intentionally ignored); native release;
 wasm32-unknown-unknown compile check. Manual steps are in LATEX_CONFIGURATION.md.
 No additional physical native/browser interaction smoke is claimed for this slice.
+Final Trunk release packaging also completed successfully. GitHub CI was pending
+at the time of the local verification report.
