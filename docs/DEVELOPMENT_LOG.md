@@ -774,3 +774,10 @@ Updated the renderer resource, Settings label/default/fallback and migration of
 both prior preset IDs. Reused the GUST/LPPL notices, added upstream attribution,
 and removed the superseded font/package resources. Source editing, configuration,
 resolution caching and PDF boundaries remain the same.
+
+
+M1.13 configuration indicator follow-up on open PR #47: added effective source
+labels, read-only configuration/macro viewer, explicit shadowing, validation
+errors, copy and existing settings navigation. Session configuration now
+refreshes from owning Drawing snapshots without replacing source or selection.
+Added source/override/error and live-session/popover regressions.

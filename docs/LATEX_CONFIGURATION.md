@@ -101,3 +101,24 @@ fail with errors. Validation uses a sample `x` and existing formula sources befo
 application; configuration requiring a particular structural body may fail the
 sample validation. The last valid preview remains visible while a formula draft
 is invalid; Finish is disabled until corrected.
+
+## Formula editor configuration viewer
+
+Click Default, Global, Document, Global + Document or Configuration Error below
+the formula heading. The label reflects nonempty configuration fields in the
+owning document's effective snapshots (including undo), rather than another tab
+or unapplied settings drafts. The scrollable viewer shows active raw fragments,
+math wrappers after removing definitions, and custom command signatures/bodies
+with Global/Document provenance and effective/shadowed status. Definitions follow
+the renderer's existing resolution order; invalid configurations show errors and
+no usable command list. Copy Effective Configuration includes fragments and status.
+Open Global LaTeX Settings and Open Document LaTeX Settings reuse the existing
+dialogs, retaining formula source and cursor selection. Applied configuration
+changes refresh the viewer and preview; inspection alone adds no undo entry.
+
+Manual verification: create a formula with default settings and open the indicator.
+Define a global macro, then add an explicit document override via the viewer's
+settings actions; confirm source/selection survive and both definitions show with
+correct status. Copy the configuration. Open another document and confirm its
+macro list excludes the first document's additions. Invalid settings drafts stay
+in their settings dialog until corrected; they never replace active configuration.

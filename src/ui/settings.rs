@@ -20,6 +20,10 @@ pub struct SettingsDialog {
     latex: super::latex_controls::GlobalLatexDraft,
 }
 impl SettingsDialog {
+    pub fn open_latex(&mut self) {
+        self.section = Section::Latex;
+        self.open = true;
+    }
     pub fn show(&mut self, ctx: &egui::Context, prefs: &mut Preferences, warning: Option<&str>) {
         if !self.open {
             return;

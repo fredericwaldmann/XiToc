@@ -12,11 +12,13 @@ pub(super) struct FormulaSession {
     preview: Option<RenderedFormula>,
     attempted: Option<(String, [u8; 4])>,
     error: Option<String>,
-    focus: bool,
+    pub(super) focus: bool,
     config: (
         crate::latex_config::LatexPreferences,
         crate::latex_config::LatexConfig,
     ),
+    view: Option<crate::latex_config::ConfigurationView>,
+    cursor: Option<egui::text::CCursorRange>,
     texture: crate::formula_render::FormulaTexture,
 }
 pub(super) struct FormulaCache {
@@ -59,12 +61,30 @@ fn make_session(
         error: None,
         focus: true,
         config: (global.clone(), doc.clone()),
+        view: None,
+        cursor: None,
         texture: Default::default(),
     };
     session.update_preview();
     session
 }
 impl FormulaSession {
+    fn refresh_config(
+        &mut self,
+        global: &crate::latex_config::LatexConfig,
+        doc: &crate::latex_config::LatexConfig,
+    ) {
+        if self.config.0.config != *global || self.config.1 != *doc {
+            self.config.0.config = global.clone();
+            self.config.1 = doc.clone();
+            self.attempted = None;
+            self.view = None;
+        }
+        if self.view.is_none() {
+            self.view = Some(crate::latex_config::inspect(global, doc));
+        }
+    }
+
     fn update_preview(&mut self) {
         if self.attempted.as_ref() == Some(&(self.source.clone(), self.color)) {
             return;
@@ -204,7 +224,14 @@ impl Canvas {
         let Some(mut session) = self.formula_session.take() else {
             return;
         };
+        session.refresh_config(&self.drawing.latex_global, &self.drawing.latex);
         session.update_preview();
+        if self.latex_dialog.open || self.formula_settings_suspended {
+            session.focus = true;
+            self.formula_session = Some(session);
+            return;
+        }
+        let popup_was_open = egui::Popup::is_any_open(ui.ctx());
         let mut commit = false;
         let mut cancel = false;
         egui::Modal::new(egui::Id::unique(("formula-editor", session.id))).show(ui.ctx(), |ui| {
@@ -214,11 +241,43 @@ impl Canvas {
             } else {
                 "New Formula"
             });
+            let view = session.view.as_ref().unwrap();
+            let label = if view.error.is_some() { egui::RichText::new(view.label).small().color(ui.visuals().error_fg_color) } else { egui::RichText::new(view.label).small() };
+            ui.menu_button(label, |ui| {
+                ui.set_max_width(440.0);
+                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    for (title, text) in [
+                        ("Active global preamble", &session.config.0.config.preamble),
+                        ("Active global postamble", &session.config.0.config.postamble),
+                        ("Active document preamble", &session.config.1.preamble),
+                        ("Active document postamble", &session.config.1.postamble),
+                        ("Effective preamble (definitions removed)", &view.preamble),
+                        ("Effective postamble (definitions removed)", &view.postamble),
+                    ] {
+                        ui.strong(title);
+                        ui.add(egui::Label::new(egui::RichText::new(if text.trim().is_empty() { "(empty)" } else { text }).monospace()).wrap());
+                    }
+                    ui.weak("Wrapper order: Global → Document → source → Document → Global. Macros resolve in that same order.");
+                    ui.strong("Available custom commands");
+                    if view.macros.is_empty() { ui.weak("None"); }
+                    for m in &view.macros {
+                        ui.label(format!("{}[{}] = {} · {} · {}", m.name, m.args, m.body, m.source, if m.shadowed { "shadowed" } else { "effective" }));
+                    }
+                    if let Some(error) = &view.error { ui.colored_label(ui.visuals().error_fg_color, error); ui.weak("Commands unavailable until configuration is valid. Check both settings sources below."); }
+                });
+                ui.separator();
+                if ui.button("Open Global LaTeX Settings").clicked() { self.open_global_latex = true; ui.close(); }
+                if ui.button("Open Document LaTeX Settings").clicked() { self.latex_dialog.open = true; ui.close(); }
+                if ui.button("Copy Effective Configuration").clicked() { ui.ctx().copy_text(view.copy_text(&session.config.0.config, &session.config.1)); }
+            });
             ui.label("LaTeX math source");
+            let source_id = egui::Id::unique(("formula-source", session.id));
+            if let Some(cursor) = session.cursor
+                && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), source_id) { state.cursor.set_char_range(Some(cursor)); state.store(ui.ctx(), source_id); }
             let editor = ui.add_sized(
                 [ui.available_width(), 116.0],
                 egui::TextEdit::multiline(&mut session.source)
-                    .id(egui::Id::unique(("formula-source", session.id)))
+                    .id(source_id)
                     .font(egui::TextStyle::Monospace)
                     .desired_rows(5)
                     .hint_text(r"\frac{-b \pm \sqrt{b^2-4ac}}{2a}"),
@@ -227,10 +286,11 @@ impl Canvas {
                 editor.request_focus();
                 session.focus = false;
             }
+            if editor.has_focus() { session.cursor = egui::TextEdit::load_state(ui.ctx(), source_id).and_then(|state| state.cursor.char_range()); }
             if editor.changed() {
                 session.update_preview();
             }
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if !popup_was_open && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 cancel = true;
             }
             if editor.has_focus()
@@ -421,4 +481,90 @@ impl Canvas {
 
 fn ui_error_color(_painter: &egui::Painter) -> egui::Color32 {
     egui::Color32::from_rgb(196, 64, 64)
+}
+
+#[cfg(test)]
+mod configuration_tests {
+    use super::*;
+    #[test]
+    fn opening_configuration_popover_does_not_edit_or_add_history() {
+        use crate::ui::settings::tests::{pointer, render};
+        let data = crate::document::DocumentData::blank(crate::document::DocumentKind::Whiteboard);
+        let mut canvas = Canvas::new(&data);
+        canvas.formula_session = Some(make_session(
+            Surface::Canvas,
+            [0., 0.],
+            None,
+            &Default::default(),
+            &Default::default(),
+        ));
+        canvas.formula_session.as_mut().unwrap().source = "x + y".into();
+        let revision = canvas.drawing.revision();
+        let ctx = egui::Context::default();
+        let mut frame = |events| render(&ctx, events, |ui| canvas.show_formula_editor(ui));
+        frame(vec![]);
+        let labels = frame(vec![]);
+        let pos = labels["Default"];
+        frame(pointer(pos, true));
+        frame(pointer(pos, false));
+        let labels = frame(vec![]);
+        assert!(
+            labels.contains_key("Open Global LaTeX Settings"),
+            "{labels:?}"
+        );
+        assert_eq!(canvas.formula_session.as_ref().unwrap().source, "x + y");
+        assert_eq!(canvas.drawing.revision(), revision);
+        assert!(canvas.drawing.undo().is_empty());
+        canvas.formula_settings_suspended = true;
+        render(&ctx, vec![], |ui| {
+            ui.disable();
+            canvas.begin_frame(ui);
+        });
+        assert_eq!(canvas.formula_session.as_ref().unwrap().source, "x + y");
+        canvas.formula_settings_suspended = false;
+        canvas.latex_dialog.open = true;
+        render(&ctx, vec![], |ui| canvas.show_formula_editor(ui));
+        assert_eq!(canvas.formula_session.as_ref().unwrap().source, "x + y");
+        assert_eq!(canvas.drawing.revision(), revision);
+    }
+    #[test]
+    fn live_config_preserves_source_cursor_and_unchanged_preview() {
+        let global = crate::latex_config::LatexPreferences::default();
+        let empty = crate::latex_config::LatexConfig::default();
+        let mut session = make_session(Surface::Canvas, [0., 0.], None, &global, &empty);
+        session.source = "x + y".into();
+        session.cursor = Some(egui::text::CCursorRange::two(
+            egui::text::CCursor::new(1),
+            egui::text::CCursor::new(4),
+        ));
+        session.update_preview();
+        let cursor = session.cursor;
+        let attempted = session.attempted.clone();
+        session.refresh_config(&global.config, &empty);
+        assert_eq!(session.attempted, attempted);
+        let doc = crate::latex_config::LatexConfig {
+            preamble: r"\newcommand{\R}{\mathbb{R}}".into(),
+            ..Default::default()
+        };
+        session.refresh_config(&global.config, &doc);
+        assert!(session.attempted.is_none());
+        session.update_preview();
+        assert!(session.error.is_none());
+        assert_eq!(session.view.as_ref().unwrap().label, "Document");
+        session.refresh_config(&global.config, &empty);
+        assert!(session.view.as_ref().unwrap().macros.is_empty());
+        assert_eq!(session.source, "x + y");
+        assert_eq!(session.cursor, cursor);
+        session.refresh_config(
+            &global.config,
+            &crate::latex_config::LatexConfig {
+                preamble: r"\unsupportedcommand".into(),
+                ..Default::default()
+            },
+        );
+        session.update_preview();
+        assert!(session.error.is_some());
+        assert!(session.preview.is_some());
+        assert_eq!(session.source, "x + y");
+    }
 }

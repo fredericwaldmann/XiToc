@@ -998,3 +998,11 @@ The current font is `assets/fonts/latinmodern-math.otf` (Latin Modern Math),
 loaded through `MathFont::from_bytes`. Source, layout, object and texture interfaces
 stay the same. Old STIX and Computer Modern preference identifiers migrate to
 `latin-modern-math`; unknown presets resolve to the same bundled Latin Modern face.
+
+
+`latex_config::inspect` reuses the configuration definition parser and
+validation to build a read-only configuration view. `canvas_formula.rs` caches
+this view per session configuration and refreshes from the owning Drawing
+global/document snapshots, preserving source/cursor and invalidating previews
+only on configuration changes. Settings navigation uses existing dialogs; no new
+canonical state or persistence format is introduced.

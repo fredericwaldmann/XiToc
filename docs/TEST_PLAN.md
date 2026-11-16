@@ -1741,3 +1741,18 @@ Computer Modern preset IDs without losing other settings. Full suite: 304 passed
 pass. The explicitly run typography review sheet was visually inspected and
 replaced with Latin Modern Math output. GUST/LPPL attribution remains bundled;
 obsolete New Computer Modern assets are removed. PDF persistence is unchanged.
+
+## M1.13 configuration indicator and effective macro viewer (#48)
+
+Automated coverage: Default/global-only/document-only/combined source labels,
+explicit overrides with effective/shadowed provenance, conflicting and unsupported
+macros, configuration refresh during editing, unchanged-preview reuse, independent
+configuration inspection, exact source/cursor retention, last-valid preview on
+error, and actual egui popover opening without document revision/history changes.
+The widget regression also covers retaining the draft while Global Settings
+suspends the canvas and while Document Settings is open.
+
+Executed: cargo fmt --all -- --check; denied-warning all-target Clippy;
+cargo test --all-targets (307 passed, 12 intentionally ignored); native release;
+wasm32-unknown-unknown compile check. Manual steps are in LATEX_CONFIGURATION.md.
+No additional physical native/browser interaction smoke is claimed for this slice.

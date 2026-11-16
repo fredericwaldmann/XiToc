@@ -275,6 +275,8 @@ const MESH_SEGMENTS: usize = 128;
 
 pub struct Canvas {
     pub latex: crate::latex_config::LatexPreferences,
+    pub open_global_latex: bool,
+    pub formula_settings_suspended: bool,
     pub latex_dialog: crate::ui::latex_controls::DocumentLatexDialog,
     pub snapping: crate::snapping::SnapSettings,
     snap_session: Option<crate::snapping::SnapSession>,
@@ -335,6 +337,8 @@ impl Canvas {
     pub fn new(data: &DocumentData) -> Self {
         Self {
             latex: Default::default(),
+            open_global_latex: false,
+            formula_settings_suspended: false,
             latex_dialog: Default::default(),
             drawing: Drawing::new(data),
             text_session: None,
@@ -526,7 +530,18 @@ impl Canvas {
         }
 
         if !ui.input(|i| i.focused) || !ui.is_enabled() {
+            let formula = if self.formula_settings_suspended {
+                self.formula_session.take()
+            } else {
+                None
+            };
             self.finish();
+            if self.formula_settings_suspended {
+                self.formula_session = formula;
+                if let Some(session) = &mut self.formula_session {
+                    session.focus = true;
+                }
+            }
         }
         if !ui.is_enabled() {
             return;

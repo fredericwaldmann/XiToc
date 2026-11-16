@@ -105,6 +105,13 @@ fn command(input: &str, at: &mut usize) -> String {
     input[start..*at].into()
 }
 fn definitions(input: &str, macros: &mut Macros) -> Result<String, String> {
+    definitions_tracked(input, macros, &mut Vec::new())
+}
+fn definitions_tracked(
+    input: &str,
+    macros: &mut Macros,
+    records: &mut Vec<(String, usize, String)>,
+) -> Result<String, String> {
     if input.len() > 4096 || input.contains('\0') {
         return Err("Each preamble/postamble is limited to 4096 bytes without NUL.".into());
     }
@@ -175,6 +182,7 @@ fn definitions(input: &str, macros: &mut Macros) -> Result<String, String> {
                         return Err("Macro body contains an invalid argument placeholder.".into());
                     }
                 }
+                records.push((key.clone(), args, body.clone()));
                 macros.insert(key, Macro { args, body });
                 if macros.len() > 64 {
                     return Err("At most 64 custom commands are supported.".into());
@@ -261,6 +269,103 @@ pub fn assemble(global: &LatexConfig, doc: &LatexConfig, source: &str) -> Result
 }
 pub fn validate(global: &LatexConfig, doc: &LatexConfig) -> Result<(), String> {
     crate::formula_render::render(&assemble(global, doc, "x")?, [0, 0, 0, 255]).map(|_| ())
+}
+
+/// Read-only inspection uses the renderer's parser and validation, including override order.
+pub struct ConfigurationView {
+    pub label: &'static str,
+    pub preamble: String,
+    pub postamble: String,
+    pub macros: Vec<MacroView>,
+    pub error: Option<String>,
+}
+pub struct MacroView {
+    pub name: String,
+    pub args: usize,
+    pub body: String,
+    pub source: &'static str,
+    pub shadowed: bool,
+}
+pub fn inspect(global: &LatexConfig, doc: &LatexConfig) -> ConfigurationView {
+    let mut view = ConfigurationView {
+        label: match (!global.is_default(), !doc.is_default()) {
+            (false, false) => "Default",
+            (true, false) => "Global",
+            (false, true) => "Document",
+            (true, true) => "Global + Document",
+        },
+        preamble: String::new(),
+        postamble: String::new(),
+        macros: Vec::new(),
+        error: None,
+    };
+    let result = (|| -> Result<(), String> {
+        let mut macros = Macros::new();
+        let mut fragments = Vec::new();
+        for (source, field, text) in [
+            ("Global", "preamble", &global.preamble),
+            ("Document", "preamble", &doc.preamble),
+            ("Document", "postamble", &doc.postamble),
+            ("Global", "postamble", &global.postamble),
+        ] {
+            let mut records = Vec::new();
+            let fragment = definitions_tracked(text, &mut macros, &mut records)
+                .map_err(|e| format!("{source} {field}: {e}"))?;
+            fragments.push(fragment);
+            for (name, args, body) in records {
+                for previous in &mut view.macros {
+                    if previous.name == name {
+                        previous.shadowed = true;
+                    }
+                }
+                view.macros.push(MacroView {
+                    name,
+                    args,
+                    body,
+                    source,
+                    shadowed: false,
+                });
+            }
+        }
+        view.preamble = format!("{}\n{}", fragments[0], fragments[1]);
+        view.postamble = format!("{}\n{}", fragments[2], fragments[3]);
+        validate(global, doc)
+    })();
+    if let Err(error) = result {
+        view.label = "Configuration Error";
+        view.error = Some(error);
+        // No partially parsed or unsupported definition is advertised as available.
+        view.macros.clear();
+    }
+    view
+}
+impl ConfigurationView {
+    pub fn copy_text(&self, global: &LatexConfig, doc: &LatexConfig) -> String {
+        let mut text = format!(
+            "{}\nGlobal preamble:\n{}\nGlobal postamble:\n{}\nDocument preamble:\n{}\nDocument postamble:\n{}\nEffective preamble (definitions removed):\n{}\nEffective postamble (definitions removed):\n{}\n",
+            self.label,
+            global.preamble,
+            global.postamble,
+            doc.preamble,
+            doc.postamble,
+            self.preamble,
+            self.postamble
+        );
+        for m in &self.macros {
+            text.push_str(&format!(
+                "{}[{}] = {} · {} · {}\n",
+                m.name,
+                m.args,
+                m.body,
+                m.source,
+                if m.shadowed { "shadowed" } else { "effective" }
+            ));
+        }
+        if let Some(error) = &self.error {
+            text.push_str(error);
+        }
+        text
+    }
 }
 
 #[cfg(test)]
@@ -427,5 +532,53 @@ mod tests {
                 data
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod inspection_tests {
+    use super::*;
+    #[test]
+    fn sources_overrides_and_invalid_commands() {
+        let empty = LatexConfig::default();
+        let global = LatexConfig {
+            preamble: r"\newcommand{\vect}[1]{\mathbf{#1}}".into(),
+            ..Default::default()
+        };
+        let doc = LatexConfig {
+            preamble: r"\newcommand{\R}{\mathbb{R}}".into(),
+            ..Default::default()
+        };
+        assert_eq!(inspect(&empty, &empty).label, "Default");
+        assert_eq!(inspect(&global, &empty).label, "Global");
+        assert_eq!(inspect(&empty, &doc).label, "Document");
+        assert_eq!(inspect(&global, &doc).label, "Global + Document");
+        let override_doc = LatexConfig {
+            preamble: r"\renewcommand{\vect}[1]{\mathit{#1}}".into(),
+            ..Default::default()
+        };
+        let view = inspect(&global, &override_doc);
+        assert!(view.error.is_none());
+        assert_eq!(view.macros.len(), 2);
+        assert!(view.macros[0].shadowed);
+        assert_eq!(view.macros[0].source, "Global");
+        assert!(!view.macros[1].shadowed);
+        assert_eq!(view.macros[1].source, "Document");
+        for bad in [
+            r"\newcommand{\vect}{x}",
+            r"\newcommand{\bad}{\unsupportedcommand}",
+        ] {
+            let view = inspect(
+                &global,
+                &LatexConfig {
+                    preamble: bad.into(),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(view.label, "Configuration Error");
+            assert!(view.error.is_some());
+            assert!(view.macros.is_empty());
+        }
+        assert_eq!(inspect(&empty, &empty).macros.len(), 0);
     }
 }

@@ -687,3 +687,12 @@ Global configuration: Enabled, preamble/postamble code fields, Validate, Apply a
 Cancel/Escape. Applying updates one document and one undo entry. The UI identifies
 the math-only supported subset and memory-only document lifecycle. No bottom tools,
 placeholder fonts, package loader or PDF-save controls are introduced.
+
+
+The formula editor heading has a compact configuration menu: Default, Global,
+Document, Global + Document, or Configuration Error. Its scrollable read-only
+viewer shows active fragments, effective math wrappers, parsed custom commands
+with source/effective/shadowed status and validation errors. Navigation opens
+existing Global or Document LaTeX settings while retaining the formula draft and
+cursor. Copy Effective Configuration copies fragments and macro status. No
+history entry is created by inspection.
