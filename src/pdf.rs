@@ -9,6 +9,9 @@ const PAYLOAD_NAME: &[u8] = b"XiToc/document.json";
 
 pub fn encode(data: &DocumentData) -> Result<Vec<u8>, String> {
     data.validate()?;
+    if !data.latex.is_default() {
+        return Err("Saving document LaTeX configuration requires M2 PDF persistence.".into());
+    }
     let payload = serde_json::to_vec(data).map_err(|e| e.to_string())?;
     let mut pdf = Pdf::new();
     pdf.set_version(1, 7);

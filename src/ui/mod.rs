@@ -4,6 +4,7 @@ pub mod dialog;
 pub mod drawing_controls;
 pub mod explorer;
 pub mod icons;
+pub mod latex_controls;
 pub mod selection_controls;
 pub mod settings;
 pub mod shape_controls;
