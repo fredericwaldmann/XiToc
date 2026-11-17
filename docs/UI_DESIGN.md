@@ -230,8 +230,11 @@ text is not treated as a native note. No unfinished tools appear. Shapes formatt
 
 ### M1.4 rotation, Cut and keyboard movement
 
-A round rotation handle sits 24 screen points from the top of the selection's
-oriented frame. Its stem and ring follow the object or group's live rotation.
+Selection outlines follow the local axes of the selected object, group or
+temporary selection. Box corners resize both local axes. Box side grips
+resize one axis and keep the opposite side fixed. Shift constrains proportions.
+A round rotation handle sits 24 screen points along the outward normal of
+the oriented frame's top edge. Its stem and ring follow the object or group's live rotation.
 After the drag threshold, the normal outline and resize grips are hidden until
 release. Hold Shift to snap to 15-degree steps around the same pivot. Escape
 cancels rotation and restores the original selection. Page rotations retain the

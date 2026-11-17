@@ -40,24 +40,15 @@ pub enum Membership {
 
 /// A frame aligned with the selected object's local axes or the collective reference.
 #[derive(Clone, Copy)]
-pub struct RotationFrame {
+pub struct SelectionFrame {
     axes: Placement,
     bounds: ObjectBounds,
 }
-impl RotationFrame {
+impl SelectionFrame {
     pub fn for_object(object: &dyn CanvasObject) -> Option<Self> {
-        let placement = object.placement();
-        let local = object.local_bounds()?;
-        let center = placement.apply(local.center());
         Some(Self {
-            axes: Placement {
-                position: center,
-                rotation: placement.rotation,
-                ..Default::default()
-            },
-            bounds: ObjectBounds::from_points(local.corners().map(|point| {
-                std::array::from_fn(|i| (point[i] - local.center()[i]) * placement.scale)
-            }))?,
+            axes: object.placement(),
+            bounds: object.editing_bounds()?,
         })
     }
 
@@ -67,13 +58,19 @@ impl RotationFrame {
             .iter()
             .filter(|o| selection.ids.contains(&o.id()))
             .min_by_key(|o| matches!(o, ObjectSnapshot::Connector(_)))?;
-        let angle = match reference {
-            ObjectSnapshot::Group(group) => group.rotation,
+        let basis = match reference {
+            ObjectSnapshot::Group(group) => group.frame_basis(),
             ObjectSnapshot::Connector(c) => {
                 let [a, b] = c.ends().map(|end| end.position());
-                (b[1] - a[1]).atan2(b[0] - a[0])
+                Placement {
+                    rotation: (b[1] - a[1]).atan2(b[0] - a[0]),
+                    ..Default::default()
+                }
             }
-            _ => reference.as_object().placement().rotation,
+            _ => Placement {
+                rotation: reference.as_object().placement().rotation,
+                ..Default::default()
+            },
         };
         let reference = reference.as_object();
         if selection.ids.len() == 1
@@ -85,9 +82,23 @@ impl RotationFrame {
             return Self::for_object(reference);
         }
         let axes = Placement {
-            position: selection.bounds?.center(),
-            rotation: angle,
-            ..Default::default()
+            position: drawing
+                .items()
+                .iter()
+                .find_map(|snapshot| {
+                    if !selection.expanded.contains(&snapshot.id())
+                        || matches!(
+                            snapshot,
+                            ObjectSnapshot::Group(_) | ObjectSnapshot::Connector(_)
+                        )
+                    {
+                        return None;
+                    }
+                    let object = snapshot.as_object();
+                    Some(object.placement().apply(object.editing_bounds()?.center()))
+                })
+                .unwrap_or(selection.bounds?.center()),
+            ..basis
         };
         let mut bounds = None::<ObjectBounds>;
         for snapshot in drawing
@@ -104,7 +115,7 @@ impl RotationFrame {
                 continue;
             }
             let object = snapshot.as_object();
-            if let Some(local) = object.local_bounds() {
+            if let Some(local) = object.editing_bounds() {
                 let projected = ObjectBounds::from_points(
                     local
                         .corners()
@@ -138,12 +149,39 @@ impl RotationFrame {
         self.axes.rotation
     }
 
+    pub fn corners(self) -> [Point; 4] {
+        self.bounds.corners().map(|point| self.axes.apply(point))
+    }
+
+    pub fn transformed(self, delta: Placement) -> Self {
+        if delta.is_identity() {
+            return self;
+        }
+        Self {
+            axes: self.axes.then(delta, self.bounds.center()),
+            ..self
+        }
+    }
+
+    pub fn is_world_aligned(self) -> bool {
+        self.axes.rotation == 0.0 && self.axes.reflected == [false; 2]
+    }
+
+    pub fn with_minimum_extent(mut self, minimum_world: f64) -> Self {
+        let minimum = minimum_world / self.axes.scale;
+        for (axis, center) in self.bounds.center().into_iter().enumerate() {
+            if self.bounds.max[axis] - self.bounds.min[axis] < minimum {
+                self.bounds.min[axis] = center - minimum * 0.5;
+                self.bounds.max[axis] = center + minimum * 0.5;
+            }
+        }
+        self
+    }
+
     pub fn grip(self, offset: f64) -> (Point, Point) {
-        let top = [self.bounds.center()[0], self.bounds.min[1]];
-        (
-            self.axes.apply(top),
-            self.axes.apply([top[0], top[1] - offset]),
-        )
+        let top = self.bounds.edge_midpoints()[0];
+        let outer = [top[0], top[1] - offset / self.axes.scale];
+        (self.axes.apply(top), self.axes.apply(outer))
     }
 }
 
@@ -153,8 +191,7 @@ pub struct Selection {
     pub surface: Surface,
     pub bounds: Option<ObjectBounds>,
     pub geometry: Option<ObjectBounds>,
-    pub rotation: Option<RotationFrame>,
-    pub objects: Vec<(ObjectId, ObjectBounds)>,
+    pub frame: Option<SelectionFrame>,
     revision: Option<u64>,
 }
 impl Selection {
@@ -165,8 +202,7 @@ impl Selection {
             surface,
             bounds: None,
             geometry: None,
-            rotation: None,
-            objects: Vec::new(),
+            frame: None,
             revision: None,
         }
     }
@@ -181,8 +217,7 @@ impl Selection {
         self.expanded.clear();
         self.bounds = None;
         self.geometry = None;
-        self.rotation = None;
-        self.objects.clear();
+        self.frame = None;
         self.revision = None;
     }
     pub fn change(
@@ -214,8 +249,7 @@ impl Selection {
         self.revision = Some(drawing.revision());
         self.bounds = None;
         self.geometry = None;
-        self.rotation = None;
-        self.objects.clear();
+        self.frame = None;
         self.expanded.clear();
         if self.ids.is_empty() {
             return;
@@ -229,7 +263,6 @@ impl Selection {
             let id = object.object_id();
             live.insert(id);
             if let Some(b) = object.world_bounds() {
-                self.objects.push((id, b));
                 self.bounds = Some(self.bounds.map_or(b, |old| old.union(b)));
             }
             if let Some(b) = object.geometry_bounds() {
@@ -238,7 +271,7 @@ impl Selection {
         }
         self.ids = live;
         self.expanded = drawing.expanded(&self.ids);
-        self.rotation = RotationFrame::for_selection(drawing, self);
+        self.frame = SelectionFrame::for_selection(drawing, self);
     }
 }
 

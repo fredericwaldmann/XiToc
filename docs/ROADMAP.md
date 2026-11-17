@@ -324,6 +324,6 @@ round trips, cropping and masks remain future work; no image persistence is clai
 
 ## Shared rotation interaction (#51)
 
-All rotatable selections use one live ring, hide resize overlays while rotating,
+All rotatable selections use oriented editing frames and one live ring, hide resize overlays while rotating,
 and support one-step orientation reset by double-click. Group resets retain
 descendant-local orientation and magnetic relationships.

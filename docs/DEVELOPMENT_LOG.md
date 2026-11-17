@@ -813,3 +813,11 @@ connectors and the visible ring. Selection outlines and resize grips return
 when the gesture ends. Double-click resets the reference angle atomically.
 Groups retain a journaled angle so their inverse rotation preserves relative
 child placements and nested hierarchy. Previous group snapshots default to zero.
+
+### Oriented selection frame follow-up
+
+Replaced world-aligned selection overlays with the shared oriented frame.
+Group frames derive from child-local rectangles projected into the group's
+basis. Rotation rings use the top edge's outward normal at a fixed screen
+offset. Box side grips edit local dimensions and collective corners resize
+around the opposite oriented corner.

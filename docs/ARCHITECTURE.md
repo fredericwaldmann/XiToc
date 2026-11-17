@@ -482,17 +482,28 @@ scales by the same positive scalar as the centerline; raw pressure/style/smoothi
 remain unchanged. Nonuniform resize belongs to future content types whose geometry
 can define that policy (for example boxes), not an implicit elliptical ink nib.
 
-Rotation uses an oriented frame and fixed document-space pivot. A singleton
-uses its local bounds and placement. A collective frame projects descendant
-bounds into the reference orientation and excludes reroutable wires when there
-are other objects. A connector-only frame uses endpoints. The controller
-captures the frame, original snapshots, view, revision and initial pointer
-angle. The unwrapped difference maps original geometry to a live preview. Shift
-snaps the difference in 15-degree steps. Page rotations retain the last valid
-conservative preview. Escape discards the preview and restores the selection.
-The object renderer, connector resolver and rotation grip all consume the same
-delta. The box and resize grips stay hidden while rotation is active. Ink reuses
-tessellated mesh vertices and preserves the raw pressure samples.
+The interactive selection frame retains a local editing rectangle and a
+local-to-world placement. The viewport maps its transformed corners into
+screen space. World AABBs continue to support culling, indexing, alignment,
+and Page Note constraints. Box shapes use their intrinsic dimensions and
+local corner and edge grips. Images keep their independent width and height.
+Irregular strokes and paths use their local geometry bounds.
+
+A group frame projects each descendant's local editing corners through its
+baked world placement and back into the selected group's stored rotation and reflection basis.
+Nested children contribute their geometry once. Reroutable connectors do not
+extend a frame with other content. Connector-only selections use endpoint
+extents. An ungrouped selection uses the bottommost selected root with placement
+as its reference orientation. The frame is derived on revision or membership
+changes and captured for the duration of a gesture.
+
+The frame's center is the pivot. Its ring extends 24 screen points from the
+transformed top midpoint along its outward normal. Rotation, drawing and
+connector previews share the captured world-space delta. Only the stem and
+ring remain visible while rotating. After release, the oriented outline and
+grips return. Collective corner resize follows the original frame diagonal
+about the opposite corner. Shift snaps rotation in 15-degree steps. Page Note
+constraints retain the last valid preview. Escape discards the gesture.
 
 Double-click resets orientation through the same atomic Drawing transform.
 A singleton resets around its visual center. A mixed selection uses the

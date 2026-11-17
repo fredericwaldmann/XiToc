@@ -734,7 +734,7 @@ fn drag_rotation(
     };
     let initial = frame_shapes(ctx, c, s, view, vec![], 0., true);
     assert!(has_box(&initial));
-    let pivot = c.selection.rotation.unwrap().center();
+    let pivot = c.selection.frame.unwrap().center();
     let grip = c.rotation_point(view.scale).unwrap();
     let target = Placement {
         origin: pivot,
@@ -774,7 +774,7 @@ fn drag_rotation(
     );
     assert!(has_box(&released));
     near(actual, c.rotation_point(view.scale).unwrap());
-    near(pivot, c.selection.rotation.unwrap().center());
+    near(pivot, c.selection.frame.unwrap().center());
     delta
 }
 
@@ -842,7 +842,7 @@ fn shared_rotation_ring_and_reset_cover_all_object_kinds_at_every_zoom() {
                     egui::Context::default()
                 };
                 c.selection.change([id], Membership::Replace, &c.drawing);
-                let frame_start = c.selection.rotation.unwrap();
+                let frame_start = c.selection.frame.unwrap();
                 let view = Transform {
                     origin: [370., 320.],
                     center: frame_start.center(),
@@ -882,7 +882,7 @@ fn shared_rotation_ring_and_reset_cover_all_object_kinds_at_every_zoom() {
                 let reset = c.drawing.snapshot(id).unwrap().clone();
                 assert_eq!(reset.as_object().placement().rotation, 0.);
                 assert_eq!(c.drawing.revision(), revision + 1);
-                near(frame_start.center(), c.selection.rotation.unwrap().center());
+                near(frame_start.center(), c.selection.frame.unwrap().center());
                 if let (ObjectSnapshot::Text(a), ObjectSnapshot::Text(b)) = (&original, &reset) {
                     assert!(Arc::ptr_eq(&a.content, &b.content));
                 }
@@ -964,7 +964,7 @@ fn nested_group_rotation_reset_keeps_local_angles_and_magnetic_routes() {
         c.selection.change([outer], Membership::Replace, &c.drawing);
         let view = Transform {
             origin: [365., 300.],
-            center: c.selection.rotation.unwrap().center(),
+            center: c.selection.frame.unwrap().center(),
             scale: 2.,
         };
         let original = c.drawing.items().to_vec();
@@ -1037,7 +1037,7 @@ fn mixed_lasso_rotation_reset_uses_one_reference_and_keeps_relative_ink() {
         .change([first, second], Membership::Replace, &c.drawing);
     let view = Transform {
         origin: [360., 350.],
-        center: c.selection.rotation.unwrap().center(),
+        center: c.selection.frame.unwrap().center(),
         scale: 4.,
     };
     let original = c.drawing.strokes().to_vec();
@@ -1056,4 +1056,259 @@ fn mixed_lasso_rotation_reset_uses_one_reference_and_keeps_relative_ink() {
     assert_eq!(c.drawing.strokes(), rotated);
     c.redo();
     assert_eq!(c.drawing.strokes(), reset);
+}
+
+#[test]
+fn rotated_rectangle_paints_local_frame_and_resizes_from_its_right_edge() {
+    use super::tests::frame_shapes;
+    use crate::shape::{Shape, ShapeKind};
+    for scale in [0.5, 1., 2., 4.] {
+        let (mut c, surface) = setup(DocumentKind::Whiteboard);
+        c.select(Tool::Select);
+        c.snapping.grid = false;
+        let mut rectangle = Shape::create(
+            c.drawing.owner(),
+            surface,
+            ShapeKind::Rectangle,
+            [50., 80.],
+            [150., 120.],
+            false,
+        )
+        .unwrap();
+        rectangle.placement.origin = [50., 20.];
+        rectangle.placement.position = [100., 100.];
+        rectangle.placement.rotation = std::f64::consts::FRAC_PI_4;
+        let id = rectangle.id;
+        assert!(c.drawing.add_shape(rectangle.clone()));
+        c.selection.change([id], Membership::Replace, &c.drawing);
+        let ctx = egui::Context::default();
+        let view = Transform {
+            origin: [370., 270.],
+            center: [103., 97.],
+            scale,
+        };
+        let expected = rectangle.box_corners().unwrap();
+        let frame_before = c.editing_frame(scale).unwrap();
+        assert_eq!(frame_before.corners(), expected);
+        assert_ne!(
+            frame_before.corners(),
+            c.selection.bounds.unwrap().corners()
+        );
+        for (a, b, length) in [
+            (expected[0], expected[1], 100.),
+            (expected[1], expected[2], 40.),
+        ] {
+            assert!(((a[0] - b[0]).hypot(a[1] - b[1]) - length).abs() < 1e-8);
+        }
+        let (stem, ring) = frame_before.grip(f64::from(style::ROTATION_OFFSET) / scale);
+        near(stem, rectangle.box_edges().unwrap()[0]);
+        assert!(((stem[0] - ring[0]).hypot(stem[1] - ring[1]) * scale - 24.).abs() < 1e-9);
+        let outline_matches = |shapes: &[egui::epaint::ClippedShape], corners: [Point; 4]| {
+            shapes.iter().any(|shape| {
+                matches!(&shape.shape, egui::Shape::Path(path)
+                if path.closed && path.points.len() == 4
+                && path.points.iter().zip(corners).all(|(actual, point)| {
+                    let expected = screen(view, point);
+                    actual.distance(egui::pos2(expected[0] as f32, expected[1] as f32)) < 0.01
+                }))
+            })
+        };
+        let initial = frame_shapes(&ctx, &mut c, surface, view, vec![], 0., true);
+        assert!(outline_matches(&initial, expected));
+        let edges = rectangle.box_edges().unwrap();
+        let start = edges[1];
+        let end = rectangle.placement.apply([135., 30.]);
+        let held = frame_shapes(
+            &ctx,
+            &mut c,
+            surface,
+            view,
+            vec![
+                pointer(screen(view, start), true, egui::Modifiers::NONE),
+                moved(view, end),
+            ],
+            1.,
+            true,
+        );
+        let preview = c.shape_edit_preview().expect("right edge owns resize");
+        near(edges[3], preview.box_edges().unwrap()[3]);
+        let local = preview.editing_bounds().unwrap();
+        near(local.max, [135., 40.]);
+        let preview_corners = preview.box_corners().unwrap();
+        assert!(outline_matches(&held, preview_corners));
+        let released = frame_shapes(
+            &ctx,
+            &mut c,
+            surface,
+            view,
+            vec![pointer(screen(view, end), false, egui::Modifiers::NONE)],
+            1.1,
+            true,
+        );
+        assert!(outline_matches(&released, preview_corners));
+        c.undo();
+        assert_eq!(c.selection.frame.unwrap().corners(), expected);
+        c.redo();
+        assert!(
+            c.selection
+                .frame
+                .unwrap()
+                .corners()
+                .into_iter()
+                .zip(preview_corners)
+                .all(|(a, b)| (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-6)
+        );
+    }
+}
+
+#[test]
+fn mixed_child_group_frame_keeps_its_dimensions_through_a_full_turn() {
+    use crate::{
+        image_object::ImageObject,
+        shape::{Shape, ShapeKind},
+    };
+    let (mut c, surface) = setup(DocumentKind::Whiteboard);
+    let owner = c.drawing.owner();
+    let mut ids = Vec::new();
+    for (x, angle) in [(125., 0.), (265., std::f64::consts::PI / 6.)] {
+        let mut shape = Shape::create(
+            owner,
+            surface,
+            ShapeKind::Rectangle,
+            [x, 195.],
+            [x + 85., 240.],
+            false,
+        )
+        .unwrap();
+        shape.placement.rotation = angle;
+        ids.push(shape.id);
+        assert!(c.drawing.add_shape(shape));
+    }
+    let mut image = ImageObject::new(
+        owner,
+        surface,
+        [335., 300.],
+        crate::image_object::test_support::asset(),
+    );
+    image.dimensions = [115., 38.];
+    image.placement.rotation = -std::f64::consts::PI / 9.;
+    image.placement.reflected = [true, false];
+    let image_id = image.id;
+    assert!(c.drawing.insert_snapshots(vec![image.into()]));
+    let nested = c
+        .drawing
+        .group_selection(&HashSet::from([ids[1], image_id]))
+        .unwrap();
+    let group = c
+        .drawing
+        .group_selection(&HashSet::from([ids[0], nested]))
+        .unwrap();
+    c.selection.change([group], Membership::Replace, &c.drawing);
+    let initial = c.selection.frame.unwrap();
+    let pivot = initial.center();
+    let mut previous = 0.;
+    for angle in [45_f64, 90., 180., 270., 360.] {
+        let angle = angle.to_radians();
+        let rotation = |rotation| Placement {
+            origin: pivot,
+            position: pivot,
+            rotation,
+            ..Default::default()
+        };
+        assert!(
+            c.drawing
+                .transform_objects(&HashSet::from([group]), rotation(angle - previous))
+        );
+        previous = angle;
+        c.selection.refresh(&c.drawing);
+        let actual = c.selection.frame.unwrap();
+        for (a, b) in actual
+            .corners()
+            .into_iter()
+            .zip(initial.transformed(rotation(angle)).corners())
+        {
+            near(a, b);
+        }
+        near(actual.center(), pivot);
+        let (stem, handle) = actual.grip(12.);
+        let expected = initial.transformed(rotation(angle)).grip(12.);
+        near(stem, expected.0);
+        near(handle, expected.1);
+    }
+    assert_eq!(c.drawing.parent(nested), Some(group));
+    c.undo();
+    c.redo();
+    for (a, b) in c
+        .selection
+        .frame
+        .unwrap()
+        .corners()
+        .into_iter()
+        .zip(initial.corners())
+    {
+        near(a, b);
+    }
+    let reflection = Placement {
+        origin: pivot,
+        position: pivot,
+        reflected: [false, true],
+        ..Default::default()
+    };
+    let before_reflection = c.selection.frame.unwrap();
+    assert!(
+        c.drawing
+            .transform_objects(&HashSet::from([group]), reflection)
+    );
+    c.selection.refresh(&c.drawing);
+    let reflected = c.selection.frame.unwrap();
+    near(
+        reflected.grip(24.).1,
+        before_reflection.transformed(reflection).grip(24.).1,
+    );
+    for (actual, expected) in reflected
+        .corners()
+        .into_iter()
+        .zip(before_reflection.transformed(reflection).corners())
+    {
+        near(actual, expected);
+    }
+    c.select(Tool::Select);
+    c.snapping.grid = false;
+    let ctx = egui::Context::default();
+    let view = Transform {
+        center: pivot,
+        origin: [375., 300.],
+        scale: 1.5,
+    };
+    frame(&ctx, &mut c, surface, view, vec![], 0., true);
+    let [grip, _, anchor, _] = reflected.corners();
+    let target = std::array::from_fn(|i| anchor[i] + 1.15 * (grip[i] - anchor[i]));
+    frame(
+        &ctx,
+        &mut c,
+        surface,
+        view,
+        vec![
+            pointer(screen(view, grip), true, egui::Modifiers::NONE),
+            moved(view, target),
+        ],
+        1.,
+        true,
+    );
+    let resize = c.selection_preview(surface).unwrap();
+    assert!((resize.scale - 1.15).abs() < 1e-5);
+    near(resize.origin, anchor);
+    let held = c.editing_frame(view.scale).unwrap().corners();
+    frame(
+        &ctx,
+        &mut c,
+        surface,
+        view,
+        vec![pointer(screen(view, target), false, egui::Modifiers::NONE)],
+        1.1,
+        true,
+    );
+    for (a, b) in c.selection.frame.unwrap().corners().into_iter().zip(held) {
+        near(a, b);
+    }
 }

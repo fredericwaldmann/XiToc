@@ -34,7 +34,7 @@ fn body_drag_does_not_activate_hidden_axis_aligned_resize_handles() {
     c.select(Tool::Select);
     c.selection.change([id], Membership::Replace, &c.drawing);
     let bounds = c.selection.bounds.unwrap();
-    let start = bounds.min.map(|v| v + 3.);
+    let start = bounds.min.map(|v| v + 7.);
     assert!(c.drawing.object(id).unwrap().hit_test(start, 0.));
     assert!(
         c.shape_handle(start, 1.).is_none(),

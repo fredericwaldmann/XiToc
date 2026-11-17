@@ -767,20 +767,64 @@ impl Shape {
             )
         })
     }
-    pub fn box_corners(&self) -> Option<[Point; 4]> {
-        if let ShapeGeometry::Box { size, .. } = self.geometry {
-            Some(
-                ObjectBounds {
-                    min: [0.; 2],
-                    max: size,
-                }
-                .corners()
-                .map(|p| self.placement.apply(p)),
-            )
-        } else {
-            None
-        }
+    fn box_bounds(&self) -> Option<ObjectBounds> {
+        let ShapeGeometry::Box { size, .. } = self.geometry else {
+            return None;
+        };
+        Some(ObjectBounds {
+            min: [0.; 2],
+            max: size,
+        })
     }
+
+    pub fn box_corners(&self) -> Option<[Point; 4]> {
+        Some(
+            self.box_bounds()?
+                .corners()
+                .map(|point| self.placement.apply(point)),
+        )
+    }
+
+    pub fn box_edges(&self) -> Option<[Point; 4]> {
+        Some(
+            self.box_bounds()?
+                .edge_midpoints()
+                .map(|point| self.placement.apply(point)),
+        )
+    }
+
+    pub fn with_edge(&self, index: usize, point: Point, constrain: bool) -> Option<Self> {
+        let ShapeGeometry::Box {
+            kind,
+            size,
+            corner_radius,
+        } = self.geometry
+        else {
+            return None;
+        };
+        let axis = usize::from(index.is_multiple_of(2));
+        let cross = 1 - axis;
+        let opposite = self.box_bounds()?.edge_midpoints()[(index + 2) % 4];
+        let target = self.placement.inverse(point);
+        let mut min = [0.0; 2];
+        let mut resized = size;
+        min[axis] = target[axis].min(opposite[axis]);
+        resized[axis] = (target[axis] - opposite[axis]).abs();
+        if constrain || kind == ShapeKind::Circle {
+            resized[cross] *= resized[axis] / size[axis];
+            min[cross] = (size[cross] - resized[cross]) * 0.5;
+        }
+        let mut out = self.clone();
+        out.geometry = ShapeGeometry::Box {
+            kind,
+            size: resized,
+            corner_radius,
+        };
+        out.placement.origin = [0.; 2];
+        out.placement.position = self.placement.apply(min);
+        out.valid().then_some(out)
+    }
+
     pub fn with_corner(&self, index: usize, point: Point, constrain: bool) -> Option<Self> {
         let ShapeGeometry::Box {
             kind,
@@ -891,6 +935,9 @@ impl CanvasObject for Shape {
                 .geometry_bounds()
                 .expand(self.style.envelope_width() * 0.5),
         )
+    }
+    fn editing_bounds(&self) -> Option<ObjectBounds> {
+        self.box_bounds().or_else(|| self.local_bounds())
     }
     fn world_bounds(&self) -> Option<ObjectBounds> {
         Some(

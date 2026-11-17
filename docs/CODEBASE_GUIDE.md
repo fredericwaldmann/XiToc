@@ -425,15 +425,15 @@ transform so the original overlay returns. Focus loss or view changes also
 cancel previews while retaining membership. Canvas Escape defers to text input
 and open popovers.
 
-Selection caches an oriented rotation frame from local bounds. A gesture
-captures that frame, pivot, pointer angle, view, revision and selected snapshots
-in a DragSession. The controller counts turns across the angle seam and applies
-the current displacement to the captured sources. Shift snaps to 15-degree
-steps, including modifier changes while stationary. The frame's stem and
-screen-sized grip follow the same preview delta as the objects. During rotation
-only that stem and grip are painted. Releasing restores the outline and resize
-handles. Page rotations keep the last valid preview inside the source page.
-The existing renderer and connector resolver take the shared placement delta.
+Selection caches an oriented editing frame from local bounds and placement.
+The canvas uses that frame for the outline, collective resize targets, ring,
+and pivot. Box side grips edit local width or height about the opposite edge.
+The contextual bar uses a screen-aligned envelope of the frame for layout.
+A rotation captures its frame, pivot, pointer angle, view, revision and selected
+snapshots in a DragSession. It unwraps the pointer angle, applies the same delta
+to content and frame, and leaves only the ring visible during the drag. Outline
+and resize grips return on release. Connector routing shares the same delta.
+Page rotations keep the last valid preview inside the source page.
 
 Double-click the rotation handle to reset in one undoable transaction. A
 singleton resets about its visual center. A mixed selection uses the bottommost

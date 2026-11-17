@@ -172,6 +172,15 @@ impl ObjectBounds {
             [self.min[0], self.max[1]],
         ]
     }
+    pub fn edge_midpoints(self) -> [Point; 4] {
+        let [x, y] = self.center();
+        [
+            [x, self.min[1]],
+            [self.max[0], y],
+            [x, self.max[1]],
+            [self.min[0], y],
+        ]
+    }
 }
 
 /// Stroke and Shape share this protocol; future content extends the same store.
@@ -200,6 +209,9 @@ pub trait CanvasObject {
     fn surface(&self) -> Surface;
     fn placement(&self) -> Placement;
     fn local_bounds(&self) -> Option<ObjectBounds>;
+    fn editing_bounds(&self) -> Option<ObjectBounds> {
+        self.local_bounds()
+    }
     fn geometry_bounds(&self) -> Option<ObjectBounds> {
         self.world_bounds()
     }
@@ -729,16 +741,16 @@ impl ObjectSnapshot {
         match self {
             Self::Image(i) => i.transformed(delta).into(),
             Self::Group(group) => {
-                let orientation = Placement {
-                    rotation: group.rotation,
-                    ..Default::default()
-                };
-                let rotation = orientation.then(delta, [0.; 2]).rotation;
-                if rotation == group.rotation {
+                let previous = group.frame_basis();
+                let orientation = previous.then(delta, [0.; 2]);
+                if orientation.rotation == previous.rotation
+                    && orientation.reflected == previous.reflected
+                {
                     return self.clone();
                 }
                 let mut group = (**group).clone();
-                group.rotation = rotation;
+                group.rotation = orientation.rotation;
+                group.reflected = orientation.reflected;
                 Self::Group(group.into())
             }
             Self::Text(t) => t.transformed(delta).into(),

@@ -18,9 +18,20 @@ pub struct Group {
     /// Orientation of the container. Descendants retain baked world placements.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub rotation: f64,
+    #[serde(default, skip_serializing_if = "unreflected")]
+    pub reflected: [bool; 2],
     /// Rebuilt from descendants at transaction boundaries, never saved content.
     #[serde(skip)]
     pub bounds: Option<ObjectBounds>,
+}
+impl Group {
+    pub fn frame_basis(&self) -> Placement {
+        Placement {
+            rotation: self.rotation,
+            reflected: self.reflected,
+            ..Default::default()
+        }
+    }
 }
 impl CanvasObject for Group {
     fn object_id(&self) -> ObjectId {
@@ -45,6 +56,10 @@ impl CanvasObject for Group {
     fn hit_test(&self, _: Point, _: f64) -> bool {
         false
     }
+}
+
+fn unreflected(axes: &[bool; 2]) -> bool {
+    *axes == [false; 2]
 }
 
 fn is_zero(angle: &f64) -> bool {

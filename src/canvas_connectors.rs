@@ -310,6 +310,7 @@ impl Canvas {
                 {
                     let point = view.to_document([pos.x as f64, pos.y as f64]);
                     if !self.rotation_hit(point, view.scale)
+                        && self.shape_handle(point, view.scale).is_none()
                         && let Some((source, preview, moving)) =
                             self.connection_handle(point, view.scale)
                     {
