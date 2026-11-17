@@ -743,3 +743,18 @@ The user changed the requested math font to Latin Modern Math. Bundle the offici
 Use the existing `MathFont::from_bytes`/SVG renderer and high-resolution cache.
 Migrate both earlier preset names to `latin-modern-math` without changing source
 or other preferences. This is a font-resource change, with no PDF persistence.
+
+## M1.14 — Immutable image resources and transient interchange
+
+Use SHA-256 IDs and Arc-owned original-byte ImageAssets, interned through a weak
+Drawing registry. This retains assets exactly as long as live/history/clipboard
+snapshots need them, shares large bytes through transforms/copy, and avoids source
+path dependencies. Object snapshots carry resource handles today; future M2 writes
+a deduplicated resource table, as version-2 image clipboard interchange already
+does. GPU textures are independently disposable derived state, excluded from serde.
+Image-rs 0.25.10 already exists in native dependencies; enable its PNG/JPEG/WebP
+codecs portably instead of adding platform-specific image semantics. Strict size,
+pixel and retained-asset caps bound memory; a 2048-side display cap can soften
+extreme enlargements while originals stay intact. Native decoding uses workers;
+WASM initially uses bounded synchronous decoding after asynchronous file reads.
+No guarantee of zero browser pause for maximum-size first imports is claimed.

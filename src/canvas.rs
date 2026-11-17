@@ -20,6 +20,8 @@ use selection_ui::SelectionGesture;
 mod connectors_ui;
 #[path = "canvas_formula.rs"]
 mod formula_ui;
+#[path = "canvas_images.rs"]
+mod images_ui;
 #[path = "canvas_shapes.rs"]
 mod shapes_ui;
 #[path = "canvas_text.rs"]
@@ -274,6 +276,9 @@ impl Cached {
 const MESH_SEGMENTS: usize = 128;
 
 pub struct Canvas {
+    image_cache_revision: Option<u64>,
+    image_imports: crate::image_import::Imports,
+    image_cache: HashMap<crate::image_object::AssetId, images_ui::ImageTexture>,
     pub latex: crate::latex_config::LatexPreferences,
     pub open_global_latex: bool,
     pub formula_settings_suspended: bool,
@@ -336,6 +341,9 @@ impl Canvas {
 
     pub fn new(data: &DocumentData) -> Self {
         Self {
+            image_cache_revision: None,
+            image_imports: Default::default(),
+            image_cache: Default::default(),
             latex: Default::default(),
             open_global_latex: false,
             formula_settings_suspended: false,
@@ -546,6 +554,7 @@ impl Canvas {
         if !ui.is_enabled() {
             return;
         }
+        self.poll_images(ui.ctx());
         self.selection.refresh(&self.drawing);
         if self.font_browser.is_none()
             && self.text_session.is_none()
@@ -600,6 +609,10 @@ impl Canvas {
     }
 
     pub fn surface(&mut self, ui: &egui::Ui, bounds: Rect, surface: Surface, transform: Transform) {
+        if self.image_surface(ui, bounds, surface, transform) {
+            self.paint(ui, bounds, surface, transform);
+            return;
+        }
         if matches!(self.tool, Tool::Select | Tool::Lasso) {
             let preview_layer = egui::LayerId::new(
                 egui::Order::Middle,
@@ -950,6 +963,7 @@ impl Canvas {
             Some(SelectionGesture::Transform { session, .. }) => &session.ids,
             _ => &self.selection.expanded,
         };
+        let image_resize_preview = self.image_resize_preview().cloned();
         let endpoint_preview = match &self.selection_gesture {
             Some(SelectionGesture::ShapeEdit { preview, .. }) => Some(preview),
             _ => None,
@@ -967,6 +981,18 @@ impl Canvas {
                 continue;
             }
             let stroke = match object {
+                ObjectSnapshot::Image(image) => {
+                    let source = image_resize_preview
+                        .as_ref()
+                        .filter(|i| i.id == image.id)
+                        .unwrap_or(image)
+                        .clone();
+                    let delta = selection_preview
+                        .filter(|_| preview_ids.contains(&image.id))
+                        .unwrap_or_default();
+                    Canvas::paint_image(&mut self.image_cache, &painter, transform, &source, delta);
+                    continue;
+                }
                 ObjectSnapshot::Group(_) => continue,
                 ObjectSnapshot::Formula(formula) => {
                     if self

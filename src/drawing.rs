@@ -316,6 +316,10 @@ pub struct Drawing {
     owner: Uuid,
     layout: Layout,
     items: Vec<ObjectSnapshot>,
+    image_assets: std::collections::HashMap<
+        crate::image_object::AssetId,
+        std::sync::Weak<crate::image_object::ImageAsset>,
+    >,
     parents: std::collections::HashMap<Uuid, Uuid>,
     pub editing_group: Option<Uuid>,
     live_ids: std::collections::HashSet<Uuid>,
@@ -337,6 +341,7 @@ impl Drawing {
             owner: data.id(),
             layout: data.layout().clone(),
             items: Vec::new(),
+            image_assets: Default::default(),
             parents: Default::default(),
             editing_group: None,
             live_ids: Default::default(),
@@ -554,6 +559,11 @@ impl Drawing {
     }
     pub fn valid_object(&self, object: &ObjectSnapshot) -> bool {
         match object {
+            ObjectSnapshot::Image(i) => {
+                i.valid()
+                    && i.document_id == self.owner
+                    && i.corners().iter().all(|p| self.contains(i.surface, *p))
+            }
             ObjectSnapshot::Group(g) => g.document_id == self.owner && !g.id.is_nil(),
             ObjectSnapshot::Text(t) => {
                 t.valid()
@@ -581,6 +591,86 @@ impl Drawing {
                         .all(|p| self.contains(s.surface, *p))
             }
         }
+    }
+    fn intern_images(&mut self, objects: &mut [ObjectSnapshot]) -> bool {
+        self.image_assets
+            .retain(|_, asset| asset.strong_count() > 0);
+        let mut assets: std::collections::HashMap<_, _> = self
+            .image_assets
+            .iter()
+            .filter_map(|(id, a)| a.upgrade().map(|a| (*id, a)))
+            .collect();
+        for object in objects.iter() {
+            if let ObjectSnapshot::Image(image) = object {
+                assets
+                    .entry(image.asset.id())
+                    .or_insert_with(|| image.asset.clone());
+            }
+        }
+        if assets.len() > 16
+            || assets.values().map(|a| a.bytes().len()).sum::<usize>() > 128 * 1024 * 1024
+        {
+            return false;
+        }
+        for object in objects {
+            if let ObjectSnapshot::Image(image) = object {
+                let asset = assets[&image.asset.id()].clone();
+                if !Arc::ptr_eq(&image.asset, &asset) {
+                    Arc::make_mut(image).asset = asset;
+                }
+            }
+        }
+        self.image_assets = assets
+            .into_iter()
+            .map(|(id, a)| (id, Arc::downgrade(&a)))
+            .collect();
+        true
+    }
+    pub fn replace_image(&mut self, image: crate::image_object::ImageObject) -> bool {
+        self.edit_image(image, false)
+    }
+    pub fn edit_image(&mut self, image: crate::image_object::ImageObject, merge: bool) -> bool {
+        let mut object = ObjectSnapshot::from(image);
+        if !self.intern_images(std::slice::from_mut(&mut object)) {
+            return false;
+        }
+        let id = object.id();
+        if self.is_locked(id) || !self.valid_object(&object) {
+            return false;
+        }
+        let Some(old) = self.snapshot(id) else {
+            return false;
+        };
+        if !matches!(old, ObjectSnapshot::Image(_)) || old == &object {
+            return false;
+        }
+        let index = self.object_slots[&id];
+        let before = vec![(index, old.clone())];
+        let original = if merge && self.cursor == self.history.len() {
+            match self.history.last().map(|e| &e.command) {
+                Some(Command::Replace {
+                    before: original,
+                    after,
+                }) if *after == before => Some(original.clone()),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if original.is_some() {
+            self.history.pop();
+            self.cursor -= 1;
+        }
+        self.execute(Command::Replace {
+            before,
+            after: vec![(index, object)],
+        });
+        if let Some(original) = original
+            && let Command::Replace { before, .. } = &mut self.history.last_mut().unwrap().command
+        {
+            *before = original;
+        }
+        true
     }
     pub fn valid_connector<'a>(
         &self,
@@ -886,6 +976,9 @@ impl Drawing {
         self.insert_snapshots(objects.into_iter().map(Into::into).collect())
     }
     pub fn insert_snapshots(&mut self, mut objects: Vec<ObjectSnapshot>) -> bool {
+        if !self.intern_images(&mut objects) {
+            return false;
+        }
         if objects.is_empty() {
             return false;
         }

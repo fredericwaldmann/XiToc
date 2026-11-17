@@ -313,3 +313,11 @@ texture resolution caching, persistent global LaTeX preferences and independent
 undoable document preambles/postambles. These are supported math-only fragments
 and bounded custom commands, not a full package/document compiler. Formula and
 document configuration PDF persistence remain outside this task/M2.
+
+## M1.14 — Editable raster images (in memory, #49)
+
+PNG/JPEG/WebP image insertion, local file drop and screenshot paste join the
+shared canvas-object model. Original-byte assets, cached display textures,
+eight-handle aspect-aware resizing, replacement/opacity and existing transforms,
+groups, clipboard and history are implemented. PDF embedding, saved asset/object
+round trips, cropping and masks remain future work; no image persistence is claimed.

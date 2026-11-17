@@ -696,3 +696,33 @@ with source/effective/shadowed status and validation errors. Navigation opens
 existing Global or Document LaTeX settings while retaining the formula draft and
 cursor. Copy Effective Configuration copies fragments and macro status. No
 history entry is created by inspection.
+
+## M1.14 Image
+
+Image is an original 26-point icon in the TOP drawing toolbar beside Formula;
+it opens a local PNG/JPEG/WebP picker and inserts a selected object near the visible
+canvas center after successful decoding. Initial size preserves oriented source
+aspect ratio, caps the longest side at 320 document points without upscaling small
+images, and fits A4 bounds when necessary. Up to four files may be dropped together
+onto the canvas at the pointer with small offsets. Drag-over feedback explicitly
+says these become images. Generic attachments are not implemented, so no competing
+attachment behavior is offered. Unsupported/corrupted input reports a status error
+without creating an object or changing existing content.
+
+Selected images use the shared move/rotation/group/lock/Arrange/alignment controls.
+Eight local resize grips retain the opposite anchor, source asset and captured
+view/revision. Preserve aspect ratio defaults on for both corners and edges; turn
+it off explicitly for independent dimensions. Alt continues to bypass snapping.
+Image formatting is a compact menu in the shared selection controls/right-click
+Format menu, and in the top toolbar at widths >=650. It offers Opacity, Preserve
+aspect ratio, Reset dimensions (initial import size), and Replace image source.
+Replacement preserves ID, placement, opacity, reflections and aspect preference;
+with aspect lock on its height follows the new source ratio. An out-of-page result
+is rejected without moving/replacing the existing image. Reset retains placement
+orientation, fits within A4, and resets uniform scale. No photo filters/cropping.
+
+Ctrl/Cmd+V with canvas focus accepts screenshot pixels or browser image clipboard
+files; source/text editing keeps its existing paste behavior. XiToc object copies
+carry the required assets between documents. Large copies have a clearly reported
+session-only clipboard fallback. Imports explicitly report memory-only status;
+images are not saved to PDFs or retained across application restart yet.

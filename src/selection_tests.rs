@@ -47,7 +47,7 @@ pub(crate) fn frame(
     );
     output.textures_delta.clear();
 }
-pub(super) fn click(
+pub(crate) fn click(
     ctx: &egui::Context,
     c: &mut Canvas,
     s: Surface,

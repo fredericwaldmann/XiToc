@@ -11,6 +11,8 @@ mod formula_render;
 #[cfg(test)]
 mod formula_tests;
 mod group;
+mod image_import;
+mod image_object;
 mod latex_config;
 mod object;
 mod object_clipboard;
@@ -71,6 +73,7 @@ fn main() {
                 Box::new(|cc| {
                     text_layout::install(&cc.egui_ctx);
                     web_pressure::install(cc.egui_ctx.clone());
+                    image_import::browser::install(cc.egui_ctx.clone());
                     Ok(Box::new(app::XiTocApp::new(cc.storage)))
                 }),
             )

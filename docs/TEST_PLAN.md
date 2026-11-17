@@ -1758,3 +1758,56 @@ wasm32-unknown-unknown compile check. Manual steps are in LATEX_CONFIGURATION.md
 No additional physical native/browser interaction smoke is claimed for this slice.
 Final Trunk release packaging also completed successfully. GitHub CI was pending
 at the time of the local verification report.
+
+## M1.14 image import and editable objects (#49)
+
+Automated image coverage includes PNG/JPEG/WebP originals and alpha, JPEG EXIF
+orientation, corrupted/unsupported/oversized input, oriented dimensions, all eight
+resize grips/opposite anchors, aspect lock/unlock, rotation/reflection, polygon
+selection, real click/Shift/Alt input, lasso/rectangle geometry, Page/Whiteboard
+ownership, opacity edit coalescing, grouping/ungrouping/locking/Arrange/alignment,
+copy/duplicate/cross-document asset transfer, deduplicated clipboard resources,
+source replacement, delete/undo/redo, content identity/interning/history retention,
+retained-asset limits, screenshot-pixel paste and native dropped-file coordinates.
+Controller gestures cover 50/100/200/400% zoom and partially offscreen dragging;
+texture IDs and immutable asset references are reused through those gestures.
+
+Executed on the isolated image worktree: cargo fmt --all -- --check,
+cargo clippy --all-targets -- -D warnings, cargo test --all-targets (319 passed,
+13 intentionally ignored), cargo build --release, cargo check --target
+wasm32-unknown-unknown, and trunk build --release. All pass.
+Explicit release image movement benchmark: 1,000 overlapping image objects /
+40 changed frames, 76.66 ms on this host; one source asset and texture reused.
+This is a local benchmark, not a cross-platform frame-time guarantee.
+
+Browser observations and limits are recorded below. Native hardware clipboard,
+physical desktop file drop, Windows/macOS dialogs, touch/high-DPI hardware and
+maximum-size browser import latency are not claimed verified. Web first decode
+is bounded but synchronous; extreme enlargement may expose the 2048-side display
+texture cap. Original bytes remain intact. All images remain unsaved until M2.
+
+Firefox release-package smoke at 1300×900 / 1× DPI: created a Whiteboard,
+selected a PNG through the Image tool's HTML file input, resized a corner,
+rotated via the shared ring, dropped WebP at a specified pointer location, and
+used real Ctrl+C/Ctrl+V to copy an image object. A constructed image-clipboard
+paste event exercised the browser bridge; Firefox strips files from its event
+constructor, so the fixture supplied an explicit clipboardData file list. This
+is browser event-adapter verification, not a claim of physical OS screenshot
+clipboard testing. Native pixel-paste and file reads are also covered in tests.
+
+Browser testing reproduced a dynamic toolbar-ID collision that switched to the
+neighboring Sticky Note tool when opening Image formatting. Stable scopes now
+isolate image insertion, image formatting and the sticky-note control; the final
+packaged browser menu opens with selection intact. An actual egui regression
+asserts the menu is visible, tool/selection survive, and history stays unchanged.
+Screenshots under docs/screenshots/images record the observed states.
+
+The final package also verified the opacity slider visually, image + rectangle
+grouping, group movement, and Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z after copy/movement.
+Additional Firefox checks on the final package: horizontal flip of the image
+selection, opacity preservation through copy/paste, rectangle grouping, a pen
+stroke above the images and Arrange → Send to Back. No native hardware interaction
+is inferred from these browser checks.
+The browser also reached the displayed 400% zoom level, panned to clipped image
+content, and exercised repeated group dragging with undo/redo. High-DPI hardware
+remains unverified; the screenshot is a 1×-DPI browser check.

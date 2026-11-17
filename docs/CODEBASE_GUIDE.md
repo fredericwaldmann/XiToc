@@ -29,7 +29,7 @@ formatting, mixed-selection batch changes and separate persistent creation defau
 The PDF codec creates and reopens **blank** native documents. It does not save or
 reload handwriting. Dirty drawing disables browser PDF export; Ctrl/Cmd+S explains
 the M2 limitation. Ordinary PDFs open as read-only with no PDF preview renderer.
-Formulas, images, multipage creation,
+Images and formulas are editable in memory. Multipage creation,
 browser directory handles, ink autosave and crash recovery remain planned.
 
 ## Crate and module map
@@ -1006,3 +1006,26 @@ this view per session configuration and refreshes from the owning Drawing
 global/document snapshots, preserving source/cursor and invalidating previews
 only on configuration changes. Settings navigation uses existing dialogs; no new
 canonical state or persistence format is introduced.
+
+## M1.14 image source map
+
+- `image_object.rs`: immutable ImageAsset content IDs/original bytes, bounded
+  PNG/JPEG/WebP decoding with orientation, ImageObject geometry/selection/resize.
+- `image_import.rs`: native worker and browser picker/drop/clipboard adapters,
+  captured destinations, bounded reads, lossless PNG encoding of screenshot pixels.
+- `canvas_images.rs`: completed-import insertion/replacement, texture caching,
+  image formatting and local resize-handle helpers in the existing canvas controller.
+- `object.rs`, `drawing.rs`: Image snapshot dispatch and weak asset interning;
+  canonical object/history handles retain assets. Generic transforms/grouping and
+  existing journal operations remain shared. ImageResize uses the same DragSession
+  ownership/revision/view guards alongside existing local shape/text resize adapters.
+- `object_clipboard.rs`: version-2 image asset table/reference interchange, with
+  version-1 compatibility for earlier content. Object IDs remap; asset content IDs
+  remain stable. Image originals are shared independently of GPU texture lifetime.
+- `image_controller_tests.rs`: imports, screenshot/drop events, source replacement,
+  clipboard/history/assets, groups, opacity, selection, zoom/offscreen movement,
+  eight-handle resizing, texture reuse and an explicit release movement benchmark.
+
+Image tools never read workspace paths implicitly. Source files can be deleted
+following import. Image objects and assets remain unsaved session content until
+M2's single-PDF visible-image/edit-payload round-trip gate.

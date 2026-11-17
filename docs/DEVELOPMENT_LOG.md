@@ -781,3 +781,26 @@ labels, read-only configuration/macro viewer, explicit shadowing, validation
 errors, copy and existing settings navigation. Session configuration now
 refreshes from owning Drawing snapshots without replacing source or selection.
 Added source/override/error and live-session/popover regressions.
+
+## 2026-11-17 — M1.14 image import and editable objects (#49)
+
+Started from latest main 860e253; isolated the final changes on
+feature/image-import-and-editing in /tmp/xitoc-image-worktree after detecting
+unrelated concurrent shape edits in the shared checkout. Searched all
+GitHub issue titles for image/media; none matched, so created focused issue #49.
+Added portable immutable original-byte assets and first-class Image objects,
+content-ID interning, bounded local PNG/JPEG/WebP imports/orientation and cached
+textures. Reused the canonical object store, selection/DragSession/journal,
+group/lock/Arrange, snapping/alignment and cross-document clipboard infrastructure.
+Top-toolbar picker, canvas drops, screenshot paste and contextual appearance share
+this model. Clipboard version 2 deduplicates assets; large copies retain a session
+fallback. Added explicit source/asset retention and error-path regressions.
+PDF persistence remains M2; no sidecars, cropping, OCR, external resources or
+unrelated UI redesign. Verification results are recorded in TEST_PLAN.
+
+Final validation: 319 active tests pass (13 intentionally ignored), formatting,
+denied-warning Clippy, native release, WASM check and Trunk release pass. Explicit
+release overlap benchmark: 1,000 image objects / 40 changed frames in 76.66 ms.
+Firefox smoke and native/hardware limits are detailed in TEST_PLAN. Browser
+format-menu testing caught a dynamic widget-ID collision; stable control scopes
+and an egui selection/tool/history regression cover the correction.

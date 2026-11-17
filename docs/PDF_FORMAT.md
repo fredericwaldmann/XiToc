@@ -201,3 +201,19 @@ must preserve; rendered vector geometry is derived from source/font/version and 
 be emitted as conventional visible PDF graphics in the same file. Include enough
 version/font metadata for stable re-editing or explicitly handle a renderer-version
 migration. The blank-only codec remains unchanged and does not serialize formulas.
+
+## M1.14 image asset preparation (not persisted)
+
+ImageObject snapshots hold stable object/document/surface IDs, Placement, positive
+local dimensions, opacity, aspect preference, lock and a shared immutable ImageAsset.
+Asset IDs are SHA-256 hashes of original PNG/JPEG/WebP bytes. Originals and oriented
+pixel dimensions are independent of disposable decoded RGBA/textures and source paths.
+Clipboard's asset-table format is transient interchange, never a canonical note.
+
+M2 must version a complete object/resource envelope, embed each unique original
+asset once inside the same PDF, validate all image references and resource limits,
+and emit conventional visible image XObjects with matching alpha masks, EXIF
+orientation and object transforms. It must test ordinary-viewer rendering plus
+editable asset/source round trips and failed-save preservation. No image bytes,
+sidecars, PDF graphics or new payload fields are written by M1.14; restarting or
+discarding unsaved content loses images just as other in-memory canvas objects.

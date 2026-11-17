@@ -1032,3 +1032,46 @@ coordinates. `ui/latex_controls.rs` shares validated draft editors. No PDF formu
 persistence is added; the blank encoder rejects nondefault document LaTeX settings.
 See LATEX_CONFIGURATION.md and FORMULA_RENDERER_EVALUATION.md for syntax, limits,
 font licenses, alternatives and resolution/memory tradeoffs.
+
+## M1.14 editable raster images (#49)
+
+`image_object.rs` adds ImageObject to the shared CanvasObject/ObjectSnapshot store.
+Placement carries uniform scale, rotation and true local-axis reflections; positive
+local dimensions allow independent width/height resizing when aspect lock is off.
+The canonical sequence, group forest, locks, selection, snapping, alignment and
+Replace journal remain authoritative. Eight local resize handles capture immutable
+sources and the shared DragSession view/revision guard; movement uses the existing
+selection transform session. Raw asset bytes never change during transformations.
+
+ImageAsset is an immutable resource with a SHA-256 content ID, original compressed
+bytes in Arc<[u8]>, and orientation-correct pixel dimensions. Objects own shared
+Arc handles to these resources, rather than filesystem paths. Drawing interns
+assets by content ID using a weak registry; object/history/clipboard snapshots own
+resource lifetime. The registry bounds retained assets (including undo/redo) to 16
+unique assets / 128 MiB per document. Deletion retains resources needed by undo.
+Cross-document copies carry resources; repeated copies share bytes in memory.
+Clipboard version 2 writes one asset table and image references; older object-only
+version 1 interchange remains supported. This is transient interchange, not a new
+native note format. System clipboard payloads are bounded at 64 MiB; larger image
+copies use an explicit XiToc session clipboard fallback, including Cut safety.
+
+`image_import.rs` handles explicit picker/drop reads and screenshot encoding.
+Native reads/decoding run on a worker; imports capture a document-owned channel and
+surface/position so completion cannot target a different tab. Web uses permissioned
+file handles and clipboard-event files without fetching URLs. An image paste bridge
+leaves text/formula editing alone; drop coordinates are forwarded from DOM events
+because eframe's file-drop event omits them. Web decoding is synchronous and bounded;
+large first imports can pause the browser. Nothing is inserted before decode succeeds.
+
+The decoder accepts PNG, JPEG and WebP only, applies available EXIF orientation,
+limits compressed input to 16 MiB, dimensions to 16384 per axis and 32 megapixels,
+and constrains decoder allocation. SVG and external resources are not supported.
+Display RGBA is derived once, downsampled to at most 2048 per side (or the GPU limit),
+then cached per asset as a linearly filtered texture. Zoom, placement, opacity,
+selection and dragging do not decode or upload unchanged textures. Nonvisible
+images skip painting. Texture caches release deleted/replaced assets; undo may
+rebuild a released texture from retained originals. At most 16 unique display
+textures per document bound this cache to approximately 256 MiB before overhead.
+
+Assets and image objects are memory-only until M2. No sidecars or PDF payload/codec
+changes are introduced. Existing dirty/export/discard protections apply to images.

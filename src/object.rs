@@ -99,6 +99,7 @@ fn rotate([x, y]: Point, angle: f64) -> Point {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(dead_code)] // Semantic dispatch tag; only implemented content variants belong here.
 pub enum ObjectType {
+    Image,
     Group,
     Text,
     Formula,
@@ -112,6 +113,7 @@ pub enum ObjectType {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", deny_unknown_fields)]
 pub enum ObjectSnapshot {
+    Image(std::sync::Arc<crate::image_object::ImageObject>),
     Group(std::sync::Arc<crate::group::Group>),
     Text(std::sync::Arc<crate::text::TextObject>),
     Formula(std::sync::Arc<crate::formula::FormulaObject>),
@@ -173,7 +175,7 @@ impl ObjectBounds {
 }
 
 /// Stroke and Shape share this protocol; future content extends the same store.
-/// No dummy Text/Formula/Connector/Image variants exist.
+/// Only implemented variants participate in this protocol.
 #[allow(dead_code)] // Shared domain API; some operations await future object tools.
 pub trait CanvasObject {
     fn object_id(&self) -> ObjectId;
@@ -680,6 +682,7 @@ impl From<crate::formula::FormulaObject> for ObjectSnapshot {
 impl ObjectSnapshot {
     pub fn locked(&self) -> bool {
         match self {
+            Self::Image(o) => o.locked,
             Self::Group(o) => o.locked,
             Self::Stroke(o) => o.locked,
             Self::Shape(o) => o.locked,
@@ -690,6 +693,7 @@ impl ObjectSnapshot {
     }
     pub fn set_locked(&mut self, value: bool) {
         match self {
+            Self::Image(o) => std::sync::Arc::make_mut(o).locked = value,
             Self::Group(o) => std::sync::Arc::make_mut(o).locked = value,
             Self::Stroke(o) => std::sync::Arc::make_mut(o).locked = value,
             Self::Shape(o) => std::sync::Arc::make_mut(o).locked = value,
@@ -701,6 +705,7 @@ impl ObjectSnapshot {
 
     pub fn as_object(&self) -> &dyn CanvasObject {
         match self {
+            Self::Image(i) => i.as_ref(),
             Self::Group(g) => g.as_ref(),
             Self::Text(t) => t.as_ref(),
             Self::Formula(f) => f.as_ref(),
@@ -711,6 +716,7 @@ impl ObjectSnapshot {
     }
     pub fn id(&self) -> ObjectId {
         match self {
+            Self::Image(i) => i.id,
             Self::Group(g) => g.id,
             Self::Text(t) => t.id,
             Self::Formula(f) => f.id,
@@ -721,6 +727,7 @@ impl ObjectSnapshot {
     }
     pub fn transformed(&self, delta: Placement) -> Self {
         match self {
+            Self::Image(i) => i.transformed(delta).into(),
             Self::Group(_) => self.clone(),
             Self::Text(t) => t.transformed(delta).into(),
             Self::Formula(f) => f.transformed(delta).into(),
@@ -739,6 +746,13 @@ impl ObjectSnapshot {
     }
     pub fn relocated(&self, owner: Uuid, surface: crate::drawing::Surface) -> Self {
         match self {
+            Self::Image(i) => {
+                let mut i = (**i).clone();
+                i.id = Uuid::new_v4();
+                i.document_id = owner;
+                i.surface = surface;
+                i.into()
+            }
             Self::Group(g) => {
                 let mut g = (**g).clone();
                 g.id = Uuid::new_v4();
@@ -788,5 +802,11 @@ impl ObjectSnapshot {
 impl From<crate::text::TextObject> for ObjectSnapshot {
     fn from(t: crate::text::TextObject) -> Self {
         Self::Text(std::sync::Arc::new(t))
+    }
+}
+
+impl From<crate::image_object::ImageObject> for ObjectSnapshot {
+    fn from(i: crate::image_object::ImageObject) -> Self {
+        Self::Image(std::sync::Arc::new(i))
     }
 }
