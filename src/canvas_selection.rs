@@ -16,6 +16,13 @@ pub(super) struct DragSession {
     revision: u64,
 }
 
+pub(super) struct RotationClick {
+    surface: Surface,
+    revision: u64,
+    time: f64,
+    pos: Pos2,
+}
+
 pub(super) enum SelectionGesture {
     ImageResize {
         session: DragSession,
@@ -56,6 +63,7 @@ pub(super) enum SelectionGesture {
         roots: HashSet<Uuid>,
         surface: Surface,
         start: Point,
+        started_at: f64,
         frame: selection::RotationFrame,
         geometry: ObjectBounds,
         start_angle: f64,
@@ -480,6 +488,7 @@ impl Canvas {
         if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             // Cancel first so a later pointer release cannot commit a preview.
             let gesture = self.selection_gesture.take();
+            self.rotation_click = None;
             self.snap_session = None;
             let image_transform = matches!(gesture, Some(SelectionGesture::ImageResize { .. }))
                 || (matches!(gesture, Some(SelectionGesture::Transform { .. }))
@@ -705,7 +714,7 @@ impl Canvas {
                 (p[0] - point[0]).hypot(p[1] - point[1]) * scale <= f64::from(style::SELECTION_HIT)
             })
     }
-    fn start_rotation(&mut self, surface: Surface, point: Point) {
+    fn start_rotation(&mut self, surface: Surface, point: Point, started_at: f64) {
         self.snap_session = None;
         if self
             .selection
@@ -743,6 +752,7 @@ impl Canvas {
                 roots: self.selection.ids.clone(),
                 surface,
                 start: point,
+                started_at,
                 frame,
                 geometry,
                 start_angle,
@@ -1375,7 +1385,7 @@ impl Canvas {
                     self.selection_view =
                         Some((surface, transform, bounds.intersect(ui.clip_rect())));
                     if rotation {
-                        self.start_rotation(surface, point);
+                        self.start_rotation(surface, point, ui.input(|input| input.time));
                         continue;
                     }
                     if !modifiers.alt
@@ -1513,26 +1523,41 @@ impl Canvas {
                             modifiers.shift,
                             modifiers.alt,
                         );
-                        if let Some(SelectionGesture::Rotate { moved, .. }) = self.selection_gesture
+                        if let Some(SelectionGesture::Rotate {
+                            moved, started_at, ..
+                        }) = self.selection_gesture
                         {
-                            let click = !moved
-                                && self.rotation_hit(
-                                    transform.to_document([pos.x as f64, pos.y as f64]),
-                                    transform.scale,
-                                )
-                                && ui.input(|i| i.pointer.button_clicked(PointerButton::Primary));
                             let previous = self.rotation_click.take();
-                            if click {
-                                let current = (surface, self.drawing.revision());
-                                if previous == Some(current)
-                                    && ui.input(|i| {
-                                        i.pointer.button_double_clicked(PointerButton::Primary)
-                                    })
-                                {
-                                    self.selection_gesture = None;
-                                    self.reset_rotation();
-                                } else {
-                                    self.rotation_click = Some(current);
+                            let point = transform.to_document([pos.x as f64, pos.y as f64]);
+                            if !moved && self.rotation_hit(point, transform.scale) {
+                                let current = RotationClick {
+                                    surface,
+                                    revision: self.drawing.revision(),
+                                    time: ui.input(|input| input.time),
+                                    pos,
+                                };
+                                let (duration, delay, distance) = ui.ctx().options(|options| {
+                                    let input = &options.input_options;
+                                    (
+                                        input.max_click_duration,
+                                        input.max_double_click_delay,
+                                        input.max_click_dist,
+                                    )
+                                });
+                                // Pair only releases owned by this handle. Other widgets' clicks
+                                // and multiple presses/releases in one frame share egui's click state.
+                                if current.time - started_at <= duration {
+                                    if previous.is_some_and(|last| {
+                                        last.surface == current.surface
+                                            && last.revision == current.revision
+                                            && current.time - last.time < delay
+                                            && current.pos.distance(last.pos) <= distance
+                                    }) {
+                                        self.selection_gesture = None;
+                                        self.reset_rotation();
+                                    } else {
+                                        self.rotation_click = Some(current);
+                                    }
                                 }
                             }
                         }

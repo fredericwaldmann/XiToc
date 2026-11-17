@@ -858,7 +858,27 @@ fn shared_rotation_ring_and_reset_cover_all_object_kinds_at_every_zoom() {
                 let revision = c.drawing.revision();
                 rotation_click(&ctx, &mut c, s, view, 2.);
                 assert_eq!(c.drawing.revision(), revision);
-                rotation_click(&ctx, &mut c, s, view, 2.14);
+                if kind == Some(ShapeKind::Rectangle) {
+                    // The backend may deliver adjacent clicks in the same render frame.
+                    let grip = screen(view, c.rotation_point(scale).unwrap());
+                    c.rotation_click = None;
+                    frame(
+                        &ctx,
+                        &mut c,
+                        s,
+                        view,
+                        vec![
+                            pointer(grip, true, egui::Modifiers::NONE),
+                            pointer(grip, false, egui::Modifiers::NONE),
+                            pointer(grip, true, egui::Modifiers::NONE),
+                            pointer(grip, false, egui::Modifiers::NONE),
+                        ],
+                        2.14,
+                        true,
+                    );
+                } else {
+                    rotation_click(&ctx, &mut c, s, view, 2.14);
+                }
                 let reset = c.drawing.snapshot(id).unwrap().clone();
                 assert_eq!(reset.as_object().placement().rotation, 0.);
                 assert_eq!(c.drawing.revision(), revision + 1);

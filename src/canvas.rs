@@ -308,7 +308,7 @@ pub struct Canvas {
     pub selection: crate::selection::Selection,
     pub notice: Option<String>,
     selection_gesture: Option<SelectionGesture>,
-    rotation_click: Option<(Surface, u64)>,
+    rotation_click: Option<selection_ui::RotationClick>,
     selection_view: Option<(Surface, Transform, Rect)>,
     pending_paste: Option<f64>,
     input_pressure: Option<f32>,
