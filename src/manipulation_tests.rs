@@ -877,7 +877,7 @@ fn shared_rotation_ring_and_reset_cover_all_object_kinds_at_every_zoom() {
                 assert_eq!(c.drawing.snapshot(id), Some(&reset));
                 let revision = c.drawing.revision();
                 rotation_click(&ctx, &mut c, s, view, 3.);
-                rotation_click(&ctx, &mut c, s, view, 3.14);
+                rotation_click(&ctx, &mut c, s, view, 3.16);
                 assert_eq!(c.drawing.revision(), revision);
             }
         }
