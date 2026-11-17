@@ -279,7 +279,8 @@ impl Connector {
         out
     }
     /// A container move does not drag an external attached endpoint off its target.
-    /// Direct wire drags retain the existing detach policy; copies detach on remap.
+    /// Rotations including an attached host keep the other endpoint attached as well.
+    /// Direct wire drags retain the existing detach policy.
     pub fn transformed_in_group(
         &self,
         delta: Placement,
@@ -287,7 +288,12 @@ impl Connector {
         grouped: bool,
     ) -> Self {
         let mut out = self.transformed(delta, selected);
-        if grouped {
+        let rotating_host = delta.rotation != 0.0
+            && self
+                .ends()
+                .iter()
+                .any(|end| end.target().is_some_and(|id| selected.contains(&id)));
+        if grouped || rotating_host {
             for (source, target) in self.ends().into_iter().zip(out.ends_mut()) {
                 if source.target().is_some_and(|id| !selected.contains(&id)) {
                     *target = source.clone();

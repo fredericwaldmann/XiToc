@@ -304,7 +304,11 @@ impl Canvas {
         } else if let Some(ends) = shape.endpoints() {
             ends.to_vec()
         } else {
-            shape.box_corners()?.to_vec()
+            shape
+                .box_corners()?
+                .into_iter()
+                .chain(shape.box_edges()?)
+                .collect()
         };
         ends.iter()
             .position(|p| {
@@ -359,7 +363,15 @@ impl Canvas {
             .note_resize_handles()
             .map(|p| p.to_vec())
             .or_else(|| shape.endpoints().map(|p| p.to_vec()))
-            .or_else(|| shape.box_corners().map(|p| p.to_vec()))
+            .or_else(|| {
+                Some(
+                    shape
+                        .box_corners()?
+                        .into_iter()
+                        .chain(shape.box_edges()?)
+                        .collect(),
+                )
+            })
             .unwrap_or_default();
         if !points.is_empty() {
             for point in points {

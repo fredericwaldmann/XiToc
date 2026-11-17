@@ -118,6 +118,13 @@ pub(super) fn resize_grip(
             .min_by(|(_, a), (_, b)| distance(*a, desired).total_cmp(&distance(*b, desired)))
             .unwrap()
             .1
+    } else if corner && index >= 4 {
+        let edges = shape.box_edges().unwrap();
+        let index = index - 4;
+        [edges[index], edges[(index + 2) % 4]]
+            .into_iter()
+            .min_by(|a, b| distance(*a, desired).total_cmp(&distance(*b, desired)))
+            .unwrap()
     } else if corner {
         shape
             .box_corners()

@@ -1828,3 +1828,20 @@ is inferred from these browser checks.
 The browser also reached the displayed 400% zoom level, panned to clipped image
 content, and exercised repeated group dragging with undo/redo. High-DPI hardware
 remains unverified; the screenshot is a 1×-DPI browser check.
+
+## Shared rotation interaction (#51)
+
+At 50%, 100%, 200% and 400%, pan the viewport and drag the ring on images, shapes,
+ink, text, formula, sticky notes, and mixed or nested groups. The box and resize
+grips should hide beyond the drag threshold. The ring should follow the preview
+at constant radius and stay in place on release. Include an offscreen selection,
+a full turn, a stationary Shift toggle and Escape. Double-click to reset and
+undo/redo to compare exact placements. For nested groups, compare child-relative
+angles and attached orthogonal and curved wires before and after rotation/reset.
+
+At 50%, 100%, 200% and 400%, rotate a wide rectangle to 45° and compare all
+four corners with the selection outline. Drag its right midpoint while moving
+the pointer along both local axes. Only the local width should change without
+Shift. Group two differently rotated shapes and a stretched image. Rotate the
+group through a full turn and check the pivot, edge lengths, and ring offset.
+Double-click the ring, then undo and redo to verify child-relative angles.

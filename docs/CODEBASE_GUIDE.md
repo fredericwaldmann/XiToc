@@ -419,17 +419,28 @@ on release; lasso stays active after release. See UI_DESIGN for feedback tokens.
 
 Move/proportional corner-resize gestures preview cached geometry without changing
 committed objects on every pointer move. Release commits one `transform_objects`
-transaction, retaining IDs/raw ink/style. Escape cancels a live selection gesture
-and clears selection IDs/bounds/outlines in one frame, without changing ink,
-history or cached meshes; later pointer release cannot commit it. Focus loss or
-view changes cancel the preview while retaining membership. Canvas Escape defers
-to text-input focus and open popovers. Page moves/resizes stay on the source surface with
-centerlines constrained to its bounds; rendering clips ink edges. The round handle
-24 screen points above the group rotates around its logical center; Shift snaps
-to 15 degrees, including modifier changes while stationary. Angle accumulation
-unwraps full turns. Conservative centerline bounds keep Page rotations on the
-source page, retaining the last valid preview; Whiteboards are unrestricted.
-Edit/context menus also offer left/right 15-degree rotation for keyboard access.
+transaction, retaining IDs, raw ink and style. Escape cancels a gesture without
+committing it. It preserves membership when cancelling rotation or an image
+transform so the original overlay returns. Focus loss or view changes also
+cancel previews while retaining membership. Canvas Escape defers to text input
+and open popovers.
+
+Selection caches an oriented editing frame from local bounds and placement.
+The canvas uses that frame for the outline, collective resize targets, ring,
+and pivot. Box side grips edit local width or height about the opposite edge.
+The contextual bar uses a screen-aligned envelope of the frame for layout.
+A rotation captures its frame, pivot, pointer angle, view, revision and selected
+snapshots in a DragSession. It unwraps the pointer angle, applies the same delta
+to content and frame, and leaves only the ring visible during the drag. Outline
+and resize grips return on release. Connector routing shares the same delta.
+Page rotations keep the last valid preview inside the source page.
+
+Double-click the rotation handle to reset in one undoable transaction. A
+singleton resets about its visual center. A mixed selection uses the bottommost
+selected root with placement as its angle reference and rotates the entire set
+by one inverse angle. A group's orientation is explicitly journaled, so reset
+preserves each descendant's orientation relative to its group. Edit and context
+menus still offer 15-degree rotation steps for keyboard access.
 
 Horizontal/vertical flips use the same `Drawing::transform_objects` batch command.
 Their common pivot is the selection's document-space bounding-box center. A world
@@ -1015,8 +1026,8 @@ canonical state or persistence format is introduced.
   captured destinations, bounded reads, lossless PNG encoding of screenshot pixels.
 - `canvas_images.rs`: completed-import insertion/replacement, texture caching,
   image formatting and local resize-handle helpers in the existing canvas controller.
-  The image mesh, oriented outline, eight resize handles and rotation handle
-  derive from the same effective image. A move or rotation composes the shared
+  The image mesh, oriented outline and eight resize handles derive from the
+  same effective image. The shared rotation ring uses the image's oriented bounds. A move or rotation composes the shared
   selection placement with the committed image. An intrinsic resize supplies its
   preview snapshot directly. Mixed selections and groups use the shared overlay.
   Overlay geometry is generated from the current gesture each frame. Contextual

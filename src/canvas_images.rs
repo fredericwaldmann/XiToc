@@ -373,18 +373,6 @@ impl Canvas {
             placement,
         ))
     }
-    pub(super) fn image_rotation_geometry(image: &ImageObject, view_scale: f64) -> (Point, Point) {
-        let center = image
-            .placement
-            .apply(image.dimensions.map(|size| size * 0.5));
-        let (sin, cos) = image.placement.rotation.sin_cos();
-        let outward = [sin, -cos];
-        let half_height = image.dimensions[1] * image.placement.scale * 0.5;
-        let stem = std::array::from_fn(|i| center[i] + outward[i] * half_height);
-        let offset = f64::from(crate::ui::style::ROTATION_OFFSET) / view_scale;
-        let handle = std::array::from_fn(|i| stem[i] + outward[i] * offset);
-        (stem, handle)
-    }
     pub(super) fn paint_image_handles(
         &self,
         painter: &egui::Painter,

@@ -504,8 +504,7 @@ fn dot_selection_moves_and_proportional_handles_remain_reachable() {
         true,
     );
     assert_eq!(c.drawing.strokes()[0].path(), vec![[120., 120.]]);
-    let display = Canvas::display_bounds(c.selection.bounds.unwrap(), t.scale);
-    let corner = display.max;
+    let corner = c.editing_frame(t.scale).unwrap().corners()[2];
     frame(
         &ctx,
         &mut c,
@@ -808,7 +807,7 @@ fn escape_clears_idle_and_active_lasso_selection_without_editing_ink() {
             );
             assert!(c.selection.bounds.is_none());
             assert!(c.selection.geometry.is_none());
-            assert!(c.selection.objects.is_empty());
+            assert!(c.selection.frame.is_none());
             assert!(c.selection_gesture.is_none());
             frame(
                 &ctx,

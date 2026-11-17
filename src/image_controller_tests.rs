@@ -573,13 +573,6 @@ fn assert_selection_paint(
     );
 }
 
-fn rotation_grip(bounds: ObjectBounds, view: Transform) -> Point {
-    [
-        bounds.center()[0],
-        bounds.min[1] - f64::from(crate::ui::style::ROTATION_OFFSET) / view.scale,
-    ]
-}
-
 fn assert_image_paint(
     canvas: &Canvas,
     shapes: &[egui::epaint::ClippedShape],
@@ -618,7 +611,10 @@ fn assert_selected_image_paint(
         view,
         expected.corners(),
         &expected.handles(),
-        Canvas::image_rotation_geometry(expected, view.scale).1,
+        crate::selection::SelectionFrame::for_object(expected)
+            .unwrap()
+            .grip(f64::from(crate::ui::style::ROTATION_OFFSET) / view.scale)
+            .1,
     );
 }
 
@@ -762,7 +758,10 @@ fn image_resize_and_rotation_paint_match_before_and_after_release() {
             let end = [start[0] + 38., start[1] - 18.];
             (start, end, original.resized(index, end, false))
         } else {
-            let start = Canvas::image_rotation_geometry(&original, view.scale).1;
+            let start = crate::selection::SelectionFrame::for_object(&original)
+                .unwrap()
+                .grip(f64::from(crate::ui::style::ROTATION_OFFSET) / view.scale)
+                .1;
             let center = bounds.center();
             let end = [
                 center[0] + center[1] - start[1],
@@ -793,7 +792,12 @@ fn image_resize_and_rotation_paint_match_before_and_after_release() {
             true,
         );
         assert_eq!(*get(&c, id), original);
-        assert_selected_image_paint(&c, &held, view, &expected);
+        if index.is_some() {
+            assert_selected_image_paint(&c, &held, view, &expected);
+        } else {
+            assert_image_paint(&c, &held, view, &expected);
+            assert!(c.rotating(s));
+        }
         let release = frame_shapes(
             &ctx,
             &mut c,
@@ -858,6 +862,8 @@ fn mixed_and_grouped_image_drag_paints_the_collective_preview() {
             ..Placement::default()
         };
         let expected_bounds = bounds.placed(delta);
+        let expected_frame = c.selection.frame.unwrap().transformed(delta);
+        let expected_corners = expected_frame.corners();
         let held = frame_shapes(
             &ctx,
             &mut c,
@@ -876,9 +882,11 @@ fn mixed_and_grouped_image_drag_paints_the_collective_preview() {
         assert_selection_paint(
             &held,
             view,
-            expected_bounds.corners(),
-            &expected_bounds.corners(),
-            rotation_grip(expected_bounds, view),
+            expected_corners,
+            &expected_corners,
+            expected_frame
+                .grip(f64::from(crate::ui::style::ROTATION_OFFSET) / view.scale)
+                .1,
         );
         let release = frame_shapes(
             &ctx,

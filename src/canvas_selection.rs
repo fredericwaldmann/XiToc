@@ -16,6 +16,13 @@ pub(super) struct DragSession {
     revision: u64,
 }
 
+pub(super) struct RotationClick {
+    surface: Surface,
+    revision: u64,
+    time: f64,
+    pos: Pos2,
+}
+
 pub(super) enum SelectionGesture {
     ImageResize {
         session: DragSession,
@@ -52,12 +59,17 @@ pub(super) enum SelectionGesture {
         overflow: bool,
     },
     Rotate {
+        session: DragSession,
+        roots: HashSet<Uuid>,
         surface: Surface,
         start: Point,
-        center: Point,
+        started_at: f64,
+        frame: selection::SelectionFrame,
         geometry: ObjectBounds,
+        start_angle: f64,
         last_angle: f64,
-        angle: f64,
+        last: Point,
+        turns: i32,
         delta: Placement,
         moved: bool,
     },
@@ -68,6 +80,7 @@ pub(super) enum SelectionGesture {
         bounds: ObjectBounds,
         geometry: ObjectBounds,
         corner: Option<usize>,
+        frame: selection::SelectionFrame,
         delta: Placement,
         moved: bool,
         limits: (f64, f64),
@@ -87,7 +100,9 @@ pub(super) fn selection_preview_ids<'a>(
     selection: &'a selection::Selection,
 ) -> &'a HashSet<Uuid> {
     match gesture {
-        Some(SelectionGesture::Transform { session, .. }) => &session.ids,
+        Some(
+            SelectionGesture::Transform { session, .. } | SelectionGesture::Rotate { session, .. },
+        ) => &session.ids,
         _ => &selection.expanded,
     }
 }
@@ -214,14 +229,14 @@ impl Canvas {
             }
             RotateLeft | RotateRight => {
                 self.finish();
-                if let (Some(bounds), Some(geometry)) =
-                    (self.selection.bounds, self.selection.geometry)
+                if let (Some(frame), Some(geometry)) =
+                    (self.selection.frame, self.selection.geometry)
                 {
                     let angle = std::f64::consts::PI / 12.0
                         * if command == RotateLeft { -1.0 } else { 1.0 };
                     if let Some(delta) = selection::rotation_about(
                         geometry,
-                        bounds.center(),
+                        frame.center(),
                         angle,
                         self.drawing.bounds(self.selection.surface),
                     ) {
@@ -474,15 +489,14 @@ impl Canvas {
         if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             // Cancel first so a later pointer release cannot commit a preview.
             let gesture = self.selection_gesture.take();
+            self.rotation_click = None;
             self.snap_session = None;
             let image_transform = matches!(gesture, Some(SelectionGesture::ImageResize { .. }))
-                || (matches!(
-                    gesture,
-                    Some(SelectionGesture::Transform { .. } | SelectionGesture::Rotate { .. })
-                ) && self.selection.expanded.iter().any(|id| {
-                    matches!(self.drawing.snapshot(*id), Some(ObjectSnapshot::Image(_)))
-                }));
-            if image_transform {
+                || (matches!(gesture, Some(SelectionGesture::Transform { .. }))
+                    && self.selection.expanded.iter().any(|id| {
+                        matches!(self.drawing.snapshot(*id), Some(ObjectSnapshot::Image(_)))
+                    }));
+            if image_transform || matches!(gesture, Some(SelectionGesture::Rotate { .. })) {
                 // Keep the selection so the restored overlay is visible immediately.
                 return;
             }
@@ -632,16 +646,6 @@ impl Canvas {
         }
         None
     }
-    fn display_bounds(mut bounds: ObjectBounds, scale: f64) -> ObjectBounds {
-        let center = bounds.center();
-        for (i, c) in center.into_iter().enumerate() {
-            if (bounds.max[i] - bounds.min[i]) * scale < f64::from(style::SELECTION_MIN) {
-                bounds.min[i] = c - f64::from(style::SELECTION_MIN) * 0.5 / scale;
-                bounds.max[i] = c + f64::from(style::SELECTION_MIN) * 0.5 / scale;
-            }
-        }
-        bounds
-    }
     fn handle(&self, point: Point, scale: f64) -> Option<usize> {
         if !matches!(self.tool, Tool::Select | Tool::Lasso)
             || self.single_shape_handles()
@@ -649,33 +653,61 @@ impl Canvas {
         {
             return None;
         }
-        Self::display_bounds(self.selection.bounds?, scale)
-            .corners()
-            .iter()
-            .position(|c| {
-                (c[0] - point[0]).hypot(c[1] - point[1]) * scale <= f64::from(style::SELECTION_HIT)
-            })
+        self.editing_frame(scale)?.corners().iter().position(|c| {
+            (c[0] - point[0]).hypot(c[1] - point[1]) * scale <= f64::from(style::SELECTION_HIT)
+        })
     }
     fn rotation_point(&self, scale: f64) -> Option<Point> {
-        if let Some(image) = self.effective_selected_image() {
-            return Some(Self::image_rotation_geometry(&image, scale).1);
+        self.rotation_grip(scale).map(|(_, handle)| handle)
+    }
+    fn editing_frame(&self, scale: f64) -> Option<selection::SelectionFrame> {
+        if let Some(SelectionGesture::Rotate { frame, delta, .. }) = self.selection_gesture {
+            return Some(frame.transformed(delta));
         }
-        let bounds = Self::display_bounds(self.selection.bounds?, scale);
-        let (_, handle) = Self::rotation_geometry(bounds, scale);
-        Some(handle)
+        let preview: Option<&dyn CanvasObject> = self
+            .image_resize_preview()
+            .map(|image| image as &dyn CanvasObject)
+            .or_else(|| {
+                self.shape_edit_preview()
+                    .map(|shape| shape as &dyn CanvasObject)
+            })
+            .or_else(|| {
+                self.text_resize
+                    .as_ref()
+                    .map(|resize| &resize.preview as &dyn CanvasObject)
+            });
+        let frame = preview
+            .and_then(selection::SelectionFrame::for_object)
+            .or(self.selection.frame)?;
+        let frame = frame.transformed(
+            self.selection_preview(self.selection.surface)
+                .unwrap_or_default(),
+        );
+        Some(
+            if self.single_shape_handles() || self.selected_image().is_some() {
+                frame
+            } else {
+                frame.with_minimum_extent(f64::from(style::SELECTION_MIN) / scale)
+            },
+        )
     }
-    fn rotation_geometry(bounds: ObjectBounds, scale: f64) -> (Point, Point) {
-        let stem = [bounds.center()[0], bounds.min[1]];
-        let handle = [stem[0], stem[1] - f64::from(style::ROTATION_OFFSET) / scale];
-        (stem, handle)
+
+    fn rotation_grip(&self, scale: f64) -> Option<(Point, Point)> {
+        Some(
+            self.editing_frame(scale)?
+                .grip(f64::from(style::ROTATION_OFFSET) / scale),
+        )
     }
-    fn rotation_hit(&self, point: Point, scale: f64) -> bool {
+    pub(super) fn rotating(&self, surface: Surface) -> bool {
+        matches!(self.selection_gesture, Some(SelectionGesture::Rotate { surface: s, moved: true, .. }) if s == surface)
+    }
+    pub(super) fn rotation_hit(&self, point: Point, scale: f64) -> bool {
         matches!(self.tool, Tool::Select | Tool::Lasso)
             && self.rotation_point(scale).is_some_and(|p| {
                 (p[0] - point[0]).hypot(p[1] - point[1]) * scale <= f64::from(style::SELECTION_HIT)
             })
     }
-    fn start_rotation(&mut self, surface: Surface, point: Point) {
+    fn start_rotation(&mut self, surface: Surface, point: Point, started_at: f64) {
         self.snap_session = None;
         if self
             .selection
@@ -688,18 +720,59 @@ impl Canvas {
             );
             return;
         }
-        if let (Some(bounds), Some(geometry)) = (self.selection.bounds, self.selection.geometry) {
-            let center = bounds.center();
+        if let (Some(geometry), Some((_, view, _))) = (self.selection.geometry, self.selection_view)
+            && let Some(frame) = self.editing_frame(view.scale)
+        {
+            let center = frame.center();
+            let start_angle = (point[1] - center[1]).atan2(point[0] - center[0]);
+            let ids = self.selection.expanded.clone();
+            let sources = self
+                .drawing
+                .items()
+                .iter()
+                .filter(|obj| ids.contains(&obj.id()))
+                .cloned()
+                .collect();
             self.selection_gesture = Some(SelectionGesture::Rotate {
+                session: DragSession {
+                    ids,
+                    sources,
+                    view,
+                    revision: self.drawing.revision(),
+                },
+                roots: self.selection.ids.clone(),
                 surface,
                 start: point,
-                center,
+                started_at,
+                frame,
                 geometry,
-                last_angle: (point[1] - center[1]).atan2(point[0] - center[0]),
-                angle: 0.,
+                start_angle,
+                last_angle: start_angle,
+                last: point,
+                turns: 0,
                 delta: Placement::default(),
                 moved: false,
             });
+        }
+    }
+    fn reset_rotation(&mut self) {
+        if let Some(frame) = self.selection.frame
+            && frame.angle() != 0.0
+        {
+            let center = frame.center();
+            let delta = Placement {
+                origin: center,
+                position: center,
+                rotation: -frame.angle(),
+                ..Default::default()
+            };
+            if self.drawing.transform_objects(&self.selection.ids, delta) {
+                self.prune_cache();
+            } else {
+                self.notice = Some(
+                    "Rotation reset would leave this page or exceed supported coordinates.".into(),
+                );
+            }
         }
     }
     fn start_transform(
@@ -709,7 +782,11 @@ impl Canvas {
         corner: Option<usize>,
         scale: f64,
     ) {
-        if let (Some(bounds), Some(geometry)) = (self.selection.bounds, self.selection.geometry) {
+        if let (Some(bounds), Some(geometry), Some(frame)) = (
+            self.selection.bounds,
+            self.selection.geometry,
+            self.editing_frame(scale),
+        ) {
             let expanded = self.selection.expanded.clone();
             if expanded.iter().any(|id| self.drawing.is_locked(*id)) {
                 self.notice = Some(
@@ -723,11 +800,6 @@ impl Canvas {
                 (1.0 / extent).min(1.0)
             } else {
                 1.0
-            };
-            let bounds = if corner.is_some() {
-                Self::display_bounds(bounds, scale)
-            } else {
-                bounds
             };
             let mut limits = (0.0001_f64, 10000.0_f64);
             for object in self
@@ -762,6 +834,7 @@ impl Canvas {
                 bounds,
                 geometry,
                 corner,
+                frame,
                 delta: Placement::default(),
                 moved: false,
                 limits,
@@ -853,6 +926,8 @@ impl Canvas {
                 // the visible handle, and must not snap its center to the pointer.
                 let handle = if source.is_sticky_note() {
                     source.note_resize_handles().unwrap()[*index]
+                } else if *corner && *index >= 4 {
+                    source.box_edges().unwrap()[*index - 4]
                 } else if *corner {
                     source.box_corners().unwrap()[*index]
                 } else {
@@ -862,6 +937,8 @@ impl Canvas {
                 let resize = |target| {
                     if source.is_sticky_note() {
                         source.with_note_handle(*index, target)
+                    } else if *corner && *index >= 4 {
+                        source.with_edge(*index - 4, target, shift)
                     } else if *corner {
                         source.with_corner(*index, target, shift)
                     } else {
@@ -878,6 +955,10 @@ impl Canvas {
                         let zero = source.placement.apply([0.; 2]);
                         let end = source.placement.apply(local);
                         Some([end[0] - zero[0], end[1] - zero[1]])
+                    } else if *corner && *index >= 4 {
+                        let edges = source.box_edges().unwrap();
+                        let opposite = edges[(*index - 4 + 2) % 4];
+                        Some([handle[0] - opposite[0], handle[1] - opposite[1]])
                     } else if (*corner && shift) || source.kind() == crate::shape::ShapeKind::Circle
                     {
                         let anchor = source.box_corners().unwrap()[(*index + 2) % 4];
@@ -995,38 +1076,48 @@ impl Canvas {
             Some(SelectionGesture::Rotate {
                 surface: s,
                 start,
-                center,
+                frame,
                 geometry,
+                start_angle,
                 last_angle,
-                angle,
+                last,
+                turns,
                 delta,
                 moved,
+                ..
             }) if *s == surface => {
+                let center = frame.center();
                 if (point[0] - center[0]).hypot(point[1] - center[1]) * scale < 1.0 {
                     return;
                 }
+                *last = point;
                 let next = (point[1] - center[1]).atan2(point[0] - center[0]);
-                *angle += (next - *last_angle + std::f64::consts::PI)
-                    .rem_euclid(std::f64::consts::TAU)
-                    - std::f64::consts::PI;
+                let difference = next - *last_angle;
+                let pi = std::f64::consts::PI;
+                if difference > pi {
+                    *turns -= 1;
+                } else if difference < -pi {
+                    *turns += 1;
+                }
                 *last_angle = next;
                 if !*moved && (point[0] - start[0]).hypot(point[1] - start[1]) * scale < 3.0 {
                     return;
                 }
-                let step = std::f64::consts::PI / 12.0;
-                let rotation = if shift {
-                    (*angle / step).round() * step
+                *moved = true;
+                let angle = next - *start_angle + f64::from(*turns) * std::f64::consts::TAU;
+                let step = pi / 12.0;
+                let angle = if shift {
+                    (angle / step).round() * step
                 } else {
-                    *angle
+                    angle
                 };
                 if let Some(valid) = selection::rotation_about(
                     *geometry,
-                    *center,
-                    rotation,
+                    center,
+                    angle,
                     self.drawing.bounds(surface),
                 ) {
                     *delta = valid;
-                    *moved = true;
                 }
             }
             Some(SelectionGesture::Transform {
@@ -1035,6 +1126,7 @@ impl Canvas {
                 bounds,
                 geometry,
                 corner,
+                frame,
                 delta,
                 moved,
                 limits,
@@ -1046,7 +1138,7 @@ impl Canvas {
                 }
                 *moved = true;
                 *delta = if let Some(index) = corner {
-                    let corners = bounds.corners();
+                    let corners = frame.corners();
                     let anchor = corners[(*index + 2) % 4];
                     let corner = corners[*index];
                     let direction = [corner[0] - anchor[0], corner[1] - anchor[1]];
@@ -1061,7 +1153,37 @@ impl Canvas {
                 if let Some(snap) = &mut self.snap_session {
                     let moving = snap.moving_bounds.unwrap_or(*bounds);
                     if let Some(index) = corner {
-                        let snapped = snap.resize(moving, *delta, *index, scale, bypass);
+                        let rail_snap = !frame.is_world_aligned();
+                        let snapped = if rail_snap {
+                            let grip = delta.apply(frame.corners()[*index]);
+                            let anchor = delta.origin;
+                            let direction = [grip[0] - anchor[0], grip[1] - anchor[1]];
+                            let point_bounds = ObjectBounds {
+                                min: grip,
+                                max: grip,
+                            };
+                            let point = snap.handle(
+                                point_bounds,
+                                grip,
+                                Some(direction),
+                                true,
+                                scale,
+                                bypass,
+                            );
+                            let projection = (point[0] - anchor[0]) * direction[0]
+                                + (point[1] - anchor[1]) * direction[1];
+                            let length_squared = direction[0].powi(2) + direction[1].powi(2);
+                            if point == grip || length_squared <= 1e-12 {
+                                *delta
+                            } else {
+                                Placement {
+                                    scale: delta.scale * projection / length_squared,
+                                    ..*delta
+                                }
+                            }
+                        } else {
+                            snap.resize(moving, *delta, *index, scale, bypass)
+                        };
                         let clamped = selection::scale_about(
                             *geometry,
                             snapped.origin,
@@ -1070,7 +1192,16 @@ impl Canvas {
                         );
                         if clamped == snapped {
                             *delta = snapped;
-                            snap.reconcile(moving.placed(*delta));
+                            let bounds = if rail_snap {
+                                let grip = delta.apply(frame.corners()[*index]);
+                                ObjectBounds {
+                                    min: grip,
+                                    max: grip,
+                                }
+                            } else {
+                                moving.placed(*delta)
+                            };
+                            snap.reconcile(bounds);
                         } else {
                             snap.clear();
                         }
@@ -1146,10 +1277,24 @@ impl Canvas {
                 }
             }
             Some(SelectionGesture::Rotate {
-                delta, moved: true, ..
+                session,
+                roots,
+                delta,
+                moved: true,
+                ..
             }) => {
-                self.drawing.transform_objects(&self.selection.ids, delta);
-                self.prune_cache();
+                if self.drawing.revision() == session.revision
+                    && self.selection.ids == roots
+                    && self
+                        .drawing
+                        .items()
+                        .iter()
+                        .filter(|o| session.ids.contains(&o.id()))
+                        .eq(session.sources.iter())
+                    && self.drawing.transform_objects(&roots, delta)
+                {
+                    self.prune_cache();
+                }
             }
             Some(SelectionGesture::Lasso {
                 surface,
@@ -1217,7 +1362,8 @@ impl Canvas {
         if self.selection.surface == surface {
             if let Some(
                 SelectionGesture::Transform { session, .. }
-                | SelectionGesture::ImageResize { session, .. },
+                | SelectionGesture::ImageResize { session, .. }
+                | SelectionGesture::Rotate { session, .. },
             ) = &self.selection_gesture
                 && (session.view != transform || session.revision != self.drawing.revision())
             {
@@ -1268,12 +1414,19 @@ impl Canvas {
                     let rotation = self.selection.surface == surface
                         && !modifiers.alt
                         && self.rotation_hit(point, transform.scale);
+                    if !rotation {
+                        self.rotation_click = None;
+                    }
                     if !self.drawing.contains(surface, point) && corner.is_none() && !rotation {
                         continue;
                     }
                     self.selection.scope(surface);
                     self.selection_view =
                         Some((surface, transform, bounds.intersect(ui.clip_rect())));
+                    if rotation {
+                        self.start_rotation(surface, point, ui.input(|input| input.time));
+                        continue;
+                    }
                     if !modifiers.alt
                         && let Some((source, index)) = self.image_handle(point, transform.scale)
                     {
@@ -1315,10 +1468,7 @@ impl Canvas {
                         });
                         continue;
                     }
-                    if rotation {
-                        self.start_rotation(surface, point);
-                        continue;
-                    }
+
                     if let Some(corner) = corner {
                         self.start_transform(surface, point, Some(corner), transform.scale);
                         continue;
@@ -1361,7 +1511,10 @@ impl Canvas {
                 }
                 Event::ModifiersChanged(modifiers) => {
                     let point = match &self.selection_gesture {
-                        Some(SelectionGesture::ImageResize { last, .. }) => Some(*last),
+                        Some(
+                            SelectionGesture::ImageResize { last, .. }
+                            | SelectionGesture::Rotate { last, .. },
+                        ) => Some(*last),
                         Some(_) => ui
                             .input(|i| i.pointer.interact_pos())
                             .map(|pos| transform.to_document([pos.x as f64, pos.y as f64])),
@@ -1409,6 +1562,44 @@ impl Canvas {
                             modifiers.shift,
                             modifiers.alt,
                         );
+                        if let Some(SelectionGesture::Rotate {
+                            moved, started_at, ..
+                        }) = self.selection_gesture
+                        {
+                            let previous = self.rotation_click.take();
+                            let point = transform.to_document([pos.x as f64, pos.y as f64]);
+                            if !moved && self.rotation_hit(point, transform.scale) {
+                                let current = RotationClick {
+                                    surface,
+                                    revision: self.drawing.revision(),
+                                    time: ui.input(|input| input.time),
+                                    pos,
+                                };
+                                let (duration, delay, distance) = ui.ctx().options(|options| {
+                                    let input = &options.input_options;
+                                    (
+                                        input.max_click_duration,
+                                        input.max_double_click_delay,
+                                        input.max_click_dist,
+                                    )
+                                });
+                                // Pair only releases owned by this handle. Other widgets' clicks
+                                // and multiple presses/releases in one frame share egui's click state.
+                                if current.time - started_at <= duration {
+                                    if previous.is_some_and(|last| {
+                                        last.surface == current.surface
+                                            && last.revision == current.revision
+                                            && current.time - last.time < delay
+                                            && current.pos.distance(last.pos) <= distance
+                                    }) {
+                                        self.selection_gesture = None;
+                                        self.reset_rotation();
+                                    } else {
+                                        self.rotation_click = Some(current);
+                                    }
+                                }
+                            }
+                        }
                         self.commit_selection();
                     }
                 }
@@ -1513,76 +1704,47 @@ impl Canvas {
         if self.selection.surface != surface {
             return;
         }
-        let delta = self.selection_preview(surface).unwrap_or_default();
         let selection_tool = matches!(self.tool, Tool::Select | Tool::Lasso);
-        let image = self.effective_selected_image();
-        if image.is_none() {
-            for (_, object) in &self.selection.objects {
-                let object = object.placed(delta);
-                painter.rect_stroke(
-                    Rect::from_min_max(screen(object.min), screen(object.max)),
-                    2.0,
-                    Line::new(0.75, p.accent.gamma_multiply(0.55)),
-                    egui::StrokeKind::Outside,
-                );
-            }
-        }
-        let group = image
-            .as_ref()
-            .and_then(CanvasObject::world_bounds)
-            .or_else(|| {
-                self.shape_edit_preview()
-                    .and_then(CanvasObject::world_bounds)
-            })
-            .or(self.selection.bounds);
-        if let Some(group) = group {
-            let group = Self::display_bounds(group, transform.scale);
-            let corners = match &image {
-                Some(image) => image.corners(),
-                None => group.corners().map(|point| delta.apply(point)),
-            }
-            .map(screen);
-            painter.add(egui::Shape::closed_line(
-                corners.to_vec(),
-                Line::new(1.0, p.accent),
-            ));
-            if selection_tool {
-                if let Some(image) = &image {
-                    self.paint_image_handles(&painter, transform, image, p.surface, p.accent);
-                } else if !self.single_shape_handles() {
-                    for corner in corners {
-                        painter.rect(
-                            Rect::from_center_size(
-                                corner,
-                                egui::Vec2::splat(style::SELECTION_HANDLE),
-                            ),
-                            1.0,
-                            p.surface,
-                            Line::new(1.0, p.accent),
-                            egui::StrokeKind::Inside,
-                        );
+        let frame = self.editing_frame(transform.scale);
+        if !self.rotating(surface) {
+            if let Some(frame) = frame {
+                let corners = frame.corners().map(screen);
+                painter.add(egui::Shape::closed_line(
+                    corners.to_vec(),
+                    Line::new(1.0, p.accent),
+                ));
+                if selection_tool {
+                    if let Some(image) = self.effective_selected_image() {
+                        self.paint_image_handles(&painter, transform, &image, p.surface, p.accent);
+                    } else if !self.single_shape_handles() {
+                        for corner in corners {
+                            painter.rect(
+                                Rect::from_center_size(
+                                    corner,
+                                    egui::Vec2::splat(style::SELECTION_HANDLE),
+                                ),
+                                1.0,
+                                p.surface,
+                                Line::new(1.0, p.accent),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
                     }
                 }
-                let (stem, handle) = Self::rotation_geometry(group, transform.scale);
-                let (stem, handle) = match &image {
-                    Some(image) => Self::image_rotation_geometry(image, transform.scale),
-                    None => (
-                        delta.apply(stem),
-                        delta.apply(self.rotation_point(transform.scale).unwrap_or(handle)),
-                    ),
-                };
-                let handle_painter = ui.painter().with_clip_rect(ui.clip_rect());
-                handle_painter
-                    .line_segment([screen(stem), screen(handle)], Line::new(1., p.accent));
-                handle_painter.circle(
-                    screen(handle),
-                    style::SELECTION_HANDLE * 0.5,
-                    p.surface,
-                    Line::new(1., p.accent),
-                );
             }
+            self.paint_shape_handles(&painter, transform, surface, p.accent);
         }
-        self.paint_shape_handles(&painter, transform, surface, p.accent);
+        if selection_tool && let Some(frame) = frame {
+            let (stem, handle) = frame.grip(f64::from(style::ROTATION_OFFSET) / transform.scale);
+            let handle_painter = ui.painter().with_clip_rect(ui.clip_rect());
+            handle_painter.line_segment([screen(stem), screen(handle)], Line::new(1., p.accent));
+            handle_painter.circle(
+                screen(handle),
+                style::SELECTION_HANDLE * 0.5,
+                p.surface,
+                Line::new(1., p.accent),
+            );
+        }
         if let Some(pos) = ui.input(|i| i.pointer.hover_pos()).filter(|p| {
             bounds
                 .expand(style::ROTATION_OFFSET + style::SELECTION_HIT)
@@ -1603,10 +1765,16 @@ impl Canvas {
             {
                 egui::CursorIcon::Grab
             } else if let Some(index) = self.handle(point, transform.scale) {
-                if index % 2 == 0 {
-                    egui::CursorIcon::ResizeNwSe
-                } else {
-                    egui::CursorIcon::ResizeNeSw
+                let corners = frame.unwrap().corners();
+                let a = corners[index];
+                let b = corners[(index + 2) % 4];
+                let direction =
+                    ((b[1] - a[1]).atan2(b[0] - a[0]) / std::f64::consts::FRAC_PI_4).round() as i32;
+                match direction.rem_euclid(4) {
+                    0 => egui::CursorIcon::ResizeHorizontal,
+                    1 => egui::CursorIcon::ResizeNwSe,
+                    2 => egui::CursorIcon::ResizeVertical,
+                    _ => egui::CursorIcon::ResizeNeSw,
                 }
             } else if self.rotation_hit(point, transform.scale) {
                 egui::CursorIcon::Grab
@@ -1692,19 +1860,17 @@ impl Canvas {
         };
         let viewport = bounds.intersect(ui.clip_rect());
         let p = style::palette(ui);
-        let resize_bounds = self
-            .image_resize_preview()
-            .and_then(CanvasObject::world_bounds);
-        let resizing_image = resize_bounds.is_some();
+        let resizing_image = self.image_resize_preview().is_some();
         if matches!(self.tool, Tool::Select | Tool::Lasso)
             && self.selection.surface == surface
             && (self.selection_gesture.is_none() || resizing_image)
             && self.connection_gesture.is_none()
-            && let Some(group) = resize_bounds.or(self.selection.bounds)
+            && let Some(group) = self
+                .editing_frame(transform.scale)
+                .and_then(|frame| ObjectBounds::from_points(frame.corners()))
         {
-            let display = Self::display_bounds(group, transform.scale);
-            let mut top = transform.to_screen([display.center()[0], display.min[1]]);
-            let mut bottom = transform.to_screen([display.center()[0], display.max[1]]);
+            let mut top = transform.to_screen([group.center()[0], group.min[1]]);
+            let mut bottom = transform.to_screen([group.center()[0], group.max[1]]);
             if self.selection.ids.len() == 1
                 && let Some(ObjectSnapshot::Connector(c)) = self
                     .selection
@@ -1721,9 +1887,7 @@ impl Canvas {
                     bottom[1] = bottom[1].max(p[1] + f64::from(style::CONNECTOR_HIT));
                 }
             }
-            if self.selected_image().is_some()
-                && let Some(handle) = self.rotation_point(transform.scale)
-            {
+            if let Some(handle) = self.rotation_point(transform.scale) {
                 let y = transform.to_screen(handle)[1];
                 bottom[1] = bottom[1].max(y + f64::from(style::SELECTION_HIT));
             }

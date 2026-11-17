@@ -309,8 +309,10 @@ impl Canvas {
                     && ui.ctx().layer_id_at(pos) == Some(ui.layer_id()) =>
                 {
                     let point = view.to_document([pos.x as f64, pos.y as f64]);
-                    if let Some((source, preview, moving)) =
-                        self.connection_handle(point, view.scale)
+                    if !self.rotation_hit(point, view.scale)
+                        && self.shape_handle(point, view.scale).is_none()
+                        && let Some((source, preview, moving)) =
+                            self.connection_handle(point, view.scale)
                     {
                         self.connection_gesture = Some(ConnectionGesture {
                             source,
@@ -382,7 +384,10 @@ impl Canvas {
         surface: Surface,
         view: Transform,
     ) {
-        if self.selection.surface != surface || !matches!(self.tool, Tool::Select | Tool::Lasso) {
+        if self.rotating(surface)
+            || self.selection.surface != surface
+            || !matches!(self.tool, Tool::Select | Tool::Lasso)
+        {
             return;
         }
         let painter = ui.painter().with_clip_rect(ui.clip_rect());

@@ -392,6 +392,9 @@ guides and the optional document grid; hold Alt during a drag to bypass snapping
 Settings → Snapping configures defaults for future editors. All changes remain
 in memory pending M2 PDF persistence.
 
+Rotate selected objects with the round handle. Shift snaps to 15-degree steps,
+and double-clicking the handle resets the selection's orientation.
+
 Images: the top Image tool imports PNG, JPEG and WebP as editable canvas objects.
 Drag any image handle to stretch it, or hold Shift to keep its current proportions.
 Canvas file drop and screenshot paste are supported; original bytes stay in memory

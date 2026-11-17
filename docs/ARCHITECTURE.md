@@ -482,13 +482,38 @@ scales by the same positive scalar as the centerline; raw pressure/style/smoothi
 remain unchanged. Nonuniform resize belongs to future content types whose geometry
 can define that policy (for example boxes), not an implicit elliptical ink nib.
 
-Rotation uses a screen-sized handle above the group and a logical center pivot.
-Shift snaps relative rotation to 15-degree steps. Page ownership is unchanged;
-rotations whose conservative centerline bounds would leave the source page retain
-the last valid preview. Whiteboard rotations are unrestricted. Preview changes
-only scalar placement, with one journal transaction at release; Escape cancels.
-The existing nonrotating layer-transform preview remains the fast move/resize path.
-Rotation reuses tessellated mesh vertices rather than resmoothing raw ink.
+The interactive selection frame retains a local editing rectangle and a
+local-to-world placement. The viewport maps its transformed corners into
+screen space. World AABBs continue to support culling, indexing, alignment,
+and Page Note constraints. Box shapes use their intrinsic dimensions and
+local corner and edge grips. Images keep their independent width and height.
+Irregular strokes and paths use their local geometry bounds.
+
+A group frame projects each descendant's local editing corners through its
+baked world placement and back into the selected group's stored rotation and reflection basis.
+Nested children contribute their geometry once. Reroutable connectors do not
+extend a frame with other content. Connector-only selections use endpoint
+extents. An ungrouped selection uses the bottommost selected root with placement
+as its reference orientation. The frame is derived on revision or membership
+changes and captured for the duration of a gesture.
+
+The frame's center is the pivot. Its ring extends 24 screen points from the
+transformed top midpoint along its outward normal. Rotation, drawing and
+connector previews share the captured world-space delta. Only the stem and
+ring remain visible while rotating. After release, the oriented outline and
+grips return. Collective corner resize follows the original frame diagonal
+about the opposite corner. Shift snaps rotation in 15-degree steps. Page Note
+constraints retain the last valid preview. Escape discards the gesture.
+
+Double-click resets orientation through the same atomic Drawing transform.
+A singleton resets around its visual center. A mixed selection uses the
+bottommost selected root with placement as its reference, applying the inverse
+angle to the whole selection. Group snapshots carry a serde-defaulted angle.
+Descendant placements remain in world coordinates, so the group angle supplies
+orientation metadata and composes once when ancestors rotate or flip. Group
+reset rotates descendants together, keeping local angular differences and
+attachment IDs. Older group snapshots start at zero. The journal retains exact
+before and after placements and group metadata.
 
 Cut first captures a validated clipboard bundle and publishes the session fallback;
 only a successful copy removes selected objects in one history command. System

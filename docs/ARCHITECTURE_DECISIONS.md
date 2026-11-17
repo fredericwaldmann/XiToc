@@ -758,3 +758,25 @@ pixel and retained-asset caps bound memory; a 2048-side display cap can soften
 extreme enlargements while originals stay intact. Native decoding uses workers;
 WASM initially uses bounded synchronous decoding after asynchronous file reads.
 No guarantee of zero browser pause for maximum-size first imports is claimed.
+
+### Group rotation orientation (#51)
+
+Groups keep an orientation angle alongside their hierarchy. Descendant geometry
+remains in world coordinates, so existing picking, rendering and connector
+routing continue to consume the same placements. The angle allows the group
+to reset independently of child-local angles and participates in snapshot
+undo, redo and clipboard interchange. Older snapshots start at zero.
+
+### Oriented editing frames (#51)
+
+Editing frames use local geometry and its Placement. A group's stored orientation and reflection flags
+define the frame basis, and the selected descendants' projected local corners
+define its extents. The frame is derived transiently and journal entries retain
+the source objects and group angle. The world AABB remains available for spatial
+queries. Rendering and hit testing share the frame so the grip and outline
+agree before and after committing a transform.
+
+The interaction review used Figma's common-center rotation, Illustrator's
+oriented transform box, draw.io's shared group handle and Inkscape's direct
+side and corner scaling. XiToc keeps its top-center ring and its existing
+double-click rotation reset. [Figma](https://help.figma.com/hc/en-us/articles/360039956914-Adjust-alignment-rotation-position-and-dimensions), [Illustrator](https://helpx.adobe.com/illustrator/desktop/manage-objects/reshape-transform-objects/transform-objects.html), [draw.io](https://www.drawio.com/docs/manual/shapes/shape-rotate/), [Inkscape](https://inkscape-manuals.readthedocs.io/en/latest/selector-tool.html).

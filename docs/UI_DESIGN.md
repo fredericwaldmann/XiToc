@@ -203,8 +203,8 @@ retains membership and explains the 4096-vertex limit. Handles take priority ove
 area gestures in both modes (Shift still snaps rotation); Alt bypasses handles
 for subtraction. Modified object clicks change membership without moving it;
 unmodified object drags select/move the object or existing group.
-Escape cancels a live gesture and clears selection. While transforming a
-selection that contains an image, Escape cancels the transform and keeps the
+Escape cancels a live gesture and clears selection. During rotation or an image
+transform, Escape cancels the transform and keeps the
 selection visible at its original position. Focus loss or camera changes
 cancel previews without altering membership. A later release cannot commit a
 cancelled gesture. OS-reserved Alt-drag may be intercepted by window managers;
@@ -230,11 +230,20 @@ text is not treated as a native note. No unfinished tools appear. Shapes formatt
 
 ### M1.4 rotation, Cut and keyboard movement
 
-A round rotation handle sits 24 screen points above the group box, connected by
-a thin stem. Drag around the selection center; hold Shift for 15-degree snapping.
-The preview outline follows the rotating group; after commit bounds are recomputed.
-Page rotations stop at the last valid conservative centerline bounds; ownership
-never changes. The handle may be reached in the page margin within the editor.
+Selection outlines follow the local axes of the selected object, group or
+temporary selection. Box corners resize both local axes. Box side grips
+resize one axis and keep the opposite side fixed. Shift constrains proportions.
+A round rotation handle sits 24 screen points along the outward normal of
+the oriented frame's top edge. Its stem and ring follow the object or group's live rotation.
+After the drag threshold, the normal outline and resize grips are hidden until
+release. Hold Shift to snap to 15-degree steps around the same pivot. Escape
+cancels rotation and restores the original selection. Page rotations retain the
+last valid preview. The ring can be reached in the page margin within the editor.
+
+Double-click the ring to reset a singleton or group to 0° around its selection
+center. A mixed selection resets relative to its bottommost selected root with
+placement. Children keep their local orientation within a group. An already-zero
+selection creates no undo entry.
 Corner resizing remains proportional for handwriting, including off-axis drags
 and Shift; width/pressure appearance scales uniformly. Nonuniform boxes are future
 content, not a handwriting stretch mode.
@@ -242,8 +251,8 @@ content, not a handwriting stretch mode.
 Cut appears alongside Copy/Paste in Edit and canvas context actions, using
 Ctrl/Cmd+X. Cut removes content only after a validated session clipboard copy is
 available. Arrows move selected objects 1 document point; Shift-arrows move 10.
-Text input, popovers and active drags retain input priority. Escape cancels the
-preview and clears selection as before. The top drawing toolbar and application
+Text input, popovers and active drags retain input priority. The top drawing
+toolbar and application
 layout remain unchanged.
 
 On web, canvas Ctrl/Cmd+A and Ctrl/Cmd+D belong to XiToc, not browser page

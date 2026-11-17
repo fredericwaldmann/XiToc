@@ -1,7 +1,7 @@
 //! Transient object selection and pure lasso geometry. No egui or platform IO.
 use crate::{
     drawing::{Drawing, PressureStyle, Surface},
-    object::{ObjectBounds, ObjectId, Placement, Point},
+    object::{CanvasObject, ObjectBounds, ObjectId, ObjectSnapshot, Placement, Point},
 };
 use std::collections::HashSet;
 
@@ -38,13 +38,160 @@ pub enum Membership {
     Subtract,
 }
 
+/// A frame aligned with the selected object's local axes or the collective reference.
+#[derive(Clone, Copy)]
+pub struct SelectionFrame {
+    axes: Placement,
+    bounds: ObjectBounds,
+}
+impl SelectionFrame {
+    pub fn for_object(object: &dyn CanvasObject) -> Option<Self> {
+        Some(Self {
+            axes: object.placement(),
+            bounds: object.editing_bounds()?,
+        })
+    }
+
+    fn for_selection(drawing: &Drawing, selection: &Selection) -> Option<Self> {
+        let reference = drawing
+            .items()
+            .iter()
+            .filter(|o| selection.ids.contains(&o.id()))
+            .min_by_key(|o| matches!(o, ObjectSnapshot::Connector(_)))?;
+        let basis = match reference {
+            ObjectSnapshot::Group(group) => group.frame_basis(),
+            ObjectSnapshot::Connector(c) => {
+                let [a, b] = c.ends().map(|end| end.position());
+                Placement {
+                    rotation: (b[1] - a[1]).atan2(b[0] - a[0]),
+                    ..Default::default()
+                }
+            }
+            _ => Placement {
+                rotation: reference.as_object().placement().rotation,
+                ..Default::default()
+            },
+        };
+        let reference = reference.as_object();
+        if selection.ids.len() == 1
+            && !matches!(
+                reference.object_type(),
+                crate::object::ObjectType::Group | crate::object::ObjectType::Connector
+            )
+        {
+            return Self::for_object(reference);
+        }
+        let axes = Placement {
+            position: drawing
+                .items()
+                .iter()
+                .find_map(|snapshot| {
+                    if !selection.expanded.contains(&snapshot.id())
+                        || matches!(
+                            snapshot,
+                            ObjectSnapshot::Group(_) | ObjectSnapshot::Connector(_)
+                        )
+                    {
+                        return None;
+                    }
+                    let object = snapshot.as_object();
+                    Some(object.placement().apply(object.editing_bounds()?.center()))
+                })
+                .unwrap_or(selection.bounds?.center()),
+            ..basis
+        };
+        let mut bounds = None::<ObjectBounds>;
+        for snapshot in drawing
+            .items()
+            .iter()
+            .filter(|o| selection.expanded.contains(&o.id()))
+        {
+            // Routes may change on rotation. The collective frame follows the objects
+            // they connect, and uses endpoints for a selection made solely of wires.
+            if matches!(
+                snapshot,
+                ObjectSnapshot::Group(_) | ObjectSnapshot::Connector(_)
+            ) {
+                continue;
+            }
+            let object = snapshot.as_object();
+            if let Some(local) = object.editing_bounds() {
+                let projected = ObjectBounds::from_points(
+                    local
+                        .corners()
+                        .map(|p| axes.inverse(object.placement().apply(p))),
+                )?;
+                bounds = Some(bounds.map_or(projected, |b| b.union(projected)));
+            }
+        }
+        let bounds = bounds.or_else(|| {
+            ObjectBounds::from_points(
+                drawing
+                    .items()
+                    .iter()
+                    .filter_map(|o| match o {
+                        ObjectSnapshot::Connector(c) if selection.expanded.contains(&c.id) => {
+                            Some(c)
+                        }
+                        _ => None,
+                    })
+                    .flat_map(|c| c.ends().map(|end| axes.inverse(end.position()))),
+            )
+        })?;
+        Some(Self { axes, bounds })
+    }
+
+    pub fn center(self) -> Point {
+        self.axes.apply(self.bounds.center())
+    }
+
+    pub fn angle(self) -> f64 {
+        self.axes.rotation
+    }
+
+    pub fn corners(self) -> [Point; 4] {
+        self.bounds.corners().map(|point| self.axes.apply(point))
+    }
+
+    pub fn transformed(self, delta: Placement) -> Self {
+        if delta.is_identity() {
+            return self;
+        }
+        Self {
+            axes: self.axes.then(delta, self.bounds.center()),
+            ..self
+        }
+    }
+
+    pub fn is_world_aligned(self) -> bool {
+        self.axes.rotation == 0.0 && self.axes.reflected == [false; 2]
+    }
+
+    pub fn with_minimum_extent(mut self, minimum_world: f64) -> Self {
+        let minimum = minimum_world / self.axes.scale;
+        for (axis, center) in self.bounds.center().into_iter().enumerate() {
+            if self.bounds.max[axis] - self.bounds.min[axis] < minimum {
+                self.bounds.min[axis] = center - minimum * 0.5;
+                self.bounds.max[axis] = center + minimum * 0.5;
+            }
+        }
+        self
+    }
+
+    pub fn grip(self, offset: f64) -> (Point, Point) {
+        let top = self.bounds.edge_midpoints()[0];
+        let outer = [top[0], top[1] - offset / self.axes.scale];
+        (self.axes.apply(top), self.axes.apply(outer))
+    }
+}
+
 pub struct Selection {
     pub ids: HashSet<ObjectId>,
     pub expanded: HashSet<ObjectId>,
     pub surface: Surface,
     pub bounds: Option<ObjectBounds>,
     pub geometry: Option<ObjectBounds>,
-    pub objects: Vec<(ObjectId, ObjectBounds)>,
+    pub frame: Option<SelectionFrame>,
     revision: Option<u64>,
 }
 impl Selection {
@@ -55,7 +202,7 @@ impl Selection {
             surface,
             bounds: None,
             geometry: None,
-            objects: Vec::new(),
+            frame: None,
             revision: None,
         }
     }
@@ -70,7 +217,7 @@ impl Selection {
         self.expanded.clear();
         self.bounds = None;
         self.geometry = None;
-        self.objects.clear();
+        self.frame = None;
         self.revision = None;
     }
     pub fn change(
@@ -102,7 +249,7 @@ impl Selection {
         self.revision = Some(drawing.revision());
         self.bounds = None;
         self.geometry = None;
-        self.objects.clear();
+        self.frame = None;
         self.expanded.clear();
         if self.ids.is_empty() {
             return;
@@ -116,7 +263,6 @@ impl Selection {
             let id = object.object_id();
             live.insert(id);
             if let Some(b) = object.world_bounds() {
-                self.objects.push((id, b));
                 self.bounds = Some(self.bounds.map_or(b, |old| old.union(b)));
             }
             if let Some(b) = object.geometry_bounds() {
@@ -125,6 +271,7 @@ impl Selection {
         }
         self.ids = live;
         self.expanded = drawing.expanded(&self.ids);
+        self.frame = SelectionFrame::for_selection(drawing, self);
     }
 }
 
