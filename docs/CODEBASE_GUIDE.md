@@ -1015,6 +1015,14 @@ canonical state or persistence format is introduced.
   captured destinations, bounded reads, lossless PNG encoding of screenshot pixels.
 - `canvas_images.rs`: completed-import insertion/replacement, texture caching,
   image formatting and local resize-handle helpers in the existing canvas controller.
+  The image mesh, oriented outline, eight resize handles and rotation handle
+  derive from the same effective image. A move or rotation composes the shared
+  selection placement with the committed image. An intrinsic resize supplies its
+  preview snapshot directly. Mixed selections and groups use the shared overlay.
+  Overlay geometry is generated from the current gesture each frame. Contextual
+  controls are hidden during the gesture and return at the committed bounds.
+  Escape during an image transform discards the preview and leaves the selected
+  image or group outlined at its original position.
 - `object.rs`, `drawing.rs`: Image snapshot dispatch and weak asset interning;
   canonical object/history handles retain assets. Generic transforms/grouping and
   existing journal operations remain shared. ImageResize uses the same DragSession

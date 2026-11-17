@@ -1771,6 +1771,19 @@ source replacement, delete/undo/redo, content identity/interning/history retenti
 retained-asset limits, screenshot-pixel paste and native dropped-file coordinates.
 Controller gestures cover 50/100/200/400% zoom and partially offscreen dragging;
 texture IDs and immutable asset references are reused through those gestures.
+Frame-level regressions compare the image mesh, outline, eight resize grips and
+rotation grip while the pointer is held, including stationary held frames, fast
+movement, panned views and rotated/flipped images. They also compare release,
+Escape, undo and redo frames, cover corner and edge resizing and rotation, and
+verify collective bounds for two images, image mixed with rectangle, text or
+sticky note, and a group containing an image.
+
+To reproduce manually, insert and select an image, then drag its body slowly
+and quickly. Pause with the button held and check all eight grips, the outline
+and the rotation ring before release. Repeat at 50%, 100%, 200% and 400%, after
+panning, and with a rotated image partly outside the viewport. Resize a corner
+and an edge, rotate, then Shift-select a rectangle and drag both. Release,
+Undo and Redo should all show an outline and grips at the corresponding position.
 
 Executed on the isolated image worktree: cargo fmt --all -- --check,
 cargo clippy --all-targets -- -D warnings, cargo test --all-targets (319 passed,

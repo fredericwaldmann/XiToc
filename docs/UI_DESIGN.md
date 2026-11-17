@@ -203,7 +203,9 @@ retains membership and explains the 4096-vertex limit. Handles take priority ove
 area gestures in both modes (Shift still snaps rotation); Alt bypasses handles
 for subtraction. Modified object clicks change membership without moving it;
 unmodified object drags select/move the object or existing group.
-Escape cancels a live gesture and clears selection. Focus loss or camera changes
+Escape cancels a live gesture and clears selection. While transforming a
+selection that contains an image, Escape cancels the transform and keeps the
+selection visible at its original position. Focus loss or camera changes
 cancel previews without altering membership. A later release cannot commit a
 cancelled gesture. OS-reserved Alt-drag may be intercepted by window managers;
 use the corresponding area gesture with Shift where available or change the OS

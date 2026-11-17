@@ -1,5 +1,7 @@
 use super::*;
-use crate::canvas::selection_ui::tests::{click, frame, moved, pointer, screen, setup, t};
+use crate::canvas::selection_ui::tests::{
+    click, frame, frame_shapes, moved, pointer, screen, setup, t,
+};
 use crate::object::ObjectBounds;
 use crate::{
     document::DocumentKind,
@@ -519,4 +521,373 @@ fn image_overlap_drag_performance() {
             .iter()
             .all(|o| matches!(o,ObjectSnapshot::Image(i) if Arc::ptr_eq(&i.asset,&asset)))
     );
+}
+
+fn assert_selection_paint(
+    shapes: &[egui::epaint::ClippedShape],
+    view: Transform,
+    corners: [Point; 4],
+    handles: &[Point],
+    rotation: Point,
+) {
+    let near = |pos: Pos2, point: Point| {
+        let [x, y] = view.to_screen(point);
+        pos.distance(egui::pos2(x as f32, y as f32)) < 0.01
+    };
+    assert!(
+        shapes.iter().any(|shape| matches!(
+            &shape.shape,
+            egui::Shape::Path(path) if path.closed && path.points.len() == 4
+                && path.points.iter().zip(corners).all(|(&pos, point)| near(pos, point))
+        )),
+        "selection outline did not match the preview"
+    );
+    let viewport = Rect::from_min_size(Pos2::ZERO, egui::vec2(800., 600.));
+    let visible = |point| {
+        let [x, y] = view.to_screen(point);
+        viewport.contains(egui::pos2(x as f32, y as f32))
+    };
+    for &handle in handles.iter().filter(|&&point| visible(point)) {
+        assert!(
+            shapes.iter().any(|shape| matches!(
+                &shape.shape,
+                egui::Shape::Rect(rect)
+                    if (rect.rect.width() - crate::ui::style::SELECTION_HANDLE).abs() < 0.001
+                        && near(rect.rect.center(), handle)
+            )),
+            "missing resize handle at {handle:?}"
+        );
+    }
+    assert!(
+        !visible(rotation)
+            || shapes.iter().any(|shape| matches!(
+                &shape.shape,
+                egui::Shape::Circle(circle)
+                    if circle.radius == crate::ui::style::SELECTION_HANDLE * 0.5
+                        && near(circle.center, rotation)
+            )),
+        "missing rotation handle at {rotation:?}"
+    );
+}
+
+fn rotation_grip(bounds: ObjectBounds, view: Transform) -> Point {
+    [
+        bounds.center()[0],
+        bounds.min[1] - f64::from(crate::ui::style::ROTATION_OFFSET) / view.scale,
+    ]
+}
+
+fn assert_image_paint(
+    canvas: &Canvas,
+    shapes: &[egui::epaint::ClippedShape],
+    view: Transform,
+    expected: &ImageObject,
+) {
+    let texture = canvas.image_cache[&expected.asset.id()].texture.id();
+    let corners = expected.corners();
+    assert!(
+        shapes.iter().any(|shape| matches!(
+            &shape.shape,
+            egui::Shape::Mesh(mesh) if mesh.texture_id == texture
+                && mesh.vertices.len() == 4
+                && mesh.vertices.iter().zip(corners).all(|(v, p)| {
+                    let [x, y] = view.to_screen(p);
+                    v.pos.distance(egui::pos2(x as f32, y as f32)) < 0.01
+                })
+        )),
+        "image mesh did not match the preview"
+    );
+}
+
+fn assert_selected_image_paint(
+    canvas: &Canvas,
+    shapes: &[egui::epaint::ClippedShape],
+    view: Transform,
+    expected: &ImageObject,
+) {
+    let effective = canvas.effective_selected_image().unwrap();
+    for (actual, target) in effective.handles().into_iter().zip(expected.handles()) {
+        assert!((actual[0] - target[0]).hypot(actual[1] - target[1]) < 0.001);
+    }
+    assert_image_paint(canvas, shapes, view, expected);
+    assert_selection_paint(
+        shapes,
+        view,
+        expected.corners(),
+        &expected.handles(),
+        Canvas::image_rotation_geometry(expected, view.scale).1,
+    );
+}
+
+#[test]
+fn image_mesh_and_all_selection_grips_move_in_the_same_held_frame() {
+    for scale in [0.5, 1., 2., 4.] {
+        for angle in [0., 0.4] {
+            let (mut c, s) = setup(DocumentKind::Whiteboard);
+            c.snapping.objects = false;
+            c.snapping.grid = false;
+            c.select(Tool::Select);
+            let id = add(&mut c, s, [100., 100.]);
+            let mut original = (*get(&c, id)).clone();
+            original.placement.rotation = angle;
+            original.placement.reflected = [angle != 0., false];
+            if scale == 4. {
+                original.dimensions[0] = 220.;
+            }
+            if angle != 0. || scale == 4. {
+                assert!(c.drawing.replace_image(original.clone()));
+            }
+            let ctx = egui::Context::default();
+            let view = Transform {
+                origin: [if angle == 0. { 195. } else { 320. }, 165.],
+                center: [100., 100.],
+                scale,
+            };
+            let start = original.placement.apply([60., 30.]);
+            frame(&ctx, &mut c, s, view, vec![], 0., true);
+            click(&ctx, &mut c, s, view, start, egui::Modifiers::NONE);
+            let revision = c.drawing.revision();
+            let held = frame_shapes(
+                &ctx,
+                &mut c,
+                s,
+                view,
+                vec![
+                    moved(view, start),
+                    pointer(screen(view, start), true, egui::Modifiers::NONE),
+                ],
+                1.,
+                true,
+            );
+            assert_selected_image_paint(&c, &held, view, &original);
+            let offset = if angle == 0. && scale == 1. {
+                [150., 80.]
+            } else {
+                [76., 29.]
+            };
+            let end = [start[0] + offset[0], start[1] + offset[1]];
+            let mut expected = original.clone();
+            for (position, delta) in expected.placement.position.iter_mut().zip(offset) {
+                *position += delta;
+            }
+            let held = frame_shapes(&ctx, &mut c, s, view, vec![moved(view, end)], 1.01, true);
+            assert_selected_image_paint(&c, &held, view, &expected);
+            let stationary = frame_shapes(&ctx, &mut c, s, view, vec![], 1.2, true);
+            assert_selected_image_paint(&c, &stationary, view, &expected);
+            assert_eq!(c.drawing.revision(), revision);
+            assert_eq!(*get(&c, id), original);
+
+            let escape = frame_shapes(
+                &ctx,
+                &mut c,
+                s,
+                view,
+                vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                1.3,
+                true,
+            );
+            assert_selected_image_paint(&c, &escape, view, &original);
+            frame(
+                &ctx,
+                &mut c,
+                s,
+                view,
+                vec![pointer(screen(view, end), false, egui::Modifiers::NONE)],
+                1.4,
+                true,
+            );
+            assert_eq!(c.drawing.revision(), revision);
+
+            frame(
+                &ctx,
+                &mut c,
+                s,
+                view,
+                vec![
+                    moved(view, start),
+                    pointer(screen(view, start), true, egui::Modifiers::NONE),
+                    moved(view, end),
+                ],
+                2.,
+                true,
+            );
+            let released = frame_shapes(
+                &ctx,
+                &mut c,
+                s,
+                view,
+                vec![pointer(screen(view, end), false, egui::Modifiers::NONE)],
+                2.1,
+                true,
+            );
+            assert_selected_image_paint(&c, &released, view, &expected);
+            c.undo();
+            assert_eq!(*get(&c, id), original);
+            let undone = frame_shapes(&ctx, &mut c, s, view, vec![], 2.2, true);
+            assert_selected_image_paint(&c, &undone, view, &original);
+            c.redo();
+            let redone = frame_shapes(&ctx, &mut c, s, view, vec![], 2.3, true);
+            assert_selected_image_paint(&c, &redone, view, &expected);
+        }
+    }
+}
+
+#[test]
+fn image_resize_and_rotation_paint_match_before_and_after_release() {
+    for index in [Some(4), Some(3), None] {
+        let (mut c, s) = setup(DocumentKind::Whiteboard);
+        c.select(Tool::Select);
+        c.snapping.objects = false;
+        c.snapping.grid = false;
+        let id = add(&mut c, s, [200., 200.]);
+        let mut original = (*get(&c, id)).clone();
+        original.preserve_aspect = index != Some(3);
+        original.placement.rotation = 0.35;
+        original.placement.reflected = [false, true];
+        assert!(c.drawing.replace_image(original.clone()));
+        let ctx = egui::Context::default();
+        let view = t();
+        c.selection.change([id], Membership::Replace, &c.drawing);
+        let bounds = original.world_bounds().unwrap();
+        let (start, end, expected) = if let Some(index) = index {
+            let start = original.handles()[index];
+            let end = [start[0] + 38., start[1] - 18.];
+            (start, end, original.resized(index, end))
+        } else {
+            let start = Canvas::image_rotation_geometry(&original, view.scale).1;
+            let center = bounds.center();
+            let end = [
+                center[0] + center[1] - start[1],
+                center[1] + start[0] - center[0],
+            ];
+            (
+                start,
+                end,
+                original.transformed(Placement {
+                    origin: center,
+                    position: center,
+                    rotation: std::f64::consts::FRAC_PI_2,
+                    ..Placement::default()
+                }),
+            )
+        };
+        let held = frame_shapes(
+            &ctx,
+            &mut c,
+            s,
+            view,
+            vec![
+                moved(view, start),
+                pointer(screen(view, start), true, egui::Modifiers::NONE),
+                moved(view, end),
+            ],
+            1.,
+            true,
+        );
+        assert_eq!(*get(&c, id), original);
+        assert_selected_image_paint(&c, &held, view, &expected);
+        let release = frame_shapes(
+            &ctx,
+            &mut c,
+            s,
+            view,
+            vec![pointer(screen(view, end), false, egui::Modifiers::NONE)],
+            1.1,
+            true,
+        );
+        assert_selected_image_paint(&c, &release, view, &expected);
+    }
+}
+
+#[test]
+fn mixed_and_grouped_image_drag_paints_the_collective_preview() {
+    for kind in ["image", "rectangle", "text", "sticky note", "group"] {
+        let (mut c, s) = setup(DocumentKind::Whiteboard);
+        c.select(Tool::Select);
+        c.snapping.objects = false;
+        c.snapping.grid = false;
+        let id = add(&mut c, s, [100., 100.]);
+        let original = get(&c, id);
+        let owner = c.drawing.owner();
+        let peer: ObjectSnapshot = match kind {
+            "image" => {
+                let peer = add(&mut c, s, [300., 140.]);
+                get(&c, peer).as_ref().clone().into()
+            }
+            "text" => crate::text::TextObject::new(owner, s, [300., 140.], 120.).into(),
+            "sticky note" => {
+                Shape::create_sticky_note(owner, s, [300., 140.], [100., 100.], [255, 240, 100])
+                    .unwrap()
+                    .into()
+            }
+            _ => Shape::create(
+                owner,
+                s,
+                ShapeKind::Rectangle,
+                [300., 140.],
+                [390., 205.],
+                false,
+            )
+            .unwrap()
+            .into(),
+        };
+        let peer_id = peer.id();
+        if kind != "image" {
+            assert!(c.drawing.insert_snapshots(vec![peer]));
+        }
+        let ctx = egui::Context::default();
+        c.selection
+            .change([id, peer_id], Membership::Replace, &c.drawing);
+        if kind == "group" {
+            c.selection_action(SelectionCommand::Group, &ctx);
+        }
+        let bounds = c.selection.bounds.unwrap();
+        let view = t();
+        let start = [140., 130.];
+        let end = [290., 210.];
+        let delta = Placement {
+            position: [150., 80.],
+            ..Placement::default()
+        };
+        let expected_bounds = bounds.placed(delta);
+        let held = frame_shapes(
+            &ctx,
+            &mut c,
+            s,
+            view,
+            vec![
+                moved(view, start),
+                pointer(screen(view, start), true, egui::Modifiers::NONE),
+                moved(view, end),
+            ],
+            1.,
+            true,
+        );
+        assert_eq!(get(&c, id), original);
+        assert_image_paint(&c, &held, view, &original.transformed(delta));
+        assert_selection_paint(
+            &held,
+            view,
+            expected_bounds.corners(),
+            &expected_bounds.corners(),
+            rotation_grip(expected_bounds, view),
+        );
+        let release = frame_shapes(
+            &ctx,
+            &mut c,
+            s,
+            view,
+            vec![pointer(screen(view, end), false, egui::Modifiers::NONE)],
+            1.1,
+            true,
+        );
+        assert_eq!(c.selection.bounds, Some(expected_bounds));
+        assert_image_paint(&c, &release, view, &original.transformed(delta));
+    }
 }

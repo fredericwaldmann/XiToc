@@ -244,9 +244,7 @@ impl Canvas {
         painter: &egui::Painter,
         view: Transform,
         image: &ImageObject,
-        delta: Placement,
     ) {
-        let image = image.transformed(delta);
         let corners = image.corners();
         let screen = corners.map(|p| {
             let p = view.to_screen(p);
@@ -315,7 +313,7 @@ impl Canvas {
         if self.drawing.is_locked(source.id) {
             return None;
         }
-        source
+        self.effective_selected_image()?
             .handles()
             .iter()
             .position(|h| {
@@ -330,23 +328,56 @@ impl Canvas {
             _ => None,
         }
     }
+    // Resolve the same original geometry and live placement for both the mesh and
+    // selection UI. Intrinsic resize already carries its effective placement.
+    pub(super) fn effective_image(
+        source: &ImageObject,
+        resize: Option<&ImageObject>,
+        placement: Option<Placement>,
+    ) -> ImageObject {
+        if let Some(preview) = resize.filter(|preview| preview.id == source.id) {
+            preview.clone()
+        } else if let Some(delta) = placement {
+            source.transformed(delta)
+        } else {
+            source.clone()
+        }
+    }
+    pub(super) fn effective_selected_image(&self) -> Option<ImageObject> {
+        let source = self.selected_image()?;
+        let placement = self.selection_preview(source.surface).filter(|_| {
+            selection_ui::selection_preview_ids(&self.selection_gesture, &self.selection)
+                .contains(&source.id)
+        });
+        Some(Self::effective_image(
+            &source,
+            self.image_resize_preview(),
+            placement,
+        ))
+    }
+    pub(super) fn image_rotation_geometry(image: &ImageObject, view_scale: f64) -> (Point, Point) {
+        let center = image
+            .placement
+            .apply(image.dimensions.map(|size| size * 0.5));
+        let (sin, cos) = image.placement.rotation.sin_cos();
+        let outward = [sin, -cos];
+        let half_height = image.dimensions[1] * image.placement.scale * 0.5;
+        let stem = std::array::from_fn(|i| center[i] + outward[i] * half_height);
+        let offset = f64::from(crate::ui::style::ROTATION_OFFSET) / view_scale;
+        let handle = std::array::from_fn(|i| stem[i] + outward[i] * offset);
+        (stem, handle)
+    }
     pub(super) fn paint_image_handles(
         &self,
         painter: &egui::Painter,
         view: Transform,
+        image: &ImageObject,
         fill: Color32,
         outline: Color32,
     ) {
-        if !matches!(self.tool, Tool::Select | Tool::Lasso) {
+        if self.drawing.is_locked(image.id) {
             return;
         }
-        let Some(source) = self.selected_image() else {
-            return;
-        };
-        if self.drawing.is_locked(source.id) {
-            return;
-        }
-        let image = self.image_resize_preview().unwrap_or(&source);
 
         for p in image.handles() {
             let s = view.to_screen(p);

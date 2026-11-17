@@ -647,7 +647,9 @@ impl Canvas {
             self.paint_connection_controls(ui, bounds, surface, transform);
             return;
         }
-        self.selection_controls(ui, bounds, surface, transform);
+        if !matches!(self.tool, Tool::Select | Tool::Lasso) {
+            self.selection_controls(ui, bounds, surface, transform);
+        }
         if self.tool == Tool::Shape {
             self.shape_surface(ui, bounds, surface, transform);
             self.paint(ui, bounds, surface, transform);
@@ -660,6 +662,7 @@ impl Canvas {
         }
         if matches!(self.tool, Tool::Select | Tool::Lasso) {
             self.selection_surface(ui, bounds, surface, transform);
+            self.selection_controls(ui, bounds, surface, transform);
             self.paint(ui, bounds, surface, transform);
             self.paint_selection(ui, bounds, surface, transform);
             self.paint_text_handles(ui, transform, surface);
@@ -959,10 +962,8 @@ impl Canvas {
             .painter()
             .with_clip_rect(bounds.intersect(ui.clip_rect()));
         let selection_preview = self.selection_preview(surface);
-        let preview_ids = match &self.selection_gesture {
-            Some(SelectionGesture::Transform { session, .. }) => &session.ids,
-            _ => &self.selection.expanded,
-        };
+        let preview_ids =
+            selection_ui::selection_preview_ids(&self.selection_gesture, &self.selection);
         let image_resize_preview = self.image_resize_preview().cloned();
         let endpoint_preview = match &self.selection_gesture {
             Some(SelectionGesture::ShapeEdit { preview, .. }) => Some(preview),
@@ -982,15 +983,10 @@ impl Canvas {
             }
             let stroke = match object {
                 ObjectSnapshot::Image(image) => {
-                    let source = image_resize_preview
-                        .as_ref()
-                        .filter(|i| i.id == image.id)
-                        .unwrap_or(image)
-                        .clone();
-                    let delta = selection_preview
-                        .filter(|_| preview_ids.contains(&image.id))
-                        .unwrap_or_default();
-                    Canvas::paint_image(&mut self.image_cache, &painter, transform, &source, delta);
+                    let delta = selection_preview.filter(|_| preview_ids.contains(&image.id));
+                    let effective =
+                        Self::effective_image(image, image_resize_preview.as_ref(), delta);
+                    Self::paint_image(&mut self.image_cache, &painter, transform, &effective);
                     continue;
                 }
                 ObjectSnapshot::Group(_) => continue,
