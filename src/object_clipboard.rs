@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub const PREFIX: &str = "XiToc clipboard v1\n";
-pub const MAX_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_OBJECTS: usize = 512;
 pub const MAX_POINTS: usize = 200_000;
 use crate::object::ObjectSnapshot as ClipboardObject;
@@ -16,6 +16,28 @@ use crate::object::ObjectSnapshot as ClipboardObject;
 pub struct ObjectBundle {
     version: u32,
     pub objects: Vec<ClipboardObject>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImageReference {
+    id: Uuid,
+    document_id: Uuid,
+    surface: Surface,
+    placement: Placement,
+    dimensions: Point,
+    opacity: u8,
+    // Older readers expect this field. New readers always use the Shift modifier.
+    #[serde(default)]
+    preserve_aspect: bool,
+    locked: bool,
+    asset_id: crate::image_object::AssetId,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImageBundle {
+    version: u32,
+    objects: Vec<serde_json::Value>,
+    assets: Vec<std::sync::Arc<crate::image_object::ImageAsset>>,
 }
 impl ObjectBundle {
     #[cfg(test)]
@@ -49,6 +71,12 @@ impl ObjectBundle {
                 return Err("Duplicate object clipboard ID.".into());
             }
             let s = match object {
+                ClipboardObject::Image(i) => {
+                    if !i.valid() {
+                        return Err("Invalid image clipboard object.".into());
+                    }
+                    continue;
+                }
                 ClipboardObject::Group(_) => continue,
                 ClipboardObject::Text(t) => {
                     if !t.valid() {
@@ -114,24 +142,130 @@ impl ObjectBundle {
     }
     pub fn encode(&self) -> Result<String, String> {
         self.validate()?;
-        let text = format!(
-            "{PREFIX}{}",
+        let json = if self
+            .objects
+            .iter()
+            .any(|o| matches!(o, ClipboardObject::Image(_)))
+        {
+            let mut assets = std::collections::HashMap::new();
+            let mut objects = Vec::new();
+            for o in &self.objects {
+                if let ClipboardObject::Image(i) = o {
+                    assets
+                        .entry(i.asset.id())
+                        .or_insert_with(|| i.asset.clone());
+                    let data = ImageReference {
+                        id: i.id,
+                        document_id: i.document_id,
+                        surface: i.surface,
+                        placement: i.placement,
+                        dimensions: i.dimensions,
+                        opacity: i.opacity,
+                        preserve_aspect: false,
+                        locked: i.locked,
+                        asset_id: i.asset.id(),
+                    };
+                    objects.push(serde_json::json!({"kind":"Image","data":data}));
+                } else {
+                    objects.push(serde_json::to_value(o).map_err(|e| e.to_string())?);
+                }
+            }
+            if assets.values().map(|a| a.bytes().len()).sum::<usize>() > MAX_BYTES / 2 {
+                return Err(
+                    "Image copy exceeds system clipboard limit; use the XiToc session clipboard."
+                        .into(),
+                );
+            }
+            serde_json::to_string(&ImageBundle {
+                version: 2,
+                objects,
+                assets: assets.into_values().collect(),
+            })
+            .map_err(|e| e.to_string())?
+        } else {
             serde_json::to_string(self).map_err(|e| e.to_string())?
-        );
+        };
+        let text = format!("{PREFIX}{json}");
         if text.len() > MAX_BYTES {
-            return Err("Object clipboard exceeds 4 MiB.".into());
+            return Err("Object clipboard exceeds 64 MiB.".into());
         }
         Ok(text)
     }
     pub fn decode(text: &str) -> Result<Self, String> {
         if text.len() > MAX_BYTES {
-            return Err("Object clipboard exceeds 4 MiB.".into());
+            return Err("Object clipboard exceeds 64 MiB.".into());
         }
         let json = text
             .strip_prefix(PREFIX)
             .ok_or("Clipboard does not contain XiToc objects. Use Copy on a selection first.")?;
-        let bundle: Self =
+        let value: serde_json::Value =
             serde_json::from_str(json).map_err(|e| format!("Cannot read object clipboard: {e}"))?;
+        let bundle: Self = if value.get("version").and_then(|v| v.as_u64()) == Some(2) {
+            if value
+                .get("assets")
+                .and_then(|v| v.as_array())
+                .is_none_or(|v| v.len() > 16)
+            {
+                return Err("Image asset limit exceeded.".into());
+            }
+            let wire: ImageBundle = serde_json::from_value(value).map_err(|e| e.to_string())?;
+            if wire.assets.len() > 16 || wire.objects.len() > MAX_OBJECTS {
+                return Err("Image clipboard limit exceeded.".into());
+            }
+            let mut assets = std::collections::HashMap::new();
+            for asset in wire.assets {
+                if assets.insert(asset.id(), asset).is_some() {
+                    return Err("Duplicate image asset.".into());
+                }
+            }
+            let mut objects = Vec::new();
+            for value in wire.objects {
+                if value.get("kind").and_then(|v| v.as_str()) == Some("Image") {
+                    if value.as_object().is_none_or(|v| v.len() != 2) {
+                        return Err("Unknown image clipboard fields.".into());
+                    }
+                    let i: ImageReference =
+                        serde_json::from_value(value["data"].clone()).map_err(|e| e.to_string())?;
+                    let asset = assets
+                        .get(&i.asset_id)
+                        .ok_or("Missing clipboard image asset.")?
+                        .clone();
+                    objects.push(
+                        crate::image_object::ImageObject {
+                            id: i.id,
+                            document_id: i.document_id,
+                            surface: i.surface,
+                            placement: i.placement,
+                            dimensions: i.dimensions,
+                            opacity: i.opacity,
+                            locked: i.locked,
+                            asset,
+                        }
+                        .into(),
+                    );
+                } else {
+                    objects.push(serde_json::from_value(value).map_err(|e| e.to_string())?);
+                }
+            }
+            Self {
+                version: 1,
+                objects,
+            }
+        } else {
+            if value
+                .get("objects")
+                .and_then(|v| v.as_array())
+                .is_some_and(|objects| {
+                    objects
+                        .iter()
+                        .any(|o| o.get("kind").and_then(|v| v.as_str()) == Some("Image"))
+                })
+            {
+                return Err("Images require clipboard version 2.".into());
+            }
+            serde_json::from_value(value)
+                .map_err(|e| format!("Cannot read object clipboard: {e}"))?
+        };
         bundle.validate()?;
         Ok(bundle)
     }

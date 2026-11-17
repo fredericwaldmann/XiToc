@@ -17,6 +17,17 @@ pub(super) struct DragSession {
 }
 
 pub(super) enum SelectionGesture {
+    ImageResize {
+        session: DragSession,
+        surface: Surface,
+        source: Arc<crate::image_object::ImageObject>,
+        preview: crate::image_object::ImageObject,
+        index: usize,
+        start: Point,
+        last: Point,
+        proportional: bool,
+        moved: bool,
+    },
     ShapeEdit {
         surface: Surface,
         source: Arc<crate::shape::Shape>,
@@ -69,6 +80,16 @@ struct SessionClipboard {
 }
 fn clipboard_id() -> egui::Id {
     egui::Id::unique("XiToc-object-clipboard")
+}
+
+pub(super) fn selection_preview_ids<'a>(
+    gesture: &'a Option<SelectionGesture>,
+    selection: &'a selection::Selection,
+) -> &'a HashSet<Uuid> {
+    match gesture {
+        Some(SelectionGesture::Transform { session, .. }) => &session.ids,
+        _ => &selection.expanded,
+    }
 }
 
 impl Canvas {
@@ -263,8 +284,27 @@ impl Canvas {
                 true
             }
             Err(e) => {
-                self.notice = Some(e);
-                false
+                if bundle
+                    .objects
+                    .iter()
+                    .any(|o| matches!(o, ObjectSnapshot::Image(_)))
+                {
+                    ctx.data_mut(|d| {
+                        d.insert_temp(
+                            clipboard_id(),
+                            SessionClipboard {
+                                bundle: Arc::new(bundle),
+                                count: 0,
+                            },
+                        )
+                    });
+                    ctx.copy_text("XiToc image session clipboard".into());
+                    self.notice = Some(format!("Copied to XiToc session clipboard. {e}"));
+                    true
+                } else {
+                    self.notice = Some(e);
+                    false
+                }
             }
         }
     }
@@ -366,7 +406,21 @@ impl Canvas {
                     self.selection_action(SelectionCommand::Copy, ui.ctx());
                     copied = true;
                 }
+                Event::PasteImage(pixels) => {
+                    pasted = true;
+                    self.pending_paste = None;
+                    let target = self.image_target(None);
+                    self.finish();
+                    self.image_imports
+                        .paste_pixels(ui.ctx().clone(), target, pixels.clone());
+                }
                 Event::Paste(text) => {
+                    if text == "XiToc image session clipboard" {
+                        self.pending_paste = None;
+                        self.paste_session(ui.ctx());
+                        pasted = true;
+                        continue;
+                    }
                     pasted = true;
                     self.pending_paste = None;
                     match ObjectBundle::decode(text) {
@@ -397,6 +451,7 @@ impl Canvas {
                 && !(pasted && key == egui::Key::V)
             {
                 if command == SelectionCommand::Paste {
+                    #[cfg(not(target_arch = "wasm32"))]
                     self.request_paste(ui.ctx());
                 } else {
                     self.selection_action(command, ui.ctx());
@@ -418,7 +473,19 @@ impl Canvas {
         }
         if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             // Cancel first so a later pointer release cannot commit a preview.
-            self.selection_gesture = None;
+            let gesture = self.selection_gesture.take();
+            self.snap_session = None;
+            let image_transform = matches!(gesture, Some(SelectionGesture::ImageResize { .. }))
+                || (matches!(
+                    gesture,
+                    Some(SelectionGesture::Transform { .. } | SelectionGesture::Rotate { .. })
+                ) && self.selection.expanded.iter().any(|id| {
+                    matches!(self.drawing.snapshot(*id), Some(ObjectSnapshot::Image(_)))
+                }));
+            if image_transform {
+                // Keep the selection so the restored overlay is visible immediately.
+                return;
+            }
             self.connection_gesture = None;
             self.cancel_shape_draft();
             self.selection.clear();
@@ -512,6 +579,7 @@ impl Canvas {
                 let hit = match object {
                     ObjectSnapshot::Group(_) => false,
                     ObjectSnapshot::Text(t) => t.hit_test(point, tolerance),
+                    ObjectSnapshot::Image(i) => i.hit_test(point, tolerance),
                     ObjectSnapshot::Formula(f) => f.hit_test(point, tolerance),
                     ObjectSnapshot::Stroke(stroke) => {
                         let cache = self
@@ -575,7 +643,10 @@ impl Canvas {
         bounds
     }
     fn handle(&self, point: Point, scale: f64) -> Option<usize> {
-        if !matches!(self.tool, Tool::Select | Tool::Lasso) || self.single_shape_handles() {
+        if !matches!(self.tool, Tool::Select | Tool::Lasso)
+            || self.single_shape_handles()
+            || self.selected_image().is_some()
+        {
             return None;
         }
         Self::display_bounds(self.selection.bounds?, scale)
@@ -586,11 +657,17 @@ impl Canvas {
             })
     }
     fn rotation_point(&self, scale: f64) -> Option<Point> {
+        if let Some(image) = self.effective_selected_image() {
+            return Some(Self::image_rotation_geometry(&image, scale).1);
+        }
         let bounds = Self::display_bounds(self.selection.bounds?, scale);
-        Some([
-            bounds.center()[0],
-            bounds.min[1] - f64::from(style::ROTATION_OFFSET) / scale,
-        ])
+        let (_, handle) = Self::rotation_geometry(bounds, scale);
+        Some(handle)
+    }
+    fn rotation_geometry(bounds: ObjectBounds, scale: f64) -> (Point, Point) {
+        let stem = [bounds.center()[0], bounds.min[1]];
+        let handle = [stem[0], stem[1] - f64::from(style::ROTATION_OFFSET) / scale];
+        (stem, handle)
     }
     fn rotation_hit(&self, point: Point, scale: f64) -> bool {
         matches!(self.tool, Tool::Select | Tool::Lasso)
@@ -700,6 +777,65 @@ impl Canvas {
         bypass: bool,
     ) {
         match &mut self.selection_gesture {
+            Some(SelectionGesture::ImageResize {
+                surface: s,
+                source,
+                preview,
+                index,
+                start,
+                last,
+                proportional,
+                moved,
+                ..
+            }) if *s == surface => {
+                *last = point;
+                if !*moved && (point[0] - start[0]).hypot(point[1] - start[1]) * scale < 3. {
+                    return;
+                }
+                if *proportional != shift {
+                    *proportional = shift;
+                    if let Some(snap) = &mut self.snap_session {
+                        snap.clear();
+                    }
+                }
+                let handle = source.handles()[*index];
+                let target = std::array::from_fn(|i| handle[i] + (point[i] - start[i]));
+                let mut next = source.resized(*index, target, shift);
+                if let Some(snap) = &mut self.snap_session {
+                    let grip = next.handles()[*index];
+                    let opposite = source.handles()[(*index + 4) % 8];
+                    let rail = if shift || !index.is_multiple_of(2) {
+                        Some([grip[0] - opposite[0], grip[1] - opposite[1]])
+                    } else {
+                        None
+                    };
+                    let rotated = (source.placement.rotation * 2.).sin().abs() > 1e-8;
+                    let snapped = snap.handle(
+                        next.world_bounds().unwrap(),
+                        grip,
+                        rail,
+                        rotated,
+                        scale,
+                        bypass,
+                    );
+                    if snapped != grip {
+                        next = source.resized(*index, snapped, shift);
+                    }
+                    let final_grip = next.handles()[*index];
+                    snap.reconcile(if rotated {
+                        ObjectBounds {
+                            min: final_grip,
+                            max: final_grip,
+                        }
+                    } else {
+                        next.world_bounds().unwrap()
+                    });
+                }
+                if self.drawing.valid_object(&next.clone().into()) {
+                    *preview = next;
+                    *moved = true;
+                }
+            }
             Some(SelectionGesture::ShapeEdit {
                 surface: s,
                 source,
@@ -804,6 +940,9 @@ impl Canvas {
                                 ObjectSnapshot::Group(_) => false,
                                 ObjectSnapshot::Text(t) => {
                                     t.rectangle_matches(bounds, point[0] < start[0])
+                                }
+                                ObjectSnapshot::Image(i) => {
+                                    i.rectangle_matches(bounds, point[0] < start[0])
                                 }
                                 ObjectSnapshot::Formula(f) => {
                                     f.rectangle_matches(bounds, point[0] < start[0])
@@ -955,6 +1094,17 @@ impl Canvas {
     }
     fn commit_selection(&mut self) {
         match self.selection_gesture.take() {
+            Some(SelectionGesture::ImageResize {
+                session,
+                preview,
+                moved: true,
+                ..
+            }) => {
+                if self.drawing.revision() == session.revision {
+                    self.drawing.replace_image(preview);
+                    self.prune_cache();
+                }
+            }
             Some(SelectionGesture::ShapeEdit {
                 preview,
                 moved: true,
@@ -1042,6 +1192,7 @@ impl Canvas {
                                 )
                             }
                             ObjectSnapshot::Text(t) => t.lasso_matches(&region),
+                            ObjectSnapshot::Image(i) => i.lasso_matches(&region),
                             ObjectSnapshot::Formula(f) => f.lasso_matches(&region),
                             ObjectSnapshot::Shape(shape) => shape.lasso_matches(&region),
                             ObjectSnapshot::Connector(c) => c.as_shape().lasso_matches(&region),
@@ -1064,7 +1215,10 @@ impl Canvas {
         transform: Transform,
     ) {
         if self.selection.surface == surface {
-            if let Some(SelectionGesture::Transform { session, .. }) = &self.selection_gesture
+            if let Some(
+                SelectionGesture::Transform { session, .. }
+                | SelectionGesture::ImageResize { session, .. },
+            ) = &self.selection_gesture
                 && (session.view != transform || session.revision != self.drawing.revision())
             {
                 self.selection_gesture = None;
@@ -1120,6 +1274,31 @@ impl Canvas {
                     self.selection.scope(surface);
                     self.selection_view =
                         Some((surface, transform, bounds.intersect(ui.clip_rect())));
+                    if !modifiers.alt
+                        && let Some((source, index)) = self.image_handle(point, transform.scale)
+                    {
+                        self.begin_snapping(surface);
+                        if let Some((_, view, _)) = self.selection_view {
+                            let session = DragSession {
+                                ids: self.selection.expanded.clone(),
+                                sources: vec![ObjectSnapshot::Image(source.clone())],
+                                view,
+                                revision: self.drawing.revision(),
+                            };
+                            self.selection_gesture = Some(SelectionGesture::ImageResize {
+                                session,
+                                surface,
+                                preview: (*source).clone(),
+                                source,
+                                index,
+                                start: point,
+                                last: point,
+                                proportional: modifiers.shift,
+                                moved: false,
+                            });
+                        }
+                        continue;
+                    }
                     if !modifiers.alt
                         && let Some((shape, index, corner)) =
                             self.shape_handle(point, transform.scale)
@@ -1181,12 +1360,17 @@ impl Canvas {
                     }
                 }
                 Event::ModifiersChanged(modifiers) => {
-                    if self.selection_gesture.is_some()
-                        && let Some(pos) = ui.input(|i| i.pointer.interact_pos())
-                    {
+                    let point = match &self.selection_gesture {
+                        Some(SelectionGesture::ImageResize { last, .. }) => Some(*last),
+                        Some(_) => ui
+                            .input(|i| i.pointer.interact_pos())
+                            .map(|pos| transform.to_document([pos.x as f64, pos.y as f64])),
+                        None => None,
+                    };
+                    if let Some(point) = point {
                         self.selection_sample(
                             surface,
-                            transform.to_document([pos.x as f64, pos.y as f64]),
+                            point,
                             transform.scale,
                             modifiers.shift,
                             modifiers.alt,
@@ -1209,6 +1393,7 @@ impl Canvas {
                     let active = match &self.selection_gesture {
                         Some(
                             SelectionGesture::Lasso { surface: s, .. }
+                            | SelectionGesture::ImageResize { surface: s, .. }
                             | SelectionGesture::ShapeEdit { surface: s, .. }
                             | SelectionGesture::Rectangle { surface: s, .. }
                             | SelectionGesture::Transform { surface: s, .. }
@@ -1329,49 +1514,72 @@ impl Canvas {
             return;
         }
         let delta = self.selection_preview(surface).unwrap_or_default();
-        for (_, object) in &self.selection.objects {
-            let object = object.placed(delta);
-            painter.rect_stroke(
-                Rect::from_min_max(screen(object.min), screen(object.max)),
-                2.0,
-                Line::new(0.75, p.accent.gamma_multiply(0.55)),
-                egui::StrokeKind::Outside,
-            );
+        let selection_tool = matches!(self.tool, Tool::Select | Tool::Lasso);
+        let image = self.effective_selected_image();
+        if image.is_none() {
+            for (_, object) in &self.selection.objects {
+                let object = object.placed(delta);
+                painter.rect_stroke(
+                    Rect::from_min_max(screen(object.min), screen(object.max)),
+                    2.0,
+                    Line::new(0.75, p.accent.gamma_multiply(0.55)),
+                    egui::StrokeKind::Outside,
+                );
+            }
         }
-        if let Some(group) = self
-            .shape_edit_preview()
-            .and_then(|s| s.world_bounds())
-            .or(self.selection.bounds)
-        {
+        let group = image
+            .as_ref()
+            .and_then(CanvasObject::world_bounds)
+            .or_else(|| {
+                self.shape_edit_preview()
+                    .and_then(CanvasObject::world_bounds)
+            })
+            .or(self.selection.bounds);
+        if let Some(group) = group {
             let group = Self::display_bounds(group, transform.scale);
-            let corners = group.corners().map(|point| screen(delta.apply(point)));
+            let corners = match &image {
+                Some(image) => image.corners(),
+                None => group.corners().map(|point| delta.apply(point)),
+            }
+            .map(screen);
             painter.add(egui::Shape::closed_line(
                 corners.to_vec(),
                 Line::new(1.0, p.accent),
             ));
-            if matches!(self.tool, Tool::Select | Tool::Lasso) {
-                for corner in corners.into_iter().filter(|_| !self.single_shape_handles()) {
-                    painter.rect(
-                        Rect::from_center_size(corner, egui::Vec2::splat(style::SELECTION_HANDLE)),
-                        1.0,
-                        p.surface,
-                        Line::new(1.0, p.accent),
-                        egui::StrokeKind::Inside,
-                    );
+            if selection_tool {
+                if let Some(image) = &image {
+                    self.paint_image_handles(&painter, transform, image, p.surface, p.accent);
+                } else if !self.single_shape_handles() {
+                    for corner in corners {
+                        painter.rect(
+                            Rect::from_center_size(
+                                corner,
+                                egui::Vec2::splat(style::SELECTION_HANDLE),
+                            ),
+                            1.0,
+                            p.surface,
+                            Line::new(1.0, p.accent),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
                 }
-                if let Some(handle) = self.rotation_point(transform.scale) {
-                    let stem = [group.center()[0], group.min[1]];
-                    let handle = screen(delta.apply(handle));
-                    let handle_painter = ui.painter().with_clip_rect(ui.clip_rect());
-                    handle_painter
-                        .line_segment([screen(delta.apply(stem)), handle], Line::new(1., p.accent));
-                    handle_painter.circle(
-                        handle,
-                        style::SELECTION_HANDLE * 0.5,
-                        p.surface,
-                        Line::new(1., p.accent),
-                    );
-                }
+                let (stem, handle) = Self::rotation_geometry(group, transform.scale);
+                let (stem, handle) = match &image {
+                    Some(image) => Self::image_rotation_geometry(image, transform.scale),
+                    None => (
+                        delta.apply(stem),
+                        delta.apply(self.rotation_point(transform.scale).unwrap_or(handle)),
+                    ),
+                };
+                let handle_painter = ui.painter().with_clip_rect(ui.clip_rect());
+                handle_painter
+                    .line_segment([screen(stem), screen(handle)], Line::new(1., p.accent));
+                handle_painter.circle(
+                    screen(handle),
+                    style::SELECTION_HANDLE * 0.5,
+                    p.surface,
+                    Line::new(1., p.accent),
+                );
             }
         }
         self.paint_shape_handles(&painter, transform, surface, p.accent);
@@ -1387,9 +1595,12 @@ impl Canvas {
             let cursor = if matches!(
                 self.selection_gesture,
                 Some(SelectionGesture::Rotate { .. })
-            ) {
+            ) || self.selection_preview(surface).is_some()
+            {
                 egui::CursorIcon::Grabbing
-            } else if self.shape_handle(point, transform.scale).is_some() {
+            } else if self.image_handle(point, transform.scale).is_some()
+                || self.shape_handle(point, transform.scale).is_some()
+            {
                 egui::CursorIcon::Grab
             } else if let Some(index) = self.handle(point, transform.scale) {
                 if index % 2 == 0 {
@@ -1399,8 +1610,6 @@ impl Canvas {
                 }
             } else if self.rotation_hit(point, transform.scale) {
                 egui::CursorIcon::Grab
-            } else if self.selection_preview(surface).is_some() {
-                egui::CursorIcon::Grabbing
             } else if self.tool == Tool::Lasso {
                 egui::CursorIcon::Crosshair
             } else {
@@ -1444,6 +1653,9 @@ impl Canvas {
         true
     }
     fn shape_format_controls(&mut self, ui: &mut egui::Ui) {
+        if self.selected_image().is_some() {
+            ui.menu_button("Image", |ui| self.image_controls(ui));
+        }
         self.text_format_controls(ui);
         self.connector_format_controls(ui);
         let shapes = self.selected_shapes();
@@ -1480,11 +1692,15 @@ impl Canvas {
         };
         let viewport = bounds.intersect(ui.clip_rect());
         let p = style::palette(ui);
+        let resize_bounds = self
+            .image_resize_preview()
+            .and_then(CanvasObject::world_bounds);
+        let resizing_image = resize_bounds.is_some();
         if matches!(self.tool, Tool::Select | Tool::Lasso)
             && self.selection.surface == surface
-            && self.selection_gesture.is_none()
+            && (self.selection_gesture.is_none() || resizing_image)
             && self.connection_gesture.is_none()
-            && let Some(group) = self.selection.bounds
+            && let Some(group) = resize_bounds.or(self.selection.bounds)
         {
             let display = Self::display_bounds(group, transform.scale);
             let mut top = transform.to_screen([display.center()[0], display.min[1]]);
@@ -1504,6 +1720,12 @@ impl Canvas {
                     top[1] = top[1].min(p[1] - f64::from(style::CONNECTOR_HIT));
                     bottom[1] = bottom[1].max(p[1] + f64::from(style::CONNECTOR_HIT));
                 }
+            }
+            if self.selected_image().is_some()
+                && let Some(handle) = self.rotation_point(transform.scale)
+            {
+                let y = transform.to_screen(handle)[1];
+                bottom[1] = bottom[1].max(y + f64::from(style::SELECTION_HIT));
             }
             let rect = Rect::from_min_max(
                 egui::pos2(transform.to_screen(group.min)[0] as f32, top[1] as f32),
@@ -1545,7 +1767,8 @@ impl Canvas {
                 )
                 .order(egui::Order::Foreground)
                 .movable(false)
-                .enabled(ui.is_enabled())
+                .interactable(!resizing_image)
+                .enabled(ui.is_enabled() && !resizing_image)
                 .constrain_to(viewport)
                 .pivot(egui::Align2::CENTER_TOP)
                 .fixed_pos(egui::pos2(top[0] as f32, y))
@@ -1636,7 +1859,8 @@ impl Canvas {
                 self.connect_selected_shapes();
                 ui.close();
             }
-            if !self.selected_shapes().is_empty()
+            if self.selected_image().is_some()
+                || !self.selected_shapes().is_empty()
                 || self
                     .selection
                     .ids

@@ -81,6 +81,7 @@ impl eframe::App for XiTocApp {
     #[cfg(target_arch = "wasm32")]
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         crate::web_pressure::inject(ctx, raw);
+        crate::image_import::browser::inject(ctx, raw);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
@@ -155,6 +156,8 @@ impl XiTocApp {
         editor
     }
     fn show(&mut self, ui: &mut egui::Ui) {
+        #[cfg(target_arch="wasm32")]
+        ui.ctx().data_mut(|d|d.remove::<crate::image_import::BrowserPasteDestination>(crate::image_import::paste_id()));
         #[cfg(target_arch = "wasm32")]
         self.poll_browser();
         if ui.input(|i| i.viewport().close_requested()) && self.has_unsaved() && !self.quit_approved
@@ -177,7 +180,7 @@ impl XiTocApp {
             })
         {
             self.status =
-                "Drawing save is unavailable until M2. Unsaved ink remains in memory only.".into();
+                "Drawing save is unavailable until M2. Unsaved canvas content remains in memory only.".into();
         }
         self.preferences.theme.apply(ui.ctx());
         ui.set_style(ui.ctx().global_style());
@@ -292,7 +295,7 @@ impl XiTocApp {
             ui.set_max_width((ctx.content_rect().width() - 48.0).clamp(180.0, 360.0));
             ui.heading("Discard unsaved drawing?");
             ui.label(scope);
-            ui.label("Ink is only held in memory. PDF saving is not available until M2. Discarding cannot be undone.");
+            ui.label("Canvas content is only held in memory. PDF saving is not available until M2. Discarding cannot be undone.");
             ui.horizontal_wrapped(|ui| {
                 cancel = ui.button("Keep editing").clicked();
                 discard = ui.button("Discard drawing").clicked();

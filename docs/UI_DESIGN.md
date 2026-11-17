@@ -203,7 +203,9 @@ retains membership and explains the 4096-vertex limit. Handles take priority ove
 area gestures in both modes (Shift still snaps rotation); Alt bypasses handles
 for subtraction. Modified object clicks change membership without moving it;
 unmodified object drags select/move the object or existing group.
-Escape cancels a live gesture and clears selection. Focus loss or camera changes
+Escape cancels a live gesture and clears selection. While transforming a
+selection that contains an image, Escape cancels the transform and keeps the
+selection visible at its original position. Focus loss or camera changes
 cancel previews without altering membership. A later release cannot commit a
 cancelled gesture. OS-reserved Alt-drag may be intercepted by window managers;
 use the corresponding area gesture with Shift where available or change the OS
@@ -696,3 +698,38 @@ with source/effective/shadowed status and validation errors. Navigation opens
 existing Global or Document LaTeX settings while retaining the formula draft and
 cursor. Copy Effective Configuration copies fragments and macro status. No
 history entry is created by inspection.
+
+## M1.14 Image
+
+Image is an original 26-point icon in the TOP drawing toolbar beside Formula;
+it opens a local PNG/JPEG/WebP picker and inserts a selected object near the visible
+canvas center after successful decoding. Initial size preserves oriented source
+aspect ratio, caps the longest side at 320 document points without upscaling small
+images, and fits A4 bounds when necessary. Up to four files may be dropped together
+onto the canvas at the pointer with small offsets. Drag-over feedback explicitly
+says these become images. Generic attachments are not implemented, so no competing
+attachment behavior is offered. Unsupported/corrupted input reports a status error
+without creating an object or changing existing content.
+
+Selected images use the shared move/rotation/group/lock/Arrange/alignment controls.
+Eight local resize grips stretch freely by default. A corner changes both axes
+about the opposite corner. An edge changes one axis and keeps the opposite edge
+stationary. Hold Shift to preserve the displayed aspect ratio at the start of
+the drag. A constrained edge keeps the opposite edge midpoint fixed and changes
+the perpendicular extent symmetrically around it. Shift can be pressed or
+released during the drag, even while the pointer is stationary. The preview
+recomputes from the original grab offset and anchor. Alt bypasses snapping.
+The image and selection handles update together throughout the gesture.
+The contextual toolbar follows the resize preview and becomes interactive again
+when the gesture ends.
+Image formatting is available in the shared selection controls, right-click
+Format menu, and top toolbar at widths >=650. It offers Opacity, Reset dimensions
+and Replace image source. Reset restores the source ratio and initial size,
+retains orientation and fits within A4. Replacement preserves ID, dimensions,
+placement and opacity.
+
+Ctrl/Cmd+V with canvas focus accepts screenshot pixels or browser image clipboard
+files; source/text editing keeps its existing paste behavior. XiToc object copies
+carry the required assets between documents. Large copies have a clearly reported
+session-only clipboard fallback. Imports explicitly report memory-only status;
+images are not saved to PDFs or retained across application restart yet.

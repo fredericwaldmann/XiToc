@@ -20,6 +20,8 @@ use selection_ui::SelectionGesture;
 mod connectors_ui;
 #[path = "canvas_formula.rs"]
 mod formula_ui;
+#[path = "canvas_images.rs"]
+mod images_ui;
 #[path = "canvas_shapes.rs"]
 mod shapes_ui;
 #[path = "canvas_text.rs"]
@@ -274,6 +276,9 @@ impl Cached {
 const MESH_SEGMENTS: usize = 128;
 
 pub struct Canvas {
+    image_cache_revision: Option<u64>,
+    image_imports: crate::image_import::Imports,
+    image_cache: HashMap<crate::image_object::AssetId, images_ui::ImageTexture>,
     pub latex: crate::latex_config::LatexPreferences,
     pub open_global_latex: bool,
     pub formula_settings_suspended: bool,
@@ -336,6 +341,9 @@ impl Canvas {
 
     pub fn new(data: &DocumentData) -> Self {
         Self {
+            image_cache_revision: None,
+            image_imports: Default::default(),
+            image_cache: Default::default(),
             latex: Default::default(),
             open_global_latex: false,
             formula_settings_suspended: false,
@@ -546,6 +554,7 @@ impl Canvas {
         if !ui.is_enabled() {
             return;
         }
+        self.poll_images(ui.ctx());
         self.selection.refresh(&self.drawing);
         if self.font_browser.is_none()
             && self.text_session.is_none()
@@ -600,6 +609,10 @@ impl Canvas {
     }
 
     pub fn surface(&mut self, ui: &egui::Ui, bounds: Rect, surface: Surface, transform: Transform) {
+        if self.image_surface(ui, bounds, surface, transform) {
+            self.paint(ui, bounds, surface, transform);
+            return;
+        }
         if matches!(self.tool, Tool::Select | Tool::Lasso) {
             let preview_layer = egui::LayerId::new(
                 egui::Order::Middle,
@@ -634,7 +647,9 @@ impl Canvas {
             self.paint_connection_controls(ui, bounds, surface, transform);
             return;
         }
-        self.selection_controls(ui, bounds, surface, transform);
+        if !matches!(self.tool, Tool::Select | Tool::Lasso) {
+            self.selection_controls(ui, bounds, surface, transform);
+        }
         if self.tool == Tool::Shape {
             self.shape_surface(ui, bounds, surface, transform);
             self.paint(ui, bounds, surface, transform);
@@ -647,6 +662,7 @@ impl Canvas {
         }
         if matches!(self.tool, Tool::Select | Tool::Lasso) {
             self.selection_surface(ui, bounds, surface, transform);
+            self.selection_controls(ui, bounds, surface, transform);
             self.paint(ui, bounds, surface, transform);
             self.paint_selection(ui, bounds, surface, transform);
             self.paint_text_handles(ui, transform, surface);
@@ -946,10 +962,9 @@ impl Canvas {
             .painter()
             .with_clip_rect(bounds.intersect(ui.clip_rect()));
         let selection_preview = self.selection_preview(surface);
-        let preview_ids = match &self.selection_gesture {
-            Some(SelectionGesture::Transform { session, .. }) => &session.ids,
-            _ => &self.selection.expanded,
-        };
+        let preview_ids =
+            selection_ui::selection_preview_ids(&self.selection_gesture, &self.selection);
+        let image_resize_preview = self.image_resize_preview().cloned();
         let endpoint_preview = match &self.selection_gesture {
             Some(SelectionGesture::ShapeEdit { preview, .. }) => Some(preview),
             _ => None,
@@ -967,6 +982,13 @@ impl Canvas {
                 continue;
             }
             let stroke = match object {
+                ObjectSnapshot::Image(image) => {
+                    let delta = selection_preview.filter(|_| preview_ids.contains(&image.id));
+                    let effective =
+                        Self::effective_image(image, image_resize_preview.as_ref(), delta);
+                    Self::paint_image(&mut self.image_cache, &painter, transform, &effective);
+                    continue;
+                }
                 ObjectSnapshot::Group(_) => continue,
                 ObjectSnapshot::Formula(formula) => {
                     if self

@@ -60,6 +60,9 @@ pub fn show(
             });
             if icons::button(ui,Icon::Text,"Text · click to type, drag to set width",editor.canvas.tool==Tool::Text).clicked(){editor.canvas.select(Tool::Text);}
             if icons::button(ui, Icon::Formula, "Formula · click the canvas to enter LaTeX", editor.canvas.tool == Tool::Formula).clicked() { editor.canvas.select(Tool::Formula); }
+            if ui.push_id("image-import-tool",|ui|icons::button(ui,Icon::Image,"Image · insert PNG, JPEG or WebP",false)).inner.clicked(){editor.canvas.choose_image(ui.ctx(),None);}
+            let image_selected=width>=650.0 && editor.canvas.selected_image().is_some();
+            if image_selected {ui.push_id("image-format-menu",|ui|ui.menu_button("Image",|ui|editor.canvas.image_controls(ui)));}
             let formula_selection = if editor.canvas.selection.ids.len() == 1 {
                 editor.canvas.selection.ids.iter().next().and_then(|id| match editor.canvas.drawing.snapshot(*id) {
                     Some(crate::object::ObjectSnapshot::Formula(formula)) => Some(( *id, formula.color, !editor.canvas.drawing.is_locked(*id) )),
@@ -76,11 +79,11 @@ pub fn show(
                     }
                 });
             }
-            if width >= 420.0 && icons::button(ui, Icon::StickyNote, "Sticky Note · click to create and type", editor.canvas.tool == Tool::StickyNote).clicked() {
+            if width >= 420.0 && ui.push_id("sticky-note-tool",|ui|icons::button(ui, Icon::StickyNote, "Sticky Note · click to create and type", editor.canvas.tool == Tool::StickyNote)).inner.clicked() {
                 editor.canvas.select(Tool::StickyNote);
             }
             let reserved = if width >= 1000.0 { 480.0 } else if width >= 800.0 { 380.0 } else if width >= 500.0 { 268.0 } else { 210.0 };
-            let reserved=reserved+184.0+if formula_selection.is_some(){72.0}else{0.0}+if width>=400.0{30.0}else{0.0};
+            let reserved=reserved+214.0+if image_selected {60.0}else{0.0}+if formula_selection.is_some(){72.0}else{0.0}+if width>=400.0{30.0}else{0.0};
             let strip_width = (width - reserved).max(24.0);
             ui.allocate_ui(egui::vec2(strip_width, style::CONTROL), |ui| {
                 egui::ScrollArea::horizontal().id_salt("pen-presets").min_scrolled_width(24.0).auto_shrink([false, false])
@@ -226,7 +229,7 @@ fn export(_ui: &mut egui::Ui, _action: &mut Option<Action>, _dirty: bool) {
     #[cfg(target_arch = "wasm32")]
     if _ui
         .add_enabled(!_dirty, egui::Button::new("Export PDF…"))
-        .on_disabled_hover_text("Unsaved ink is memory-only. Drawing PDF export arrives in M2.")
+        .on_disabled_hover_text("Unsaved canvas content is memory-only. PDF export arrives in M2.")
         .clicked()
     {
         *_action = Some(Action::Export);
@@ -525,5 +528,59 @@ mod tests {
             "Adjusting a setting must keep its menu open"
         );
         assert_eq!(clicks, 1);
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+    use crate::ui::settings::tests::{pointer, render};
+    use crate::{
+        document::{DocumentData, Location},
+        image_object::{ImageObject, test_support},
+        selection::Membership,
+    };
+    #[test]
+    fn image_format_menu_keeps_tool_selection_and_history() {
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        let doc = Document {
+            data: data.clone(),
+            location: Location::new("image.pdf".into()),
+            external: false,
+        };
+        let mut editor = Editor::new(&data);
+        let image = ImageObject::new(
+            data.id(),
+            crate::drawing::Surface::Canvas,
+            [100., 100.],
+            test_support::asset(),
+        );
+        let id = image.id;
+        assert!(editor.canvas.drawing.insert_snapshots(vec![image.into()]));
+        editor.canvas.select(Tool::Select);
+        editor
+            .canvas
+            .selection
+            .change([id], Membership::Replace, &editor.canvas.drawing);
+        let revision = editor.canvas.drawing.revision();
+        let ctx = egui::Context::default();
+        let mut prefs = Default::default();
+        let mut action = None;
+        let mut frame = |events| {
+            render(&ctx, events, |ui| {
+                show(ui, Some((&doc, &mut editor)), &mut action, &mut prefs)
+            })
+        };
+        frame(vec![]);
+        let labels = frame(vec![]);
+        let pos = labels["Image"];
+        frame(pointer(pos, true));
+        frame(pointer(pos, false));
+        let labels = frame(vec![]);
+        assert!(labels.contains_key("Reset dimensions"), "{labels:?}");
+        assert!(!labels.contains_key("Preserve aspect ratio"));
+        assert!(editor.canvas.tool == Tool::Select);
+        assert!(editor.canvas.selection.ids.contains(&id));
+        assert_eq!(editor.canvas.drawing.revision(), revision);
     }
 }

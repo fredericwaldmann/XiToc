@@ -26,6 +26,17 @@ pub(crate) fn frame(
     time: f64,
     focused: bool,
 ) {
+    frame_shapes(ctx, canvas, surface, transform, events, time, focused);
+}
+pub(crate) fn frame_shapes(
+    ctx: &egui::Context,
+    canvas: &mut Canvas,
+    surface: Surface,
+    transform: Transform,
+    events: Vec<Event>,
+    time: f64,
+    focused: bool,
+) -> Vec<egui::epaint::ClippedShape> {
     let mut output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(800., 600.))),
@@ -46,8 +57,9 @@ pub(crate) fn frame(
         },
     );
     output.textures_delta.clear();
+    output.shapes
 }
-pub(super) fn click(
+pub(crate) fn click(
     ctx: &egui::Context,
     c: &mut Canvas,
     s: Surface,
