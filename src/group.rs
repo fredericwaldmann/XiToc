@@ -15,6 +15,9 @@ pub struct Group {
     pub children: Vec<ObjectId>,
     #[serde(default)]
     pub locked: bool,
+    /// Orientation of the container. Descendants retain baked world placements.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rotation: f64,
     /// Rebuilt from descendants at transaction boundaries, never saved content.
     #[serde(skip)]
     pub bounds: Option<ObjectBounds>,
@@ -44,6 +47,10 @@ impl CanvasObject for Group {
     }
 }
 
+fn is_zero(angle: &f64) -> bool {
+    *angle == 0.0
+}
+
 /// Validate a bounded, single-owner forest. Iterative walks reject cycles and
 /// missing children before any clipboard or document insertion is committed.
 pub fn validate(objects: &[crate::object::ObjectSnapshot]) -> bool {
@@ -55,7 +62,11 @@ pub fn validate(objects: &[crate::object::ObjectSnapshot]) -> bool {
     let mut parents = HashMap::new();
     for object in objects {
         if let crate::object::ObjectSnapshot::Group(g) = object {
-            if g.id.is_nil() || g.document_id.is_nil() || g.children.is_empty() {
+            if g.id.is_nil()
+                || g.document_id.is_nil()
+                || g.children.is_empty()
+                || !g.rotation.is_finite()
+            {
                 return false;
             }
             for child in &g.children {

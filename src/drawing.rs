@@ -564,7 +564,9 @@ impl Drawing {
                     && i.document_id == self.owner
                     && i.corners().iter().all(|p| self.contains(i.surface, *p))
             }
-            ObjectSnapshot::Group(g) => g.document_id == self.owner && !g.id.is_nil(),
+            ObjectSnapshot::Group(g) => {
+                g.document_id == self.owner && !g.id.is_nil() && g.rotation.is_finite()
+            }
             ObjectSnapshot::Text(t) => {
                 t.valid()
                     && t.document_id == self.owner

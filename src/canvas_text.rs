@@ -1138,6 +1138,7 @@ impl Canvas {
     }
     pub(super) fn paint_text_handles(&self, ui: &egui::Ui, view: Transform, surface: Surface) {
         if self.text_session.is_some()
+            || self.rotating(surface)
             || !matches!(self.tool, Tool::Select | Tool::Lasso)
             || self.selection.surface != surface
             || self.selection.ids.len() != 1

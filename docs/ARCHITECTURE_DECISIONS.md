@@ -758,3 +758,11 @@ pixel and retained-asset caps bound memory; a 2048-side display cap can soften
 extreme enlargements while originals stay intact. Native decoding uses workers;
 WASM initially uses bounded synchronous decoding after asynchronous file reads.
 No guarantee of zero browser pause for maximum-size first imports is claimed.
+
+### Group rotation orientation (#51)
+
+Groups keep an orientation angle alongside their hierarchy. Descendant geometry
+remains in world coordinates, so existing picking, rendering and connector
+routing continue to consume the same placements. The angle allows the group
+to reset independently of child-local angles and participates in snapshot
+undo, redo and clipboard interchange. Older snapshots start at zero.

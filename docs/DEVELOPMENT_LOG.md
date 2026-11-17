@@ -804,3 +804,12 @@ release overlap benchmark: 1,000 image objects / 40 changed frames in 76.66 ms.
 Firefox smoke and native/hardware limits are detailed in TEST_PLAN. Browser
 format-menu testing caught a dynamic widget-ID collision; stable control scopes
 and an egui selection/tool/history regression cover the correction.
+
+## Shared rotation follow-up (#51)
+
+Unified rotation grips around one oriented selection frame. A rotation freezes
+its sources, pivot and grip, and the same placement preview drives content,
+connectors and the visible ring. Selection outlines and resize grips return
+when the gesture ends. Double-click resets the reference angle atomically.
+Groups retain a journaled angle so their inverse rotation preserves relative
+child placements and nested hierarchy. Previous group snapshots default to zero.

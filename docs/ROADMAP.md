@@ -321,3 +321,9 @@ shared canvas-object model. Original-byte assets, cached display textures,
 eight-handle free resizing with live Shift proportions, replacement/opacity and existing transforms,
 groups, clipboard and history are implemented. PDF embedding, saved asset/object
 round trips, cropping and masks remain future work; no image persistence is claimed.
+
+## Shared rotation interaction (#51)
+
+All rotatable selections use one live ring, hide resize overlays while rotating,
+and support one-step orientation reset by double-click. Group resets retain
+descendant-local orientation and magnetic relationships.

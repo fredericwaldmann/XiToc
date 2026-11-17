@@ -84,6 +84,7 @@ impl Drawing {
             surface,
             children,
             locked: false,
+            rotation: 0.0,
             bounds: None,
         };
         let mut before = Vec::new();

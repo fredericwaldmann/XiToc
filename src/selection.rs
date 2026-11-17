@@ -1,7 +1,7 @@
 //! Transient object selection and pure lasso geometry. No egui or platform IO.
 use crate::{
     drawing::{Drawing, PressureStyle, Surface},
-    object::{ObjectBounds, ObjectId, Placement, Point},
+    object::{CanvasObject, ObjectBounds, ObjectId, ObjectSnapshot, Placement, Point},
 };
 use std::collections::HashSet;
 
@@ -38,12 +38,122 @@ pub enum Membership {
     Subtract,
 }
 
+/// A frame aligned with the selected object's local axes or the collective reference.
+#[derive(Clone, Copy)]
+pub struct RotationFrame {
+    axes: Placement,
+    bounds: ObjectBounds,
+}
+impl RotationFrame {
+    pub fn for_object(object: &dyn CanvasObject) -> Option<Self> {
+        let placement = object.placement();
+        let local = object.local_bounds()?;
+        let center = placement.apply(local.center());
+        Some(Self {
+            axes: Placement {
+                position: center,
+                rotation: placement.rotation,
+                ..Default::default()
+            },
+            bounds: ObjectBounds::from_points(local.corners().map(|point| {
+                std::array::from_fn(|i| (point[i] - local.center()[i]) * placement.scale)
+            }))?,
+        })
+    }
+
+    fn for_selection(drawing: &Drawing, selection: &Selection) -> Option<Self> {
+        let reference = drawing
+            .items()
+            .iter()
+            .filter(|o| selection.ids.contains(&o.id()))
+            .min_by_key(|o| matches!(o, ObjectSnapshot::Connector(_)))?;
+        let angle = match reference {
+            ObjectSnapshot::Group(group) => group.rotation,
+            ObjectSnapshot::Connector(c) => {
+                let [a, b] = c.ends().map(|end| end.position());
+                (b[1] - a[1]).atan2(b[0] - a[0])
+            }
+            _ => reference.as_object().placement().rotation,
+        };
+        let reference = reference.as_object();
+        if selection.ids.len() == 1
+            && !matches!(
+                reference.object_type(),
+                crate::object::ObjectType::Group | crate::object::ObjectType::Connector
+            )
+        {
+            return Self::for_object(reference);
+        }
+        let axes = Placement {
+            position: selection.bounds?.center(),
+            rotation: angle,
+            ..Default::default()
+        };
+        let mut bounds = None::<ObjectBounds>;
+        for snapshot in drawing
+            .items()
+            .iter()
+            .filter(|o| selection.expanded.contains(&o.id()))
+        {
+            // Routes may change on rotation. The collective frame follows the objects
+            // they connect, and uses endpoints for a selection made solely of wires.
+            if matches!(
+                snapshot,
+                ObjectSnapshot::Group(_) | ObjectSnapshot::Connector(_)
+            ) {
+                continue;
+            }
+            let object = snapshot.as_object();
+            if let Some(local) = object.local_bounds() {
+                let projected = ObjectBounds::from_points(
+                    local
+                        .corners()
+                        .map(|p| axes.inverse(object.placement().apply(p))),
+                )?;
+                bounds = Some(bounds.map_or(projected, |b| b.union(projected)));
+            }
+        }
+        let bounds = bounds.or_else(|| {
+            ObjectBounds::from_points(
+                drawing
+                    .items()
+                    .iter()
+                    .filter_map(|o| match o {
+                        ObjectSnapshot::Connector(c) if selection.expanded.contains(&c.id) => {
+                            Some(c)
+                        }
+                        _ => None,
+                    })
+                    .flat_map(|c| c.ends().map(|end| axes.inverse(end.position()))),
+            )
+        })?;
+        Some(Self { axes, bounds })
+    }
+
+    pub fn center(self) -> Point {
+        self.axes.apply(self.bounds.center())
+    }
+
+    pub fn angle(self) -> f64 {
+        self.axes.rotation
+    }
+
+    pub fn grip(self, offset: f64) -> (Point, Point) {
+        let top = [self.bounds.center()[0], self.bounds.min[1]];
+        (
+            self.axes.apply(top),
+            self.axes.apply([top[0], top[1] - offset]),
+        )
+    }
+}
+
 pub struct Selection {
     pub ids: HashSet<ObjectId>,
     pub expanded: HashSet<ObjectId>,
     pub surface: Surface,
     pub bounds: Option<ObjectBounds>,
     pub geometry: Option<ObjectBounds>,
+    pub rotation: Option<RotationFrame>,
     pub objects: Vec<(ObjectId, ObjectBounds)>,
     revision: Option<u64>,
 }
@@ -55,6 +165,7 @@ impl Selection {
             surface,
             bounds: None,
             geometry: None,
+            rotation: None,
             objects: Vec::new(),
             revision: None,
         }
@@ -70,6 +181,7 @@ impl Selection {
         self.expanded.clear();
         self.bounds = None;
         self.geometry = None;
+        self.rotation = None;
         self.objects.clear();
         self.revision = None;
     }
@@ -102,6 +214,7 @@ impl Selection {
         self.revision = Some(drawing.revision());
         self.bounds = None;
         self.geometry = None;
+        self.rotation = None;
         self.objects.clear();
         self.expanded.clear();
         if self.ids.is_empty() {
@@ -125,6 +238,7 @@ impl Selection {
         }
         self.ids = live;
         self.expanded = drawing.expanded(&self.ids);
+        self.rotation = RotationFrame::for_selection(drawing, self);
     }
 }
 

@@ -184,7 +184,7 @@ fn rotation_shift_snaps_and_escape_cancels_without_a_command() {
         );
         assert_eq!(c.drawing.strokes(), original);
         assert_eq!(c.drawing.revision(), revision);
-        assert!(c.selection.ids.is_empty());
+        assert_eq!(c.selection.ids.len(), 1);
         assert!(c.cache.values().all(|v| v.rotation_preview.is_none()));
         c.selection_action(SelectionCommand::SelectAll, &ctx);
         modifiers_frame(
@@ -689,4 +689,351 @@ fn rotation_handle_hit_target_is_clear_of_context_controls() {
         matches!(c.selection_gesture, Some(SelectionGesture::Rotate { .. })),
         "the complete rotation hit target must be outside the contextual toolbar"
     );
+}
+
+fn rotation_click(ctx: &egui::Context, c: &mut Canvas, s: Surface, view: Transform, time: f64) {
+    let point = c.rotation_point(view.scale).unwrap();
+    frame(
+        ctx,
+        c,
+        s,
+        view,
+        vec![
+            moved(view, point),
+            pointer(screen(view, point), true, egui::Modifiers::NONE),
+        ],
+        time,
+        true,
+    );
+    frame(
+        ctx,
+        c,
+        s,
+        view,
+        vec![pointer(screen(view, point), false, egui::Modifiers::NONE)],
+        time + 0.04,
+        true,
+    );
+}
+
+fn drag_rotation(
+    ctx: &egui::Context,
+    c: &mut Canvas,
+    s: Surface,
+    view: Transform,
+    angle: f64,
+) -> Placement {
+    use super::tests::frame_shapes;
+    if !matches!(c.tool, Tool::Select | Tool::Lasso) {
+        c.select(Tool::Select);
+    }
+    let has_box = |shapes: &[egui::epaint::ClippedShape]| {
+        shapes.iter().any(
+            |shape| matches!(&shape.shape, egui::Shape::Path(p) if p.closed && p.points.len() == 4),
+        )
+    };
+    let initial = frame_shapes(ctx, c, s, view, vec![], 0., true);
+    assert!(has_box(&initial));
+    let pivot = c.selection.rotation.unwrap().center();
+    let grip = c.rotation_point(view.scale).unwrap();
+    let target = Placement {
+        origin: pivot,
+        position: pivot,
+        rotation: angle,
+        ..Default::default()
+    }
+    .apply(grip);
+    let pressed = frame_shapes(
+        ctx,
+        c,
+        s,
+        view,
+        vec![pointer(screen(view, grip), true, egui::Modifiers::NONE)],
+        1.,
+        true,
+    );
+    assert!(has_box(&pressed));
+    let held = frame_shapes(ctx, c, s, view, vec![moved(view, target)], 1.1, true);
+    assert!(!has_box(&held));
+    let delta = c.selection_preview(s).unwrap();
+    assert!((delta.rotation - angle).abs() < 0.00001);
+    let actual = c.rotation_point(view.scale).unwrap();
+    near(actual, target);
+    let target_screen = screen(view, target);
+    assert!(held.iter().any(|shape| matches!(&shape.shape, egui::Shape::Circle(circle)
+        if circle.radius == style::SELECTION_HANDLE * 0.5
+            && circle.center.distance(egui::pos2(target_screen[0] as f32, target_screen[1] as f32)) < 0.01)));
+    let released = frame_shapes(
+        ctx,
+        c,
+        s,
+        view,
+        vec![pointer(target_screen, false, egui::Modifiers::NONE)],
+        1.2,
+        true,
+    );
+    assert!(has_box(&released));
+    near(actual, c.rotation_point(view.scale).unwrap());
+    near(pivot, c.selection.rotation.unwrap().center());
+    delta
+}
+
+#[test]
+fn shared_rotation_ring_and_reset_cover_all_object_kinds_at_every_zoom() {
+    use crate::{
+        formula::FormulaObject,
+        image_object::ImageObject,
+        shape::{Shape, ShapeKind},
+        text::{FormatRun, TextObject},
+    };
+    for scale in [0.5, 1., 2., 4.] {
+        for kind in ShapeKind::ALL.into_iter().map(Some).chain([None]) {
+            let (mut c, s) = setup(DocumentKind::Whiteboard);
+            let owner = c.drawing.owner();
+            let ctx = egui::Context::default();
+            let position = [225., 280.];
+            let mut fixtures = Vec::<ObjectSnapshot>::new();
+            if let Some(kind) = kind {
+                fixtures.push(
+                    Shape::create(owner, s, kind, position, [300., 325.], false)
+                        .unwrap()
+                        .into(),
+                );
+            } else {
+                fixtures.push(
+                    ImageObject::new(
+                        owner,
+                        s,
+                        position,
+                        crate::image_object::test_support::asset(),
+                    )
+                    .into(),
+                );
+                fixtures.push(
+                    Shape::create_sticky_note(owner, s, position, [110., 90.], [240, 200, 98])
+                        .unwrap()
+                        .into(),
+                );
+                let mut text = TextObject::new(owner, s, position, 110.);
+                text.content_mut().text = "Mixed fonts".into();
+                let mut alternate = text.content.style.clone();
+                alternate.size = 29.;
+                alternate.family = crate::text::TextFamily::Monospace;
+                text.content_mut().runs.push(FormatRun {
+                    range: 6..11,
+                    style: alternate,
+                });
+                fixtures.push(text.into());
+                fixtures.push(
+                    FormulaObject::new(owner, s, position, "x^2".into(), [20, 60, 90, 255]).into(),
+                );
+                let ink = pressured(&mut c, s);
+                fixtures.push(c.drawing.snapshot(ink).unwrap().clone());
+            }
+            for (i, fixture) in fixtures.into_iter().enumerate() {
+                let id = fixture.id();
+                if c.drawing.snapshot(id).is_none() {
+                    assert!(c.drawing.insert_snapshots(vec![fixture]));
+                }
+                // Use distinct contexts because each test trace restarts egui time.
+                let ctx = if i == 0 {
+                    ctx.clone()
+                } else {
+                    egui::Context::default()
+                };
+                c.selection.change([id], Membership::Replace, &c.drawing);
+                let frame_start = c.selection.rotation.unwrap();
+                let view = Transform {
+                    origin: [370., 320.],
+                    center: frame_start.center(),
+                    scale,
+                };
+                let original = c.drawing.snapshot(id).unwrap().clone();
+                drag_rotation(&ctx, &mut c, s, view, 0.73);
+                let rotated = c.drawing.snapshot(id).unwrap().clone();
+                assert_eq!(
+                    rotated.as_object().local_bounds(),
+                    original.as_object().local_bounds()
+                );
+                let revision = c.drawing.revision();
+                rotation_click(&ctx, &mut c, s, view, 2.);
+                assert_eq!(c.drawing.revision(), revision);
+                rotation_click(&ctx, &mut c, s, view, 2.14);
+                let reset = c.drawing.snapshot(id).unwrap().clone();
+                assert_eq!(reset.as_object().placement().rotation, 0.);
+                assert_eq!(c.drawing.revision(), revision + 1);
+                near(frame_start.center(), c.selection.rotation.unwrap().center());
+                if let (ObjectSnapshot::Text(a), ObjectSnapshot::Text(b)) = (&original, &reset) {
+                    assert!(Arc::ptr_eq(&a.content, &b.content));
+                }
+                if let (ObjectSnapshot::Stroke(a), ObjectSnapshot::Stroke(b)) = (&original, &reset)
+                {
+                    assert_eq!(a.points, b.points);
+                    assert_eq!(a.pressure_style, b.pressure_style);
+                }
+                c.undo();
+                assert_eq!(c.drawing.snapshot(id), Some(&rotated));
+                c.redo();
+                assert_eq!(c.drawing.snapshot(id), Some(&reset));
+                let revision = c.drawing.revision();
+                rotation_click(&ctx, &mut c, s, view, 3.);
+                rotation_click(&ctx, &mut c, s, view, 3.14);
+                assert_eq!(c.drawing.revision(), revision);
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_group_rotation_reset_keeps_local_angles_and_magnetic_routes() {
+    use crate::{
+        connector::{Connector, Endpoint, Port, Rail, Route},
+        shape::{Shape, ShapeKind},
+    };
+    for route in [
+        Route::Orthogonal {
+            rail: Some(Rail {
+                axis: 0,
+                offset: 18.,
+            }),
+        },
+        Route::Curved {
+            controls: Some([[24., 13.], [-19., 22.]]),
+        },
+    ] {
+        let (mut c, s) = setup(DocumentKind::Whiteboard);
+        let owner = c.drawing.owner();
+        let rect = |x| {
+            Shape::create(
+                owner,
+                s,
+                ShapeKind::Rectangle,
+                [x, 260.],
+                [x + 50., 310.],
+                false,
+            )
+            .unwrap()
+        };
+        let a = rect(290.);
+        let mut b = rect(420.);
+        b.placement.rotation = 0.24;
+        let external = rect(625.);
+        let [aid, bid, eid] = [a.id, b.id, external.id];
+        let mut wire = Connector::new(
+            owner,
+            s,
+            Endpoint::attached(&a, Port::Right).unwrap(),
+            Endpoint::attached(&external, Port::Left).unwrap(),
+            Default::default(),
+        );
+        wire.route = route;
+        let wid = wire.id;
+        for shape in [a, b, external] {
+            assert!(c.drawing.add_shape(shape));
+        }
+        assert!(c.drawing.add_connector(wire));
+        let inner = c
+            .drawing
+            .group_selection(&HashSet::from([aid, wid]))
+            .unwrap();
+        let outer = c
+            .drawing
+            .group_selection(&HashSet::from([inner, bid]))
+            .unwrap();
+        let ctx = egui::Context::default();
+        c.selection.change([outer], Membership::Replace, &c.drawing);
+        let view = Transform {
+            origin: [365., 300.],
+            center: c.selection.rotation.unwrap().center(),
+            scale: 2.,
+        };
+        let original = c.drawing.items().to_vec();
+        let delta = drag_rotation(&ctx, &mut c, s, view, 0.65);
+        let angle = |c: &Canvas, id| match c.drawing.snapshot(id).unwrap() {
+            ObjectSnapshot::Group(group) => group.rotation,
+            other => other.as_object().placement().rotation,
+        };
+        assert_eq!(angle(&c, outer), delta.rotation);
+        assert_eq!(angle(&c, inner), delta.rotation);
+        assert!((angle(&c, bid) - angle(&c, outer) - 0.24).abs() < 1e-9);
+        let rotated = c.drawing.items().to_vec();
+        let check_wire = |c: &Canvas| {
+            let Some(ObjectSnapshot::Connector(wire)) = c.drawing.snapshot(wid) else {
+                panic!()
+            };
+            assert_eq!(wire.source.target(), Some(aid));
+            assert_eq!(wire.target.target(), Some(eid));
+            assert!(
+                wire.as_shape()
+                    .contours(0.1)
+                    .iter()
+                    .flatten()
+                    .flatten()
+                    .all(|n| n.is_finite())
+            );
+        };
+        check_wire(&c);
+        rotation_click(&ctx, &mut c, s, view, 2.);
+        rotation_click(&ctx, &mut c, s, view, 2.14);
+        assert_eq!(angle(&c, outer), 0.);
+        assert_eq!(angle(&c, inner), 0.);
+        assert!((angle(&c, bid) - 0.24).abs() < 1e-9);
+        assert_eq!(c.drawing.parent(inner), Some(outer));
+        assert_eq!(c.drawing.parent(wid), Some(inner));
+        check_wire(&c);
+        let reset = c.drawing.items().to_vec();
+        c.undo();
+        assert_eq!(c.drawing.items(), rotated);
+        c.undo();
+        assert_eq!(c.drawing.items(), original);
+        c.redo();
+        c.redo();
+        assert_eq!(c.drawing.items(), reset);
+    }
+}
+
+#[test]
+fn mixed_lasso_rotation_reset_uses_one_reference_and_keeps_relative_ink() {
+    let (mut c, s) = setup(DocumentKind::Whiteboard);
+    c.select(Tool::Lasso);
+    let first = pressured(&mut c, s);
+    let second = stroke(&mut c, s, [60., 115.], [320., 120.]);
+    let turn = |x, y, angle| Placement {
+        origin: [x, y],
+        position: [x, y],
+        rotation: angle,
+        ..Default::default()
+    };
+    assert!(
+        c.drawing
+            .transform_objects(&HashSet::from([first]), turn(80., 65., 0.18))
+    );
+    assert!(
+        c.drawing
+            .transform_objects(&HashSet::from([second]), turn(190., 117.5, -0.12))
+    );
+    let ctx = egui::Context::default();
+    c.selection
+        .change([first, second], Membership::Replace, &c.drawing);
+    let view = Transform {
+        origin: [360., 350.],
+        center: c.selection.rotation.unwrap().center(),
+        scale: 4.,
+    };
+    let original = c.drawing.strokes().to_vec();
+    drag_rotation(&ctx, &mut c, s, view, 0.38);
+    let rotated = c.drawing.strokes().to_vec();
+    rotation_click(&ctx, &mut c, s, view, 2.);
+    rotation_click(&ctx, &mut c, s, view, 2.14);
+    let reset = c.drawing.strokes().to_vec();
+    assert_eq!(reset[0].placement.rotation, 0.);
+    assert!((reset[1].placement.rotation + 0.30).abs() < 1e-12);
+    let a = reset[0].path()[0];
+    let b = reset[1].path()[0];
+    let distance = |a: Point, b: Point| (a[0] - b[0]).hypot(a[1] - b[1]);
+    assert!((distance(a, b) - distance(original[0].path()[0], original[1].path()[0])).abs() < 1e-8);
+    c.undo();
+    assert_eq!(c.drawing.strokes(), rotated);
+    c.redo();
+    assert_eq!(c.drawing.strokes(), reset);
 }

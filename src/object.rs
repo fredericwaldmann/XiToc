@@ -728,7 +728,19 @@ impl ObjectSnapshot {
     pub fn transformed(&self, delta: Placement) -> Self {
         match self {
             Self::Image(i) => i.transformed(delta).into(),
-            Self::Group(_) => self.clone(),
+            Self::Group(group) => {
+                let orientation = Placement {
+                    rotation: group.rotation,
+                    ..Default::default()
+                };
+                let rotation = orientation.then(delta, [0.; 2]).rotation;
+                if rotation == group.rotation {
+                    return self.clone();
+                }
+                let mut group = (**group).clone();
+                group.rotation = rotation;
+                Self::Group(group.into())
+            }
             Self::Text(t) => t.transformed(delta).into(),
             Self::Formula(f) => f.transformed(delta).into(),
             Self::Connector(c) => c.transformed(delta, &Default::default()).into(),
