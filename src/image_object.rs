@@ -152,7 +152,6 @@ pub struct ImageObject {
     pub placement: Placement,
     pub dimensions: Point,
     pub opacity: u8,
-    pub preserve_aspect: bool,
     pub locked: bool,
     /// Shared immutable asset handle. History/duplicates never clone original bytes.
     pub asset: Arc<ImageAsset>,
@@ -171,7 +170,6 @@ impl ImageObject {
             },
             dimensions: dims.map(|n| f64::from(n) * factor),
             opacity: 255,
-            preserve_aspect: true,
             locked: false,
             asset,
         }
@@ -231,8 +229,11 @@ impl ImageObject {
         ]
         .map(|p| self.placement.apply(p))
     }
-    /// Captured local resize; keeps the opposite handle fixed, including rotated/flipped objects.
-    pub fn resized(&self, index: usize, target: Point) -> Self {
+    /// Resize from the captured image, keeping the opposite grip fixed.
+    pub fn resized(&self, index: usize, target: Point, proportional: bool) -> Self {
+        if target == self.handles()[index] {
+            return self.clone();
+        }
         let local = self.placement.inverse(target);
         let [w, h] = self.dimensions;
         let left = matches!(index, 0 | 6 | 7);
@@ -251,18 +252,25 @@ impl ImageObject {
                 h
             },
         ];
-        for v in &mut dims {
-            *v = v.clamp(1., 1e6);
-        }
-        if self.preserve_aspect {
+        let minimum = self.dimensions.map(|size| size.min(1.0));
+        if proportional {
             let factor = if x && y {
-                ((dims[0] / w) + (dims[1] / h)) * 0.5
+                // Project the target onto the original anchor-to-corner diagonal.
+                (dims[0] * w + dims[1] * h) / (w * w + h * h)
             } else if x {
                 dims[0] / w
             } else {
                 dims[1] / h
             };
-            dims = [w * factor, h * factor];
+            let min_factor = (minimum[0] / w).max(minimum[1] / h);
+            let max_factor = 1e6 / w.max(h);
+            let factor = factor.clamp(min_factor, max_factor);
+            dims = self.dimensions.map(|size| (size * factor).clamp(0.01, 1e6));
+        } else {
+            dims = std::array::from_fn(|axis| dims[axis].clamp(minimum[axis], 1e6));
+        }
+        if dims == self.dimensions {
+            return self.clone();
         }
         let opposite = self.handles()[(index + 4) % 8];
         let normalized = [
@@ -399,31 +407,63 @@ mod tests {
                 rotation: 0.4,
                 reflected: [true, false],
             });
-        for locked in [true, false] {
+        for proportional in [true, false] {
             for index in 0..8 {
-                let mut source = image.clone();
-                source.preserve_aspect = locked;
+                let source = &image;
                 let h = source.handles()[index];
-                let next = source.resized(index, [h[0] + 17., h[1] + 13.]);
+                let next = source.resized(index, [h[0] + 17., h[1] + 13.], proportional);
                 assert!(next.valid());
                 assert!(Arc::ptr_eq(&next.asset, &source.asset));
                 let a = source.handles()[(index + 4) % 8];
                 let b = next.handles()[(index + 4) % 8];
                 assert!((a[0] - b[0]).hypot(a[1] - b[1]) < 1e-8);
-                if locked {
+                if proportional {
                     assert!((next.dimensions[0] / next.dimensions[1] - 2.).abs() < 1e-9);
                 }
             }
         }
-        let mut unlocked = image.clone();
-        unlocked.preserve_aspect = false;
         assert!(
-            unlocked
-                .resized(4, [0., 0.])
+            image
+                .resized(4, [0., 0.], false)
                 .dimensions
                 .iter()
                 .all(|n| *n > 0.)
         );
+    }
+    #[test]
+    fn free_edges_and_corners_and_shift_use_the_current_proportions() {
+        let mut image = ImageObject::new(Uuid::new_v4(), Surface::Canvas, [100., 120.], asset());
+        image.dimensions = [400., 200.];
+        for (index, offset, dimensions) in [
+            (0, [-200., -30.], [600., 230.]),
+            (1, [200., -30.], [400., 230.]),
+            (2, [200., -30.], [600., 230.]),
+            (3, [200., -30.], [600., 200.]),
+            (4, [200., 30.], [600., 230.]),
+            (5, [200., 30.], [400., 230.]),
+            (6, [-200., 30.], [600., 230.]),
+            (7, [-200., 30.], [600., 200.]),
+        ] {
+            let start = image.handles()[index];
+            let target = std::array::from_fn(|axis| start[axis] + offset[axis]);
+            let next = image.resized(index, target, false);
+            assert_eq!(next.dimensions, dimensions);
+            let anchor = (index + 4) % 8;
+            assert_eq!(next.handles()[anchor], image.handles()[anchor]);
+        }
+        let proportional = image.resized(3, [700., 350.], true);
+        assert_eq!(proportional.dimensions, [600., 300.]);
+        assert_eq!(proportional.handles()[7], image.handles()[7]);
+        assert_eq!(proportional.placement.position, [100., 70.]);
+        let stretched = image.resized(3, [700., 350.], false);
+        let scaled = stretched.resized(3, [1000., 350.], true);
+        assert_eq!(scaled.dimensions, [900., 300.]);
+        let shrunk = stretched.resized(4, [-1e9, -1e9], true);
+        let enlarged = stretched.resized(4, [1e9, 1e9], true);
+        for candidate in [shrunk, enlarged] {
+            assert!(candidate.valid());
+            assert!((candidate.dimensions[0] / candidate.dimensions[1] - 3.).abs() < 1e-8);
+        }
     }
     #[test]
     fn rotated_image_selection_uses_polygon_not_axis_aligned_bounds() {

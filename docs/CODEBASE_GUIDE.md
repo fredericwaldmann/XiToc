@@ -1020,13 +1020,17 @@ canonical state or persistence format is introduced.
   selection placement with the committed image. An intrinsic resize supplies its
   preview snapshot directly. Mixed selections and groups use the shared overlay.
   Overlay geometry is generated from the current gesture each frame. Contextual
-  controls are hidden during the gesture and return at the committed bounds.
+  controls follow the image bounds and are disabled during resize. During moves
+  and rotations they return at the committed bounds after the gesture.
   Escape during an image transform discards the preview and leaves the selected
   image or group outlined at its original position.
 - `object.rs`, `drawing.rs`: Image snapshot dispatch and weak asset interning;
   canonical object/history handles retain assets. Generic transforms/grouping and
   existing journal operations remain shared. ImageResize uses the same DragSession
   ownership/revision/view guards alongside existing local shape/text resize adapters.
+  Image resize uses free local dimensions and derives Shift-constrained proportions
+  from the captured image. Modifier events reuse the last sampled document point,
+  including after pointer hover loss, and refresh snapping against the new constraint.
 - `object_clipboard.rs`: version-2 image asset table/reference interchange, with
   version-1 compatibility for earlier content. Object IDs remap; asset content IDs
   remain stable. Image originals are shared independently of GPU texture lifetime.

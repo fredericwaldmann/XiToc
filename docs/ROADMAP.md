@@ -318,6 +318,6 @@ document configuration PDF persistence remain outside this task/M2.
 
 PNG/JPEG/WebP image insertion, local file drop and screenshot paste join the
 shared canvas-object model. Original-byte assets, cached display textures,
-eight-handle aspect-aware resizing, replacement/opacity and existing transforms,
+eight-handle free resizing with live Shift proportions, replacement/opacity and existing transforms,
 groups, clipboard and history are implemented. PDF embedding, saved asset/object
 round trips, cropping and masks remain future work; no image persistence is claimed.

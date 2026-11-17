@@ -1037,11 +1037,15 @@ font licenses, alternatives and resolution/memory tradeoffs.
 
 `image_object.rs` adds ImageObject to the shared CanvasObject/ObjectSnapshot store.
 Placement carries uniform scale, rotation and true local-axis reflections; positive
-local dimensions allow independent width/height resizing when aspect lock is off.
+local dimensions allow free width and height resizing.
 The canonical sequence, group forest, locks, selection, snapping, alignment and
 Replace journal remain authoritative. Eight local resize handles capture immutable
-sources and the shared DragSession view/revision guard; movement uses the existing
-selection transform session. Raw asset bytes never change during transformations.
+sources and the shared DragSession view/revision guard. Resize resolves pointer
+displacement and live Shift state against that immutable source. Proportional
+corners project onto the original diagonal. Proportional edges scale about the
+opposite midpoint. Shift preserves the captured displayed ratio, including
+previous stretching. The effective snapshot feeds both rendering and selection.
+Movement uses the existing selection transform session. Asset bytes stay shared.
 
 ImageAsset is an immutable resource with a SHA-256 content ID, original compressed
 bytes in Arc<[u8]>, and orientation-correct pixel dimensions. Objects own shared

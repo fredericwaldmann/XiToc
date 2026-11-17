@@ -712,16 +712,21 @@ attachment behavior is offered. Unsupported/corrupted input reports a status err
 without creating an object or changing existing content.
 
 Selected images use the shared move/rotation/group/lock/Arrange/alignment controls.
-Eight local resize grips retain the opposite anchor, source asset and captured
-view/revision. Preserve aspect ratio defaults on for both corners and edges; turn
-it off explicitly for independent dimensions. Alt continues to bypass snapping.
-Image formatting is a compact menu in the shared selection controls/right-click
-Format menu, and in the top toolbar at widths >=650. It offers Opacity, Preserve
-aspect ratio, Reset dimensions (initial import size), and Replace image source.
-Replacement preserves ID, placement, opacity, reflections and aspect preference;
-with aspect lock on its height follows the new source ratio. An out-of-page result
-is rejected without moving/replacing the existing image. Reset retains placement
-orientation, fits within A4, and resets uniform scale. No photo filters/cropping.
+Eight local resize grips stretch freely by default. A corner changes both axes
+about the opposite corner. An edge changes one axis and keeps the opposite edge
+stationary. Hold Shift to preserve the displayed aspect ratio at the start of
+the drag. A constrained edge keeps the opposite edge midpoint fixed and changes
+the perpendicular extent symmetrically around it. Shift can be pressed or
+released during the drag, even while the pointer is stationary. The preview
+recomputes from the original grab offset and anchor. Alt bypasses snapping.
+The image and selection handles update together throughout the gesture.
+The contextual toolbar follows the resize preview and becomes interactive again
+when the gesture ends.
+Image formatting is available in the shared selection controls, right-click
+Format menu, and top toolbar at widths >=650. It offers Opacity, Reset dimensions
+and Replace image source. Reset restores the source ratio and initial size,
+retains orientation and fits within A4. Replacement preserves ID, dimensions,
+placement and opacity.
 
 Ctrl/Cmd+V with canvas focus accepts screenshot pixels or browser image clipboard
 files; source/text editing keeps its existing paste behavior. XiToc object copies

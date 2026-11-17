@@ -24,6 +24,8 @@ pub(super) enum SelectionGesture {
         preview: crate::image_object::ImageObject,
         index: usize,
         start: Point,
+        last: Point,
+        proportional: bool,
         moved: bool,
     },
     ShapeEdit {
@@ -781,19 +783,28 @@ impl Canvas {
                 preview,
                 index,
                 start,
+                last,
+                proportional,
                 moved,
                 ..
             }) if *s == surface => {
+                *last = point;
                 if !*moved && (point[0] - start[0]).hypot(point[1] - start[1]) * scale < 3. {
                     return;
                 }
+                if *proportional != shift {
+                    *proportional = shift;
+                    if let Some(snap) = &mut self.snap_session {
+                        snap.clear();
+                    }
+                }
                 let handle = source.handles()[*index];
-                let target = std::array::from_fn(|i| handle[i] + point[i] - start[i]);
-                let mut next = source.resized(*index, target);
+                let target = std::array::from_fn(|i| handle[i] + (point[i] - start[i]));
+                let mut next = source.resized(*index, target, shift);
                 if let Some(snap) = &mut self.snap_session {
                     let grip = next.handles()[*index];
                     let opposite = source.handles()[(*index + 4) % 8];
-                    let rail = if source.preserve_aspect || !index.is_multiple_of(2) {
+                    let rail = if shift || !index.is_multiple_of(2) {
                         Some([grip[0] - opposite[0], grip[1] - opposite[1]])
                     } else {
                         None
@@ -807,7 +818,9 @@ impl Canvas {
                         scale,
                         bypass,
                     );
-                    next = source.resized(*index, snapped);
+                    if snapped != grip {
+                        next = source.resized(*index, snapped, shift);
+                    }
                     let final_grip = next.handles()[*index];
                     snap.reconcile(if rotated {
                         ObjectBounds {
@@ -1279,6 +1292,8 @@ impl Canvas {
                                 source,
                                 index,
                                 start: point,
+                                last: point,
+                                proportional: modifiers.shift,
                                 moved: false,
                             });
                         }
@@ -1345,12 +1360,17 @@ impl Canvas {
                     }
                 }
                 Event::ModifiersChanged(modifiers) => {
-                    if self.selection_gesture.is_some()
-                        && let Some(pos) = ui.input(|i| i.pointer.interact_pos())
-                    {
+                    let point = match &self.selection_gesture {
+                        Some(SelectionGesture::ImageResize { last, .. }) => Some(*last),
+                        Some(_) => ui
+                            .input(|i| i.pointer.interact_pos())
+                            .map(|pos| transform.to_document([pos.x as f64, pos.y as f64])),
+                        None => None,
+                    };
+                    if let Some(point) = point {
                         self.selection_sample(
                             surface,
-                            transform.to_document([pos.x as f64, pos.y as f64]),
+                            point,
                             transform.scale,
                             modifiers.shift,
                             modifiers.alt,
@@ -1672,11 +1692,15 @@ impl Canvas {
         };
         let viewport = bounds.intersect(ui.clip_rect());
         let p = style::palette(ui);
+        let resize_bounds = self
+            .image_resize_preview()
+            .and_then(CanvasObject::world_bounds);
+        let resizing_image = resize_bounds.is_some();
         if matches!(self.tool, Tool::Select | Tool::Lasso)
             && self.selection.surface == surface
-            && self.selection_gesture.is_none()
+            && (self.selection_gesture.is_none() || resizing_image)
             && self.connection_gesture.is_none()
-            && let Some(group) = self.selection.bounds
+            && let Some(group) = resize_bounds.or(self.selection.bounds)
         {
             let display = Self::display_bounds(group, transform.scale);
             let mut top = transform.to_screen([display.center()[0], display.min[1]]);
@@ -1743,7 +1767,8 @@ impl Canvas {
                 )
                 .order(egui::Order::Foreground)
                 .movable(false)
-                .enabled(ui.is_enabled())
+                .interactable(!resizing_image)
+                .enabled(ui.is_enabled() && !resizing_image)
                 .constrain_to(viewport)
                 .pivot(egui::Align2::CENTER_TOP)
                 .fixed_pos(egui::pos2(top[0] as f32, y))

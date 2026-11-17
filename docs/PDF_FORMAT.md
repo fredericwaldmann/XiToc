@@ -205,7 +205,7 @@ migration. The blank-only codec remains unchanged and does not serialize formula
 ## M1.14 image asset preparation (not persisted)
 
 ImageObject snapshots hold stable object/document/surface IDs, Placement, positive
-local dimensions, opacity, aspect preference, lock and a shared immutable ImageAsset.
+local dimensions, opacity, lock and a shared immutable ImageAsset.
 Asset IDs are SHA-256 hashes of original PNG/JPEG/WebP bytes. Originals and oriented
 pixel dimensions are independent of disposable decoded RGBA/textures and source paths.
 Clipboard's asset-table format is transient interchange, never a canonical note.

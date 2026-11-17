@@ -104,11 +104,6 @@ impl Canvas {
                         }
                         let mut next = (**old).clone();
                         next.asset = asset.clone();
-                        if next.preserve_aspect {
-                            let d = asset.dimensions();
-                            next.dimensions[1] =
-                                next.dimensions[0] * f64::from(d[1]) / f64::from(d[0]);
-                        }
                         next
                     } else {
                         let mut next = ImageObject::new(
@@ -292,20 +287,43 @@ impl Canvas {
         let Some(source) = self.selected_image() else {
             return;
         };
-        ui.add_enabled_ui(!self.drawing.is_locked(source.id),|ui| {
-            let mut image=(*source).clone();let mut changed=false;
-            let mut opacity=f32::from(image.opacity)/255.;
-            let response=ui.add(egui::Slider::new(&mut opacity,0.0..=1.0).text("Opacity"));
-            if response.changed(){image.opacity=(opacity*255.).round() as u8;changed=true;}
-            changed|=ui.checkbox(&mut image.preserve_aspect,"Preserve aspect ratio").changed();
-            if ui.button("Reset dimensions").clicked(){
-                let natural=ImageObject::new(image.document_id,image.surface,[0.;2],image.asset.clone());image.dimensions=natural.dimensions;image.placement.scale=1.;changed=true;
+        ui.add_enabled_ui(!self.drawing.is_locked(source.id), |ui| {
+            let mut image = (*source).clone();
+            let mut opacity = f32::from(image.opacity) / 255.0;
+            let response = ui.add(egui::Slider::new(&mut opacity, 0.0..=1.0).text("Opacity"));
+            if response.changed() {
+                image.opacity = (opacity * 255.0).round() as u8;
             }
-            if changed {let page=self.drawing.bounds(image.surface);fit_image(&mut image,page);let merge=self.style_gesture==Some((response.id,self.drawing.revision()));
-                if self.drawing.edit_image(image,merge) {self.style_gesture=ui.input(|i|i.pointer.primary_down()).then_some((response.id,self.drawing.revision()));}
-                self.selection.refresh(&self.drawing);}
-            if ui.button("Replace image source…").clicked(){self.choose_image(ui.ctx(),Some(source.id));ui.close();}
-            ui.weak("Images are memory-only until M2. Corners preserve aspect ratio; unlock above for independent edges.");
+            let reset = ui
+                .button("Reset dimensions")
+                .on_hover_text("Restore the source aspect ratio and initial size")
+                .clicked();
+            if reset {
+                let natural = ImageObject::new(
+                    image.document_id,
+                    image.surface,
+                    [0.; 2],
+                    image.asset.clone(),
+                );
+                image.dimensions = natural.dimensions;
+                image.placement.scale = 1.0;
+                let page = self.drawing.bounds(image.surface);
+                fit_image(&mut image, page);
+            }
+            if response.changed() || reset {
+                let merge =
+                    !reset && self.style_gesture == Some((response.id, self.drawing.revision()));
+                if self.drawing.edit_image(image, merge) {
+                    self.style_gesture = (!reset && ui.input(|i| i.pointer.primary_down()))
+                        .then_some((response.id, self.drawing.revision()));
+                }
+                self.selection.refresh(&self.drawing);
+            }
+            if ui.button("Replace image source…").clicked() {
+                self.choose_image(ui.ctx(), Some(source.id));
+                ui.close();
+            }
+            ui.weak("Drag a handle to stretch. Hold Shift to keep proportions.");
         });
     }
     pub(super) fn image_handle(&self, p: Point, scale: f64) -> Option<(Arc<ImageObject>, usize)> {

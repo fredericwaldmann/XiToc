@@ -577,7 +577,8 @@ mod image_tests {
         frame(pointer(pos, true));
         frame(pointer(pos, false));
         let labels = frame(vec![]);
-        assert!(labels.contains_key("Preserve aspect ratio"), "{labels:?}");
+        assert!(labels.contains_key("Reset dimensions"), "{labels:?}");
+        assert!(!labels.contains_key("Preserve aspect ratio"));
         assert!(editor.canvas.tool == Tool::Select);
         assert!(editor.canvas.selection.ids.contains(&id));
         assert_eq!(editor.canvas.drawing.revision(), revision);

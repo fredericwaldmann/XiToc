@@ -26,6 +26,8 @@ struct ImageReference {
     placement: Placement,
     dimensions: Point,
     opacity: u8,
+    // Older readers expect this field. New readers always use the Shift modifier.
+    #[serde(default)]
     preserve_aspect: bool,
     locked: bool,
     asset_id: crate::image_object::AssetId,
@@ -159,7 +161,7 @@ impl ObjectBundle {
                         placement: i.placement,
                         dimensions: i.dimensions,
                         opacity: i.opacity,
-                        preserve_aspect: i.preserve_aspect,
+                        preserve_aspect: false,
                         locked: i.locked,
                         asset_id: i.asset.id(),
                     };
@@ -236,7 +238,6 @@ impl ObjectBundle {
                             placement: i.placement,
                             dimensions: i.dimensions,
                             opacity: i.opacity,
-                            preserve_aspect: i.preserve_aspect,
                             locked: i.locked,
                             asset,
                         }

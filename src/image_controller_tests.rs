@@ -55,7 +55,14 @@ fn image_history_grouping_clipboard_cross_document_and_asset_reuse() {
         )
         .unwrap();
         assert_eq!(json["assets"].as_array().unwrap().len(), 1);
-        let restored = ObjectBundle::decode(&encoded).unwrap();
+        let mut legacy = json;
+        for object in legacy["objects"].as_array_mut().unwrap() {
+            if object["kind"] == "Image" {
+                object["data"]["preserve_aspect"] = true.into();
+            }
+        }
+        let legacy = format!("{}{legacy}", crate::object_clipboard::PREFIX);
+        let restored = ObjectBundle::decode(&legacy).unwrap();
         let (mut other, other_surface) = setup(DocumentKind::Whiteboard);
         let pasted = restored.paste(&mut other.drawing, other_surface, [250., 250.]);
         assert_eq!(pasted.len(), 1);
@@ -97,7 +104,7 @@ fn image_history_grouping_clipboard_cross_document_and_asset_reuse() {
     }
 }
 #[test]
-fn image_opacity_and_aspect_edits_merge_and_undo_without_touching_bytes() {
+fn image_opacity_edits_merge_and_undo_without_touching_bytes() {
     let (mut c, s) = setup(DocumentKind::Whiteboard);
     let id = add(&mut c, s, [80., 100.]);
     let original = get(&c, id);
@@ -111,11 +118,7 @@ fn image_opacity_and_aspect_edits_merge_and_undo_without_touching_bytes() {
     assert_eq!(get(&c, id), original);
     c.drawing.redo();
     assert_eq!(get(&c, id).opacity, 80);
-    let mut edited = (*get(&c, id)).clone();
-    edited.preserve_aspect = false;
-    assert!(c.drawing.replace_image(edited));
-    c.drawing.undo();
-    assert!(get(&c, id).preserve_aspect);
+    assert!(Arc::ptr_eq(&get(&c, id).asset, &original.asset));
 }
 #[test]
 fn real_image_selection_drag_resize_offscreen_zoom_and_texture_reuse() {
@@ -173,7 +176,7 @@ fn real_image_selection_drag_resize_offscreen_zoom_and_texture_reuse() {
             assert_eq!(c.image_cache[&asset_id].texture.id(), texture_id);
             assert!(Arc::ptr_eq(&moved_image.asset, &original.asset));
             let handle = moved_image.handles()[4];
-            let end = [handle[0] + 20., handle[1] + 10.];
+            let end = [handle[0] + 20., handle[1] + 15.];
             frame(
                 &ctx,
                 &mut c,
@@ -201,8 +204,7 @@ fn real_image_selection_drag_resize_offscreen_zoom_and_texture_reuse() {
                 true,
             );
             let resized = get(&c, id);
-            assert!((resized.dimensions[0] / resized.dimensions[1] - 2.).abs() < 1e-8);
-            assert!(resized.dimensions[0] > 120.);
+            assert_eq!(resized.dimensions, [140., 75.]);
             c.drawing.undo();
             assert_eq!(get(&c, id), moved_image);
             c.drawing.redo();
@@ -348,6 +350,7 @@ fn image_import_failures_replacement_and_screenshot_paste_preserve_state() {
     assert_eq!(replaced.id, id);
     assert_eq!(replaced.placement, image.placement);
     assert_eq!(replaced.opacity, 100);
+    assert_eq!(replaced.dimensions, image.dimensions);
     assert_ne!(replaced.asset.id(), original_asset.id());
     c.drawing.undo();
     assert!(Arc::ptr_eq(&get(&c, id).asset, &original_asset));
@@ -747,7 +750,6 @@ fn image_resize_and_rotation_paint_match_before_and_after_release() {
         c.snapping.grid = false;
         let id = add(&mut c, s, [200., 200.]);
         let mut original = (*get(&c, id)).clone();
-        original.preserve_aspect = index != Some(3);
         original.placement.rotation = 0.35;
         original.placement.reflected = [false, true];
         assert!(c.drawing.replace_image(original.clone()));
@@ -758,7 +760,7 @@ fn image_resize_and_rotation_paint_match_before_and_after_release() {
         let (start, end, expected) = if let Some(index) = index {
             let start = original.handles()[index];
             let end = [start[0] + 38., start[1] - 18.];
-            (start, end, original.resized(index, end))
+            (start, end, original.resized(index, end, false))
         } else {
             let start = Canvas::image_rotation_geometry(&original, view.scale).1;
             let center = bounds.center();
@@ -889,5 +891,164 @@ fn mixed_and_grouped_image_drag_paints_the_collective_preview() {
         );
         assert_eq!(c.selection.bounds, Some(expected_bounds));
         assert_image_paint(&c, &release, view, &original.transformed(delta));
+    }
+}
+
+#[test]
+fn image_resize_reprojects_stationary_shift_changes_from_the_same_anchor() {
+    for scale in [0.5, 1., 2., 4.] {
+        for index in [3, 4] {
+            let (mut c, s) = setup(DocumentKind::Whiteboard);
+            c.select(Tool::Select);
+            c.snapping.objects = false;
+            c.snapping.grid = false;
+            let id = add(&mut c, s, [110., 140.]);
+            let mut original = (*get(&c, id)).clone();
+            original.dimensions = [260., 90.];
+            original.opacity = 177;
+            original.placement.rotation = 0.27;
+            original.placement.reflected = [index == 3, index == 4];
+            assert!(c.drawing.replace_image(original.clone()));
+            c.selection.change([id], Membership::Replace, &c.drawing);
+            let ctx = egui::Context::default();
+            let grip = original.handles()[index];
+            let view = Transform {
+                origin: [390., 295.],
+                center: grip,
+                scale,
+            };
+            // Grab off-center and move one fast sample in both local axes.
+            let start = view.to_document([392., 296.]);
+            let target = original
+                .placement
+                .apply([300., if index == 3 { 70. } else { 120. }]);
+            let end = std::array::from_fn(|axis| start[axis] + (target[axis] - grip[axis]));
+            let free = original.resized(index, target, false);
+            let proportional = original.resized(index, target, true);
+            assert_ne!(free.dimensions, proportional.dimensions);
+            let revision = c.drawing.revision();
+            let held = frame_shapes(
+                &ctx,
+                &mut c,
+                s,
+                view,
+                vec![
+                    moved(view, start),
+                    pointer(screen(view, start), true, egui::Modifiers::NONE),
+                    moved(view, end),
+                ],
+                0.,
+                true,
+            );
+            assert_selected_image_paint(&c, &held, view, &free);
+            frame(&ctx, &mut c, s, view, vec![Event::PointerGone], 0.05, true);
+            for (frame_index, modifiers) in [
+                egui::Modifiers::SHIFT,
+                egui::Modifiers::NONE,
+                egui::Modifiers::SHIFT,
+                egui::Modifiers::NONE,
+                egui::Modifiers::SHIFT,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let output = frame_shapes(
+                    &ctx,
+                    &mut c,
+                    s,
+                    view,
+                    vec![Event::ModifiersChanged(modifiers)],
+                    0.1 + frame_index as f64 * 0.01,
+                    true,
+                );
+                let expected = if modifiers.shift {
+                    &proportional
+                } else {
+                    &free
+                };
+                assert_selected_image_paint(&c, &output, view, expected);
+                let candidate = c.effective_selected_image().unwrap();
+                if scale == 1.0 {
+                    let id = egui::Id::unique("selection-context")
+                        .with(c.drawing.owner())
+                        .with(s);
+                    let controls = ctx.memory(|memory| memory.area_rect(id)).unwrap();
+                    let center = screen(view, candidate.world_bounds().unwrap().center());
+                    assert!((f64::from(controls.center().x) - center[0]).abs() < 1.0);
+                }
+                let anchor = (index + 4) % 8;
+                let [x, y] = original.handles()[anchor];
+                let [a, b] = candidate.handles()[anchor];
+                assert!((x - a).hypot(y - b) < 1e-8);
+                assert_eq!(candidate.opacity, original.opacity);
+                assert!(Arc::ptr_eq(&candidate.asset, &original.asset));
+                assert_eq!(c.drawing.revision(), revision);
+            }
+            let released = frame_shapes(
+                &ctx,
+                &mut c,
+                s,
+                view,
+                vec![pointer(screen(view, end), false, egui::Modifiers::SHIFT)],
+                1.,
+                true,
+            );
+            assert_selected_image_paint(&c, &released, view, &proportional);
+            let committed = get(&c, id);
+            assert_eq!(c.drawing.revision(), revision + 1);
+            c.undo();
+            assert_eq!(*get(&c, id), original);
+            c.redo();
+            assert_eq!(get(&c, id), committed);
+            assert_eq!(committed.asset.bytes(), original.asset.bytes());
+
+            let grip = committed.handles()[index];
+            let end = [grip[0] + 16., grip[1] - 8.];
+            frame(
+                &ctx,
+                &mut c,
+                s,
+                view,
+                vec![
+                    moved(view, grip),
+                    pointer(screen(view, grip), true, egui::Modifiers::SHIFT),
+                    moved(view, end),
+                ],
+                2.,
+                true,
+            );
+            assert!(matches!(
+                c.selection_gesture,
+                Some(SelectionGesture::ImageResize { moved: true, .. })
+            ));
+            let revision = c.drawing.revision();
+            let escaped = frame_shapes(
+                &ctx,
+                &mut c,
+                s,
+                view,
+                vec![Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                2.1,
+                true,
+            );
+            assert_selected_image_paint(&c, &escaped, view, &committed);
+            frame(
+                &ctx,
+                &mut c,
+                s,
+                view,
+                vec![pointer(screen(view, end), false, egui::Modifiers::NONE)],
+                2.2,
+                true,
+            );
+            assert_eq!(c.drawing.revision(), revision);
+            assert_eq!(get(&c, id), committed);
+        }
     }
 }

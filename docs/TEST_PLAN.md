@@ -1763,7 +1763,7 @@ at the time of the local verification report.
 
 Automated image coverage includes PNG/JPEG/WebP originals and alpha, JPEG EXIF
 orientation, corrupted/unsupported/oversized input, oriented dimensions, all eight
-resize grips/opposite anchors, aspect lock/unlock, rotation/reflection, polygon
+resize grips/opposite anchors, free stretching, live Shift proportions, rotation/reflection, polygon
 selection, real click/Shift/Alt input, lasso/rectangle geometry, Page/Whiteboard
 ownership, opacity edit coalescing, grouping/ungrouping/locking/Arrange/alignment,
 copy/duplicate/cross-document asset transfer, deduplicated clipboard resources,
@@ -1782,7 +1782,11 @@ To reproduce manually, insert and select an image, then drag its body slowly
 and quickly. Pause with the button held and check all eight grips, the outline
 and the rotation ring before release. Repeat at 50%, 100%, 200% and 400%, after
 panning, and with a rotated image partly outside the viewport. Resize a corner
-and an edge, rotate, then Shift-select a rectangle and drag both. Release,
+and an edge, rotate, then Shift-select a rectangle and drag both. While resizing,
+pause with the pointer held and press and release Shift. The preview should
+alternate between free and proportional dimensions about the same anchor.
+After stretching, start a new Shift resize and check that it preserves the
+stretched ratio. Reset dimensions restores the source proportions. Release,
 Undo and Redo should all show an outline and grips at the corresponding position.
 
 Executed on the isolated image worktree: cargo fmt --all -- --check,

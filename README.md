@@ -393,6 +393,7 @@ Settings → Snapping configures defaults for future editors. All changes remain
 in memory pending M2 PDF persistence.
 
 Images: the top Image tool imports PNG, JPEG and WebP as editable canvas objects.
+Drag any image handle to stretch it, or hold Shift to keep its current proportions.
 Canvas file drop and screenshot paste are supported; original bytes stay in memory
 with object/history snapshots. Images, like other canvas edits, are **not saved
 to PDF and do not survive restart** until M2. No sidecars or uploads are used.
