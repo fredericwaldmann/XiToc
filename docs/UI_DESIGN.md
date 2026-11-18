@@ -760,14 +760,15 @@ new version. Attachment edits remain in memory until M2.
 
 ## M1.15 — Stroke formatting
 
-Select ink with the existing Selection or Lasso tool. **Stroke** appears on
-the top drawing toolbar when the editor is at least 650 points wide. In narrower
-editors, open the Selection dropdown and choose **Stroke**. The canvas
-right-click **Format → Stroke** menu provides the same controls.
+Select ink with the existing Selection or Lasso tool. The shared contextual
+selection toolbar automatically shows **Stroke Color**, **Stroke Width**,
+**Stroke Opacity**, **Pen Style**, and **Pressure** near the selection. It
+uses the same placement, wrapping, and visibility rules as shape formatting.
+The canvas **Format** menu also offers these controls.
 
-The menu shows the number of editable pen strokes, including unlocked stroke
-descendants of selected groups. It shows Mixed beside properties with different
-values. The color picker and hex field set RGB, the opacity slider sets alpha
+Stroke properties apply to unlocked selected ink and stroke descendants of
+selected groups. In a mixed object selection, Stroke Width and the shape Width
+are separate controls. Property menus show Mixed for differing values. The color picker and hex field set RGB, the opacity slider sets alpha
 from 0–100%, and the numeric field, ± buttons and slider set the base width
 from 0.25–24 pt. Steps use the first stroke as a starting value for mixed
 widths. Pen style and pressure are independently editable. Pressure uses the

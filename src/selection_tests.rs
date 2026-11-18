@@ -175,12 +175,18 @@ fn lasso_closes_selects_and_adds_subtracts_under_zoom() {
             assert_eq!(c.selection.ids, HashSet::from([a, b]));
             lasso(
                 &mut c,
-                &[[20., 40.], [100., 40.], [100., 80.], [20., 80.]],
+                &[[20., 80.], [20., 40.], [100., 40.], [100., 80.]],
                 egui::Modifiers::ALT,
             );
             assert_eq!(c.selection.ids, HashSet::from([b]));
-            lasso(&mut c, &[[150., 40.], [151., 41.]], egui::Modifiers::NONE);
-            assert!(c.selection.ids.is_empty());
+            // Click empty canvas beyond the contextual toolbar's footprint.
+            let blank_y = (500.0_f64 / scale).min(700.0);
+            lasso(
+                &mut c,
+                &[[150., blank_y], [151., blank_y + 1.]],
+                egui::Modifiers::NONE,
+            );
+            assert!(c.selection.ids.is_empty(), "{kind:?} at zoom {scale}");
             assert_eq!(c.drawing.strokes().len(), 2);
         }
     }
@@ -1290,4 +1296,160 @@ fn lasso_formatting_keeps_selected_paths_and_reuses_unrelated_mesh() {
     assert_eq!(canvas.selection.ids, selected);
     frame(&ctx, &mut canvas, surface, transform, vec![], 0.3, true);
     assert_eq!(canvas.cache[&a].meshes[0].vertices, original.vertices);
+}
+
+#[test]
+fn stroke_formatting_follows_canvas_selection_and_edits_group_members() {
+    use crate::ui::settings::tests::{pointer as ui_pointer, render};
+    use crate::{
+        drawing::StrokeStylePatch,
+        shape::{Shape, ShapeKind},
+    };
+    let (mut canvas, surface) = setup(DocumentKind::Whiteboard);
+    let a = stroke(&mut canvas, surface, [220., 260.], [305., 260.]);
+    let b = stroke(&mut canvas, surface, [220., 310.], [305., 310.]);
+    let shape = Shape::create(
+        canvas.drawing.owner(),
+        surface,
+        ShapeKind::Rectangle,
+        [380., 260.],
+        [460., 320.],
+        false,
+    )
+    .unwrap();
+    let shape_id = shape.id;
+    assert!(canvas.drawing.insert_snapshots(vec![shape.into()]));
+    let shape_before = canvas.drawing.snapshot(shape_id).unwrap().clone();
+    assert!(
+        canvas
+            .drawing
+            .format_strokes(&HashSet::from([b]), StrokeStylePatch::Width(6.), false)
+    );
+    let ctx = egui::Context::default();
+    let frame = |c: &mut Canvas, events| {
+        render(&ctx, events, |ui| {
+            c.begin_frame(ui);
+            c.surface(ui, ui.available_rect_before_wrap(), surface, t());
+            c.end_frame(ui);
+        })
+    };
+    let labels = |c: &mut Canvas| {
+        frame(c, vec![]);
+        frame(c, vec![])
+    };
+    let click_ui = |c: &mut Canvas, pos| {
+        frame(c, ui_pointer(pos, true));
+        frame(c, ui_pointer(pos, false));
+    };
+    let drag = |c: &mut Canvas, points: &[Point]| {
+        let mut events = vec![
+            moved(t(), points[0]),
+            pointer(points[0], true, egui::Modifiers::NONE),
+        ];
+        events.extend(points[1..].iter().map(|p| moved(t(), *p)));
+        events.push(pointer(
+            *points.last().unwrap(),
+            false,
+            egui::Modifiers::NONE,
+        ));
+        frame(c, events);
+    };
+    canvas.select(Tool::Select);
+    assert!(!labels(&mut canvas).contains_key("Stroke Width"));
+    click_ui(&mut canvas, egui::pos2(265., 260.));
+    assert_eq!(canvas.selection.ids, HashSet::from([a]));
+    assert!(labels(&mut canvas).contains_key("Stroke Width"));
+    click_ui(&mut canvas, egui::pos2(420., 295.));
+    let shape_labels = labels(&mut canvas);
+    assert!(shape_labels.contains_key("Border"));
+    assert!(!shape_labels.contains_key("Stroke Width"));
+    click_ui(&mut canvas, egui::pos2(650., 490.));
+    assert!(!labels(&mut canvas).contains_key("Border"));
+    drag(&mut canvas, &[[195., 235.], [340., 335.]]);
+    assert_eq!(canvas.selection.ids, HashSet::from([a, b]));
+    assert!(labels(&mut canvas).contains_key("Stroke Width"));
+    canvas.select(Tool::Lasso);
+    drag(
+        &mut canvas,
+        &[
+            [195., 235.],
+            [340., 235.],
+            [340., 335.],
+            [195., 335.],
+            [195., 235.],
+        ],
+    );
+    assert_eq!(canvas.selection.ids, HashSet::from([a, b]));
+    let width = labels(&mut canvas)["Stroke Width"];
+    click_ui(&mut canvas, width);
+    let menu = labels(&mut canvas);
+    assert!(menu.contains_key("Width · Mixed"));
+    let field = menu["Mixed"];
+    click_ui(&mut canvas, field);
+    frame(
+        &mut canvas,
+        vec![
+            Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND,
+            },
+            Event::Text("4.0".into()),
+        ],
+    );
+    frame(
+        &mut canvas,
+        vec![Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert_eq!(canvas.selection.ids, HashSet::from([a, b]));
+    let widths = |c: &Canvas| {
+        c.drawing
+            .strokes()
+            .iter()
+            .map(|s| s.width)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(widths(&canvas), vec![4., 4.]);
+    canvas.undo();
+    assert_eq!(widths(&canvas), vec![2., 6.]);
+    canvas.redo();
+    assert_eq!(widths(&canvas), vec![4., 4.]);
+
+    let group = canvas
+        .drawing
+        .group_selection(&HashSet::from([a, b, shape_id]))
+        .unwrap();
+    canvas
+        .selection
+        .change([group], Membership::Replace, &canvas.drawing);
+    frame(
+        &mut canvas,
+        vec![Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    canvas
+        .selection
+        .change([group], Membership::Replace, &canvas.drawing);
+    let width = labels(&mut canvas)["Stroke Width"];
+    click_ui(&mut canvas, width);
+    let plus = labels(&mut canvas)["+"];
+    click_ui(&mut canvas, plus);
+    assert_eq!(canvas.selection.ids, HashSet::from([group]));
+    assert_eq!(widths(&canvas), vec![4.25, 4.25]);
+    assert_eq!(canvas.drawing.snapshot(shape_id), Some(&shape_before));
+    canvas.select(Tool::Pen);
+    assert!(!labels(&mut canvas).contains_key("Stroke Width"));
 }

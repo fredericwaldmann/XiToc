@@ -1969,7 +1969,7 @@ impl Canvas {
         self.style_gesture = held.then_some((id, self.drawing.revision()));
         true
     }
-    pub(crate) fn has_stroke_formatting(&self) -> bool {
+    fn has_stroke_formatting(&self) -> bool {
         matches!(self.tool, Tool::Select | Tool::Lasso)
             && !self
                 .drawing
@@ -1977,7 +1977,7 @@ impl Canvas {
                 .is_empty()
     }
 
-    pub(crate) fn stroke_format_controls(&mut self, ui: &mut egui::Ui) {
+    fn stroke_format_controls(&mut self, ui: &mut egui::Ui) {
         let strokes = self.drawing.formatting_strokes(&self.selection.ids);
         for (patch, id) in crate::ui::stroke_controls::controls(ui, &strokes) {
             let merge = self.style_gesture == Some((id, self.drawing.revision()));
@@ -1993,7 +1993,7 @@ impl Canvas {
             }
         }
     }
-    fn shape_format_controls(&mut self, ui: &mut egui::Ui) {
+    fn object_format_controls(&mut self, ui: &mut egui::Ui) {
         if let Some(attachment) = self.selected_attachment() {
             ui.menu_button("Attachment", |ui| self.attachment_menu(ui, attachment));
         }
@@ -2022,6 +2022,7 @@ impl Canvas {
                 ui.ctx().request_repaint();
             }
         }
+        self.stroke_format_controls(ui);
     }
     pub(super) fn selection_controls(
         &mut self,
@@ -2078,21 +2079,24 @@ impl Canvas {
                     self.selection.ids.contains(&o.id())
                         && matches!(o, ObjectSnapshot::Connector(_))
                 });
-                let height = if !has_connectors
-                    && !self.drawing.items().iter().any(|o| {
-                        self.selection.ids.contains(&o.id())
-                            && matches!(o, ObjectSnapshot::Shape(_))
-                    }) {
+                let has_strokes = self.has_stroke_formatting();
+                let has_shapes = self.drawing.items().iter().any(|o| {
+                    self.selection.ids.contains(&o.id()) && matches!(o, ObjectSnapshot::Shape(_))
+                });
+                let content_width = match (has_connectors, has_shapes, has_strokes) {
+                    (true, _, _) => style::CONNECTOR_FORMAT_CONTENT_WIDTH,
+                    (_, true, _) => style::FORMAT_TOOLBAR_WIDTH,
+                    (_, _, true) => style::SELECTION_ACTIONS_WIDTH,
+                    _ => 0.0,
+                } + if has_strokes {
+                    style::STROKE_FORMAT_CONTENT_WIDTH
+                } else {
+                    0.0
+                };
+                let height = if content_width == 0.0 {
                     34.
                 } else {
-                    ((if has_connectors {
-                        style::CONNECTOR_FORMAT_CONTENT_WIDTH
-                    } else {
-                        style::FORMAT_TOOLBAR_WIDTH
-                    }) / toolbar_width)
-                        .ceil()
-                        * 32.
-                        + 8.
+                    (content_width / toolbar_width).ceil() * 32. + 8.
                 };
                 let clearance = style::ROTATION_OFFSET + height + style::FORMAT_TOOLBAR_GAP;
                 let y = if top[1] as f32 - clearance >= viewport.top() {
@@ -2120,7 +2124,7 @@ impl Canvas {
                             ui.set_max_width(toolbar_width);
                             ui.horizontal_wrapped(|ui| {
                                 ui.spacing_mut().item_spacing.x = 2.0;
-                                self.shape_format_controls(ui);
+                                self.object_format_controls(ui);
                                 for (icon, label, cmd) in [
                                     (
                                         Icon::Duplicate,
@@ -2226,10 +2230,7 @@ impl Canvas {
                         egui::containers::menu::MenuConfig::new()
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
                     )
-                    .ui(ui, |ui| {
-                        ui.push_id("stroke-context", |ui| self.stroke_format_controls(ui));
-                        self.shape_format_controls(ui);
-                    });
+                    .ui(ui, |ui| self.object_format_controls(ui));
                 ui.separator();
             }
             let state = crate::ui::selection_controls::MenuState::for_canvas(self);

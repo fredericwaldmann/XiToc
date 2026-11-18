@@ -286,8 +286,10 @@ at a time. Style snapshots share raw samples by Arc, which serializes as the
 same sample array. The journal keeps exact before/after snapshots and selected
 roots. Continuous pointer edits merge their slot changes, including updated
 ancestor bounds, and a drag back to the starting values drops the history entry.
-`ui/stroke_controls.rs` uses the shared picker and slider styling. Pen presets
-continue to supply defaults for new strokes.
+`ui/stroke_controls.rs` uses the shared picker and slider styling.
+`Canvas::object_format_controls` places the stroke menus in the same contextual
+selection toolbar as shape, image, and text formatting. Pen presets continue
+to supply defaults for new strokes.
 
 Move/resize use egui's existing translation/scale layer preview. egui's layer
 transform cannot rotate, so `Cached::paint_rotation` reuses base tessellation and

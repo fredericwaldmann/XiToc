@@ -832,8 +832,8 @@ PDF embedding stays in M2.
 
 ## M1.15 — Editable pen stroke appearance (#55)
 
-Added selection-scoped Stroke formatting to the top toolbar and right-click
-Format menu. Independent RGB, opacity, width, nib and pressure edits support
+Added selection-scoped Stroke formatting to the shared contextual toolbar and
+right-click Format menu. Independent RGB, opacity, width, nib and pressure edits support
 mixed selections, lasso and unlocked descendants of nested groups. The journal
 shares immutable samples, preserves selection, and restores individual before
 values in one Undo. Transparent meshes now union a stroke's own outline and

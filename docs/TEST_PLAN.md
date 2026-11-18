@@ -1866,8 +1866,11 @@ and 400%.
 
 1. Create a scratch Page Note or Whiteboard. Draw several lines with different
    widths and colors. Choose Selection or Lasso and select the writing.
-2. Open Stroke in the top toolbar. Check Mixed widths or colors. Recolor via the
-   picker or hex field and confirm the widths are unchanged. Undo and Redo.
+2. Check that the contextual toolbar appears near the selected writing. Open
+   Stroke Color or Stroke Width and check the mixed values. Recolor via the
+   picker or hex field and confirm widths and selection are retained. Undo and
+   Redo. Select a shape alone, then clear selection, and check that the ink
+   controls disappear both times.
 3. Enter a base width in points, use ±, and drag the width slider. Check the
    centerlines are stationary, and Undo once after releasing a drag.
 4. Draw a pressure-sensitive stroke with a supported pen. Double its base width
@@ -1883,8 +1886,15 @@ and 400%.
 
 Local validation passed all 342 active tests (13 ignored), formatting,
 denied-warning Clippy, native release, wasm32 compilation and Trunk release.
-Packaged Firefox verification exercised lasso selection, top and right-click
-Stroke menus, mixed color and width, numeric width, an opacity drag to 40% with
+The initial toolbar implementation was verified in packaged Firefox with
+lasso selection, mixed color and width, numeric width, an opacity drag to 40% with
 one-step undo/redo, and styling strokes in a group with a rectangle. The
 separate-stroke overlap appeared darker than the self-crossing. Pressure
 hardware was not used.
+
+The contextual toolbar correction adds a selection-controller test for single,
+rectangle, lasso, grouped and shape-only selections, numeric editing with
+keyboard focus, and undo/redo. In packaged Firefox, selecting one stroke or
+lassoing two strokes showed the nearby controls automatically. Recoloring kept
+their mixed widths, entering width updated both strokes, and releasing a live
+opacity drag produced one undo step that restored the mixed alpha values.

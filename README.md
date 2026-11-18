@@ -326,8 +326,9 @@ and transactional history in `Drawing`. Rotation uses the round group handle (Sh
 new object tools and PDF ink persistence remain future milestones. See
 `docs/ARCHITECTURE.md` for the extension contract.
 
-M1.15 stroke formatting: select handwriting with Selection or Lasso and open
-**Stroke** in the top toolbar or under the Selection dropdown on narrow editors.
+M1.15 stroke formatting: select handwriting with Selection or Lasso. The
+contextual toolbar appears next to the selection with **Stroke Color**,
+**Stroke Width**, **Stroke Opacity**, **Pen Style**, and **Pressure**.
 Change color, opacity, width, pen style or pressure on single strokes, mixed
 selections or unlocked group descendants. The strokes retain their paths and
 pressure samples. Undo restores their previous individual styles.

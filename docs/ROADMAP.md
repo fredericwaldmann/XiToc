@@ -336,7 +336,8 @@ The single-PDF persistence milestone owns attachment serialization.
 
 ## M1.15 — Editable pen stroke appearance (#55)
 
-Style existing ink through Selection or Lasso and the top-toolbar Stroke menu.
+Style existing ink through the contextual toolbar that appears on Selection
+or Lasso.
 Support mixed batches, nested group descendants and one-step history while
 retaining samples, IDs and placement. Transparent self-intersections composite
 once per stroke. Editable PDF serialization and viewer equivalence belong to M2.
