@@ -60,12 +60,17 @@ impl Editor {
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, data: &DocumentData) {
+        // Page handles may extend beyond the paper into the editor margin.
+        // Keep that hit area inside the editor, clear of tabs and toolbar.
+        let clip = ui.clip_rect();
+        ui.set_clip_rect(clip.intersect(ui.available_rect_before_wrap()));
         self.canvas.begin_frame(ui);
         match data.layout() {
             Layout::Page { pages } => self.pages(ui, data, pages),
             Layout::Whiteboard { .. } => self.whiteboard(ui),
         }
         self.canvas.end_frame(ui);
+        ui.set_clip_rect(clip);
     }
 
     fn pages(

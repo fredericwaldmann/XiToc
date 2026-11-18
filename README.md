@@ -326,6 +326,12 @@ and transactional history in `Drawing`. Rotation uses the round group handle (Sh
 new object tools and PDF ink persistence remain future milestones. See
 `docs/ARCHITECTURE.md` for the extension contract.
 
+M1.15 stroke formatting: select handwriting with Selection or Lasso and open
+**Stroke** in the top toolbar or under the Selection dropdown on narrow editors.
+Change color, opacity, width, pen style or pressure on single strokes, mixed
+selections or unlocked group descendants. The strokes retain their paths and
+pressure samples. Undo restores their previous individual styles.
+
 M1.4 manipulation: drag selected ink to move; corner handles resize handwriting
 proportionally (including off-axis drags/Shift) with uniform thickness scaling.
 Drag the round handle above the group to rotate, or use Edit/context Transform

@@ -1969,6 +1969,30 @@ impl Canvas {
         self.style_gesture = held.then_some((id, self.drawing.revision()));
         true
     }
+    pub(crate) fn has_stroke_formatting(&self) -> bool {
+        matches!(self.tool, Tool::Select | Tool::Lasso)
+            && !self
+                .drawing
+                .formatting_strokes(&self.selection.ids)
+                .is_empty()
+    }
+
+    pub(crate) fn stroke_format_controls(&mut self, ui: &mut egui::Ui) {
+        let strokes = self.drawing.formatting_strokes(&self.selection.ids);
+        for (patch, id) in crate::ui::stroke_controls::controls(ui, &strokes) {
+            let merge = self.style_gesture == Some((id, self.drawing.revision()));
+            if self
+                .drawing
+                .format_strokes(&self.selection.ids, patch, merge)
+            {
+                self.selection.refresh(&self.drawing);
+                self.style_gesture = ui
+                    .input(|i| i.pointer.primary_down())
+                    .then_some((id, self.drawing.revision()));
+                ui.ctx().request_repaint();
+            }
+        }
+    }
     fn shape_format_controls(&mut self, ui: &mut egui::Ui) {
         if let Some(attachment) = self.selected_attachment() {
             ui.menu_button("Attachment", |ui| self.attachment_menu(ui, attachment));
@@ -2188,7 +2212,8 @@ impl Canvas {
                 self.connect_selected_shapes();
                 ui.close();
             }
-            if self.selected_image().is_some()
+            if self.has_stroke_formatting()
+                || self.selected_image().is_some()
                 || !self.selected_shapes().is_empty()
                 || self
                     .selection
@@ -2201,7 +2226,10 @@ impl Canvas {
                         egui::containers::menu::MenuConfig::new()
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
                     )
-                    .ui(ui, |ui| self.shape_format_controls(ui));
+                    .ui(ui, |ui| {
+                        ui.push_id("stroke-context", |ui| self.stroke_format_controls(ui));
+                        self.shape_format_controls(ui);
+                    });
                 ui.separator();
             }
             let state = crate::ui::selection_controls::MenuState::for_canvas(self);

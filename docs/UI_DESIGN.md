@@ -105,14 +105,13 @@ the existing preferences backend; no workspace sidecars or ink storage. All tabs
 use the selected preset for subsequent strokes. Active gestures capture a style
 snapshot at pointer-down, so edits never change existing strokes or history.
 
-Monoline always ignores pressure for thickness, while retaining smoothing.
-Pressure Pen captures the configured response and uses normalized device force
-when available; absent force and mouse keep constant width. Highlighter ignores
-pressure and uses a wide translucent vector ribbon. Separate strokes and true
-self-crossings accumulate opacity via normal source-over compositing. Translucent
-ink has a flat nib; ordinary opaque ink retains the rounded renderer. No textures
-or watercolor types. Opacity is captured into stroke RGBA, not a registry lookup.
-Native Linux/macOS pressure hardware currently uses constant-width fallback.
+The Monoline and Highlighter presets capture uniform width. The Pressure Pen
+preset captures the configured response and uses normalized device force when
+available. Absent force and mouse input use the base width. Highlighter uses a
+flat nib with beveled joins. Monoline and Pressure Pen use round nibs. Separate
+strokes composite in order, and self-crossings receive the stroke's opacity once.
+Opacity is captured into stroke RGBA. Native Linux/macOS pressure hardware
+currently uses constant-width fallback.
 
 Eraser opens a compact popover with Stroke Eraser / Partial Eraser and active-tab
 radius (4–48 logical screen points). Mode remains the shared application preference;
@@ -758,3 +757,23 @@ file, or view file information. General transform, order, lock, grouping and
 clipboard commands are shared. Replacing preserves geometry and a custom label.
 External edits are separate snapshots. Use Replace Attached File to import a
 new version. Attachment edits remain in memory until M2.
+
+## M1.15 — Stroke formatting
+
+Select ink with the existing Selection or Lasso tool. **Stroke** appears on
+the top drawing toolbar when the editor is at least 650 points wide. In narrower
+editors, open the Selection dropdown and choose **Stroke**. The canvas
+right-click **Format → Stroke** menu provides the same controls.
+
+The menu shows the number of editable pen strokes, including unlocked stroke
+descendants of selected groups. It shows Mixed beside properties with different
+values. The color picker and hex field set RGB, the opacity slider sets alpha
+from 0–100%, and the numeric field, ± buttons and slider set the base width
+from 0.25–24 pt. Steps use the first stroke as a starting value for mixed
+widths. Pen style and pressure are independently editable. Pressure uses the
+original measurements wherever available. Cap and join behavior comes from the
+existing nib styles. Pen settings and presets apply to future strokes.
+
+Formatting retains the object selection and immediately updates the canvas.
+A slider or picker drag is one undoable action. Text fields retain keyboard
+focus while editing.

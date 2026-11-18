@@ -31,7 +31,11 @@ pub fn show(
             if doc.external { ui.weak("Read-only PDF"); return; }
             let selection = icons::button(ui, if editor.canvas.selection_mode == Tool::Lasso { Icon::Lasso } else { Icon::Select }, "Selection · Rectangle / Lasso · Shift adds, Alt removes", matches!(editor.canvas.tool, Tool::Select | Tool::Lasso));
             if selection.clicked() { editor.canvas.select(editor.canvas.selection_mode); }
-            ui.menu_button("▾", |ui| {
+            let stroke_selected = editor.canvas.has_stroke_formatting();
+            super::shape_controls::menu(ui, "▾", |ui| {
+                if width < 650.0 && stroke_selected {
+                    ui.push_id("stroke-format-compact", |ui| editor.canvas.stroke_format_controls(ui));
+                }
                 for (tool,label) in [(Tool::Select,"Rectangle Selection"),(Tool::Lasso,"Lasso Selection")] {
                     if ui.selectable_label(editor.canvas.selection_mode == tool,label).clicked() {
                         editor.canvas.selection_mode = tool;
@@ -70,6 +74,10 @@ pub fn show(
                     ui.close();
                 }
             });
+            let show_stroke = width >= 650.0 && stroke_selected;
+            if show_stroke {
+                ui.push_id("stroke-format-menu", |ui| editor.canvas.stroke_format_controls(ui));
+            }
             let image_selected=width>=650.0 && editor.canvas.selected_image().is_some();
             if image_selected {ui.push_id("image-format-menu",|ui|ui.menu_button("Image",|ui|editor.canvas.image_controls(ui)));}
             let formula_selection = if editor.canvas.selection.ids.len() == 1 {
@@ -92,7 +100,7 @@ pub fn show(
                 editor.canvas.select(Tool::StickyNote);
             }
             let reserved = if width >= 1000.0 { 480.0 } else if width >= 800.0 { 380.0 } else if width >= 500.0 { 268.0 } else { 210.0 };
-            let reserved=reserved+244.0+if image_selected {60.0}else{0.0}+if formula_selection.is_some(){72.0}else{0.0}+if width>=400.0{30.0}else{0.0};
+            let reserved=reserved+244.0+if show_stroke {60.0}else{0.0}+if image_selected {60.0}else{0.0}+if formula_selection.is_some(){72.0}else{0.0}+if width>=400.0{30.0}else{0.0};
             let strip_width = (width - reserved).max(24.0);
             ui.allocate_ui(egui::vec2(strip_width, style::CONTROL), |ui| {
                 egui::ScrollArea::horizontal().id_salt("pen-presets").min_scrolled_width(24.0).auto_shrink([false, false])
@@ -591,5 +599,70 @@ mod image_tests {
         assert!(editor.canvas.tool == Tool::Select);
         assert!(editor.canvas.selection.ids.contains(&id));
         assert_eq!(editor.canvas.drawing.revision(), revision);
+    }
+}
+
+#[cfg(test)]
+mod stroke_tests {
+    use super::*;
+    use crate::{
+        document::{DocumentData, Location},
+        drawing::{Stroke, Surface},
+        selection::Membership,
+        ui::settings::tests::{pointer, render},
+    };
+
+    #[test]
+    fn top_stroke_menu_preserves_lasso_selection_and_preset() {
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        let doc = Document {
+            data: data.clone(),
+            location: Location::new("ink.pdf".into()),
+            external: false,
+        };
+        let mut editor = Editor::new(&data);
+        let mut stroke = Stroke::new(data.id(), Surface::Canvas, [37, 99, 200, 255], 2.5);
+        stroke.push([100., 150.]);
+        stroke.push([150., 160.]);
+        let id = stroke.id;
+        assert!(editor.canvas.drawing.add(stroke));
+        editor.canvas.select(Tool::Lasso);
+        editor
+            .canvas
+            .selection
+            .change([id], Membership::Replace, &editor.canvas.drawing);
+        let before = editor.canvas.drawing.revision();
+        let mut action = None;
+        let mut prefs = crate::settings::DrawingPreferences::default();
+        let original_preset = prefs.presets.selected;
+        let ctx = egui::Context::default();
+        let mut frame = |events| {
+            render(&ctx, events, |ui| {
+                egui::Panel::top("stroke-toolbar-test")
+                    .exact_size(40.0)
+                    .show(ui, |ui| {
+                        show(ui, Some((&doc, &mut editor)), &mut action, &mut prefs);
+                    });
+                editor.show(ui, &data);
+            })
+        };
+        frame(vec![]);
+        let labels = frame(vec![]);
+        let pos = labels["Stroke"];
+        frame(pointer(pos, true));
+        frame(pointer(pos, false));
+        let labels = frame(vec![]);
+        assert!(labels.contains_key("Opacity"), "{labels:?}");
+        let plus = labels["+"];
+        frame(pointer(plus, true));
+        frame(pointer(plus, false));
+        drop(frame);
+        assert!(editor.canvas.selection.ids.contains(&id));
+        assert!(editor.canvas.tool == Tool::Lasso);
+        assert_eq!(editor.canvas.drawing.revision(), before + 1);
+        assert_eq!(editor.canvas.drawing.strokes()[0].width, 2.75);
+        assert_eq!(prefs.presets.selected, original_preset);
+        editor.canvas.undo();
+        assert_eq!(editor.canvas.drawing.strokes()[0].width, 2.5);
     }
 }

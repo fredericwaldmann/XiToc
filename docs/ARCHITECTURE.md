@@ -370,14 +370,10 @@ out-of-range/nonfinite values and oversized names/libraries. Local preferences
 are bounded to 64 KiB; note content is never included. Unsupported preferences are
 preserved by the existing app guard until an explicit user change.
 
-Opaque ink keeps the existing rounded renderer. Translucent strokes use joined,
-anti-aliased vector ribbon strips to avoid overpainting every segment/cap. Adjacent
-cached chunks include neighbor samples for matching seam normals, preserving the
-incremental mesh architecture. Width response comes from the same PressureStyle
-and hit-testing pipeline; erasers conservatively use existing rounded envelopes
-around flat-nib endpoints. Genuine self-crossings and distinct strokes composite
-normally. Cached meshes are reused on idle frames. No offscreen full-canvas render
-or per-frame stroke reconstruction is introduced.
+Opaque round-nib ink uses cached tessellation chunks. Translucent and flat-nib
+ink use a union of per-stroke vector outlines with a separately triangulated
+antialias fringe. A self-crossing belongs to that stroke's coverage once.
+Independent strokes composite in object order.
 
 The blank PDF codec/schema and save lifecycle are unchanged; ink remains in
 memory until M2. M2 must serialize semantic pen types and style snapshots together
@@ -1133,3 +1129,30 @@ Attachment cards use the oriented editing frame, shared movement, rotation,
 alignment, grouping and journal. Intrinsic corner and side resize changes
 the card dimensions and preserves the anchor. Native picker, export and
 opening run off the UI thread. Browser File reads use bounded async input.
+
+
+## M1.15 — Editing existing ink (#55)
+
+Stroke RGB, alpha, base width, pen type and pressure response settings are
+captured object attributes. Style edits share immutable raw sample arrays with
+their history snapshots and retain smoothing metadata, transforms and IDs.
+Width multiplies the same stored pressure response and the current placement
+scale. Disabling pressure uses a factor of one. Samples without pressure
+measurements use the same factor regardless of the toggle. Nib geometry is
+selected by pen type independently of alpha. Highlighter uses a flat nib.
+Monoline and Pressure Pen share a round nib and can both render retained
+pressure when enabled.
+
+The journal handles compatible strokes as one transaction, including selected
+groups' unlocked descendants and any updated derived group bounds. A pointer
+gesture coalesces to one transaction and keeps the selected root IDs for Undo
+and Redo. Centerline and interpolated pressure caches survive appearance edits.
+Geometry-affecting styles update the mesh key. RGB and alpha within a coverage
+mode tint the existing mesh coverage. Crossing between opaque rounded chunks
+and translucent coverage requires a mesh rebuild.
+
+M2 must serialize authored RGBA, base width, nib style, pressure settings and
+samples, smoothing, object order and transforms. Visible PDF graphics must fill
+a unioned variable-width outline once or use an equivalent isolated per-stroke
+transparency group so self-crossings match the editor. Separate PDF strokes must
+composite in document order. Current PDF persistence remains unchanged.

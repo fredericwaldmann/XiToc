@@ -1234,3 +1234,60 @@ fn rectangle_matches_rotated_geometry_and_vertical_containment() {
     assert!(c.selection.ids.is_empty());
     assert_eq!(*c.drawing.strokes()[0], *original);
 }
+
+#[test]
+fn lasso_formatting_keeps_selected_paths_and_reuses_unrelated_mesh() {
+    use crate::drawing::StrokeStylePatch as Patch;
+    let (mut canvas, surface) = setup(DocumentKind::Whiteboard);
+    let ctx = egui::Context::default();
+    let a = stroke(&mut canvas, surface, [70., 130.], [160., 130.]);
+    let b = stroke(&mut canvas, surface, [70., 160.], [160., 160.]);
+    let other = stroke(&mut canvas, surface, [70., 220.], [160., 220.]);
+    let transform = t();
+    canvas.select(Tool::Lasso);
+    let poly = [[50., 110.], [180., 110.], [180., 180.], [50., 180.]];
+    let mut events = vec![
+        moved(transform, poly[0]),
+        pointer(poly[0], true, egui::Modifiers::NONE),
+    ];
+    events.extend(poly[1..].iter().map(|p| moved(transform, *p)));
+    events.push(pointer(poly[3], false, egui::Modifiers::NONE));
+    frame(&ctx, &mut canvas, surface, transform, events, 0.0, true);
+    let selected = HashSet::from([a, b]);
+    assert_eq!(canvas.selection.ids, selected);
+    let other_mesh = canvas.cache[&other].meshes[0].clone();
+    let source = canvas.cache[&a].path.as_ptr();
+    let original = canvas.cache[&a].meshes[0].clone();
+    assert!(
+        canvas
+            .drawing
+            .format_strokes(&selected, Patch::Color([225, 50, 60]), false)
+    );
+    frame(&ctx, &mut canvas, surface, transform, vec![], 0.1, true);
+    let recolored = canvas.cache[&a].meshes[0].clone();
+    assert_ne!(recolored.vertices, original.vertices);
+    assert_eq!(recolored.indices, original.indices);
+    assert!(
+        recolored
+            .vertices
+            .iter()
+            .zip(&original.vertices)
+            .all(|(a, b)| a.pos == b.pos)
+    );
+    assert_eq!(canvas.cache[&a].path.as_ptr(), source);
+    assert!(
+        canvas
+            .drawing
+            .format_strokes(&selected, Patch::Width(8.), false)
+    );
+    frame(&ctx, &mut canvas, surface, transform, vec![], 0.2, true);
+    assert_eq!(canvas.cache[&a].path.as_ptr(), source);
+    assert_ne!(canvas.cache[&a].meshes[0].vertices, recolored.vertices);
+    assert!(Arc::ptr_eq(&other_mesh, &canvas.cache[&other].meshes[0]));
+    assert_eq!(canvas.selection.ids, selected);
+    canvas.undo();
+    canvas.undo();
+    assert_eq!(canvas.selection.ids, selected);
+    frame(&ctx, &mut canvas, surface, transform, vec![], 0.3, true);
+    assert_eq!(canvas.cache[&a].meshes[0].vertices, original.vertices);
+}

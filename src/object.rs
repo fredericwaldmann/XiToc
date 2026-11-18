@@ -577,11 +577,11 @@ mod architecture_tests {
         let mut stroke = ink(&doc, Surface::Canvas);
         stroke.width = 10.;
         stroke.pressure_style.enabled = true;
-        stroke.points[0].pressure = Some(0.);
-        stroke.points[1].pressure = Some(1.);
+        std::sync::Arc::make_mut(&mut stroke.points)[0].pressure = Some(0.);
+        std::sync::Arc::make_mut(&mut stroke.points)[1].pressure = Some(1.);
         assert!(!stroke.hit_test([20., 34.], 0.));
         assert!(stroke.hit_test([40., 34.], 0.));
-        stroke.points.truncate(1);
+        std::sync::Arc::make_mut(&mut stroke.points).truncate(1);
         assert!(stroke.hit_test([20., 30.5], 0.));
         assert!(!stroke.hit_test([20., 32.], 0.));
         assert!(!stroke.hit_test([f64::NAN, 0.], 1.));

@@ -110,7 +110,7 @@ pub struct Stroke {
     pub id: Uuid,
     pub document_id: Uuid,
     pub surface: Surface,
-    pub points: Vec<InkPoint>,
+    pub points: Arc<Vec<InkPoint>>,
     pub color: [u8; 4],
     /// PDF points (1/72 inch), independent of display pixels and zoom.
     pub width: f64,
@@ -127,7 +127,7 @@ impl Stroke {
             id: Uuid::new_v4(),
             document_id,
             surface,
-            points: Vec::new(),
+            points: Arc::default(),
             color,
             width,
             smoothing: Smoothing::Legacy,
@@ -157,13 +157,37 @@ impl Stroke {
         }
         let point = InkPoint { position, pressure };
         if self.points.last() != Some(&point) {
-            self.points.push(point);
+            Arc::make_mut(&mut self.points).push(point);
         }
     }
     pub fn push(&mut self, position: [f64; 2]) {
         let point = InkPoint::mouse(position);
         if self.points.last() != Some(&point) {
-            self.points.push(point);
+            Arc::make_mut(&mut self.points).push(point);
+        }
+    }
+}
+
+/// A single selected-ink property. RGB and alpha share the stored RGBA
+/// value but can be edited independently.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum StrokeStylePatch {
+    Color([u8; 3]),
+    Width(f64),
+    Opacity(u8),
+    PenType(crate::pen::PenType),
+    Pressure(bool),
+}
+
+impl StrokeStylePatch {
+    fn apply(self, stroke: &mut Stroke) {
+        match self {
+            Self::Color(rgb) => stroke.color[..3].copy_from_slice(&rgb),
+            Self::Width(width) if width.is_finite() => stroke.width = width.clamp(0.25, 24.0),
+            Self::Opacity(alpha) => stroke.color[3] = alpha,
+            Self::PenType(pen_type) => stroke.pen_type = pen_type,
+            Self::Pressure(enabled) => stroke.pressure_style.enabled = enabled,
+            _ => {}
         }
     }
 }
@@ -1146,6 +1170,92 @@ impl Drawing {
         self.execute_selected(Command::Replace { before, after }, Some(primary));
         true
     }
+    /// Resolve editable strokes through the existing group scope and locks.
+    pub fn formatting_strokes(&self, ids: &std::collections::HashSet<Uuid>) -> Vec<&Arc<Stroke>> {
+        let roots = ids
+            .iter()
+            .copied()
+            .filter(|id| self.in_scope(*id))
+            .collect();
+        let mut strokes: Vec<_> = self
+            .expanded(&roots)
+            .into_iter()
+            .filter(|id| !self.is_locked(*id))
+            .filter_map(|id| match self.snapshot(id) {
+                Some(ObjectSnapshot::Stroke(stroke)) => Some((self.object_slots[&id], stroke)),
+                _ => None,
+            })
+            .collect();
+        strokes.sort_unstable_by_key(|(index, _)| *index);
+        strokes.into_iter().map(|(_, stroke)| stroke).collect()
+    }
+
+    pub fn format_strokes(
+        &mut self,
+        ids: &std::collections::HashSet<Uuid>,
+        patch: StrokeStylePatch,
+        merge: bool,
+    ) -> bool {
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        for source in self.formatting_strokes(ids) {
+            let mut target = (**source).clone();
+            patch.apply(&mut target);
+            if target != **source {
+                let index = self.object_slots[&source.id];
+                before.push((index, ObjectSnapshot::Stroke(source.clone())));
+                after.push((index, target.into()));
+            }
+        }
+        if after.is_empty() {
+            return false;
+        }
+        let mut selection: Vec<_> = ids.iter().copied().collect();
+        selection.sort_unstable();
+        let previous = if merge && self.cursor == self.history.len() {
+            self.history
+                .last()
+                .filter(|entry| entry.selection.as_ref() == Some(&selection))
+                .and_then(|entry| match &entry.command {
+                    Command::Replace { before, after } => Some((before.clone(), after.clone())),
+                    _ => None,
+                })
+        } else {
+            None
+        };
+        self.execute_with_group_refresh(
+            Command::Replace { before, after },
+            Some(selection),
+            matches!(patch, StrokeStylePatch::Width(_)),
+        );
+        if let Some((original, applied)) = previous {
+            // Group bounds and the subset changed by each sample can differ.
+            // Combine slot deltas, keeping the first before and last after.
+            let latest = self.history.pop().unwrap();
+            let prior = self.history.last_mut().unwrap();
+            let Command::Replace { before, after } = latest.command else {
+                unreachable!()
+            };
+            let mut old: std::collections::BTreeMap<_, _> = before.into_iter().collect();
+            old.extend(original);
+            let mut new: std::collections::BTreeMap<_, _> = applied.into_iter().collect();
+            new.extend(after);
+            old.retain(|index, value| new[index] != *value);
+            new.retain(|index, _| old.contains_key(index));
+            self.cursor -= 1;
+            if old.is_empty() {
+                self.history.pop();
+                self.cursor -= 1;
+            } else {
+                prior.command = Command::Replace {
+                    before: old.into_iter().collect(),
+                    after: new.into_iter().collect(),
+                };
+            }
+        }
+        true
+    }
+
     /// One atomic mixed-selection formatting transaction. During a continuous
     /// control gesture merge only when the preceding result exactly matches.
     pub fn format_shapes(
@@ -1504,12 +1614,22 @@ impl Drawing {
     fn execute(&mut self, command: Command) {
         self.execute_selected(command, None);
     }
-    fn execute_selected(&mut self, mut command: Command, selection: Option<Vec<Uuid>>) {
-        let organized = self
-            .items
-            .iter()
-            .any(|o| matches!(o, ObjectSnapshot::Group(_)))
-            || matches!(&command, Command::Replace { after, .. } if after.iter().any(|(_, o)| matches!(o, ObjectSnapshot::Group(_))));
+    fn execute_selected(&mut self, command: Command, selection: Option<Vec<Uuid>>) {
+        self.execute_with_group_refresh(command, selection, true);
+    }
+
+    fn execute_with_group_refresh(
+        &mut self,
+        mut command: Command,
+        selection: Option<Vec<Uuid>>,
+        refresh_groups: bool,
+    ) {
+        let organized = refresh_groups
+            && (self
+                .items
+                .iter()
+                .any(|o| matches!(o, ObjectSnapshot::Group(_)))
+                || matches!(&command, Command::Replace { after, .. } if after.iter().any(|(_, o)| matches!(o, ObjectSnapshot::Group(_)))));
         let original = organized.then(|| self.items.clone());
         self.clear_routing_hints();
         self.history.truncate(self.cursor);
@@ -1815,7 +1935,7 @@ mod tests {
             Surface::Page(0),
             &[[2.0, 4.0], [10.0, 4.2], [18.0, 4.0]],
         );
-        ink.points[1].pressure = Some(0.4);
+        Arc::make_mut(&mut ink.points)[1].pressure = Some(0.4);
         ink.smoothing = Smoothing::AdaptiveV1 { strength: 75 };
         let original = ink.clone();
         let path = ink.path();
@@ -2011,3 +2131,169 @@ mod organization;
 
 #[path = "alignment_commands.rs"]
 mod alignment_commands;
+
+#[cfg(test)]
+mod stroke_format_tests {
+    use super::*;
+    use crate::{
+        document::DocumentKind,
+        pen::PenType,
+        shape::{Shape, ShapeKind},
+    };
+    use std::collections::HashSet;
+
+    fn ink(drawing: &mut Drawing, width: f64, color: [u8; 4], y: f64) -> Arc<Stroke> {
+        let mut stroke = Stroke::new(drawing.owner(), Surface::Canvas, color, width);
+        stroke.smoothing = Smoothing::AdaptiveV1 { strength: 65 };
+        stroke.pressure_style.enabled = true;
+        stroke.pen_type = PenType::Pressure;
+        stroke.push_pressure([20.0, y], Some(0.25));
+        stroke.push_pressure([50.0, y], Some(0.75));
+        stroke.push([80.0, y + 10.0]);
+        let id = stroke.id;
+        assert!(drawing.add(stroke));
+        current(drawing, id).clone()
+    }
+
+    fn current(drawing: &Drawing, id: Uuid) -> &Arc<Stroke> {
+        let Some(ObjectSnapshot::Stroke(stroke)) = drawing.snapshot(id) else {
+            panic!()
+        };
+        stroke
+    }
+
+    #[test]
+    fn individual_properties_preserve_path_force_and_identity() {
+        let mut drawing = Drawing::new(&DocumentData::blank(DocumentKind::Whiteboard));
+        let source = ink(&mut drawing, 3.0, [30, 80, 90, 180], 60.0);
+        let ids = HashSet::from([source.id]);
+        let placement = crate::object::Placement {
+            position: [35.0, 75.0],
+            scale: 1.5,
+            rotation: 0.5,
+            ..Default::default()
+        };
+        assert!(drawing.transform_objects(&ids, placement));
+        let original = current(&drawing, source.id).clone();
+        for patch in [
+            StrokeStylePatch::Color([80, 40, 130]),
+            StrokeStylePatch::Width(6.0),
+            StrokeStylePatch::Opacity(0),
+            StrokeStylePatch::PenType(PenType::Highlighter),
+        ] {
+            assert!(drawing.format_strokes(&ids, patch, false));
+            let result = current(&drawing, source.id);
+            assert!(Arc::ptr_eq(&result.points, &original.points));
+            assert_eq!(result.path(), original.path());
+            assert_eq!(result.id, original.id);
+            assert_eq!(result.smoothing, original.smoothing);
+            assert_eq!(result.placement, original.placement);
+            assert_eq!(result.pressure_style, original.pressure_style);
+        }
+        let edited = current(&drawing, source.id).clone();
+        assert_eq!(edited.color, [80, 40, 130, 0]);
+        assert_eq!(edited.width, 6.0);
+        assert_eq!(edited.pen_type, PenType::Highlighter);
+        let thicknesses = |stroke: &Stroke| {
+            stroke
+                .points
+                .iter()
+                .map(|p| stroke.visible_width() * stroke.pressure_style.factor(p.pressure))
+                .collect::<Vec<_>>()
+        };
+        for (a, b) in thicknesses(&original).iter().zip(thicknesses(&edited)) {
+            assert!((a * 2.0 - b).abs() < 1e-10);
+        }
+        assert!(drawing.format_strokes(&ids, StrokeStylePatch::Pressure(false), false));
+        let flat = current(&drawing, source.id);
+        assert!(thicknesses(flat).iter().all(|w| *w == flat.visible_width()));
+        assert!(drawing.format_strokes(&ids, StrokeStylePatch::Pressure(true), false));
+        assert_eq!(current(&drawing, source.id), &edited);
+        assert_eq!(thicknesses(&edited)[2], edited.visible_width());
+        assert!(drawing.format_strokes(&ids, StrokeStylePatch::Width(-1.0), false));
+        assert_eq!(current(&drawing, source.id).width, 0.25);
+        assert!(!drawing.format_strokes(&ids, StrokeStylePatch::Width(f64::NAN), false));
+        drawing.undo();
+        assert_eq!(current(&drawing, source.id), &edited);
+        drawing.redo();
+        assert_eq!(current(&drawing, source.id).width, 0.25);
+    }
+
+    #[test]
+    fn grouped_mixed_batches_coalesce_and_keep_roots_selected() {
+        let mut drawing = Drawing::new(&DocumentData::blank(DocumentKind::Whiteboard));
+        let a = ink(&mut drawing, 2., [20, 30, 40, 128], 50.);
+        let b = ink(&mut drawing, 4., [30, 30, 40, 200], 90.);
+        let locked = ink(&mut drawing, 7., [70, 70, 70, 255], 130.);
+        let shape = Shape::create(
+            drawing.owner(),
+            Surface::Canvas,
+            ShapeKind::Rectangle,
+            [100., 40.],
+            [125., 80.],
+            false,
+        )
+        .unwrap();
+        let shape_id = shape.id;
+        assert!(drawing.insert_snapshots(vec![shape.into()]));
+        let inner = drawing
+            .group_selection(&HashSet::from([a.id, b.id]))
+            .unwrap();
+        let protected = drawing
+            .group_selection(&HashSet::from([locked.id, shape_id]))
+            .unwrap();
+        let outer = drawing
+            .group_selection(&HashSet::from([inner, protected]))
+            .unwrap();
+        assert!(drawing.enter_group(outer));
+        assert!(drawing.lock_objects(&HashSet::from([protected]), true));
+        assert!(drawing.enter_group(inner));
+        let individual = HashSet::from([a.id]);
+        assert!(drawing.format_strokes(&individual, StrokeStylePatch::Opacity(0), false));
+        assert_eq!(current(&drawing, b.id), &b);
+        assert_eq!(drawing.undo(), vec![a.id]);
+        assert_eq!(current(&drawing, a.id), &a);
+        drawing.exit_group();
+        drawing.exit_group();
+        let roots = HashSet::from([outer]);
+        let original = drawing.items().to_vec();
+        assert_eq!(drawing.formatting_strokes(&roots).len(), 2);
+        assert!(!drawing.format_strokes(&roots, StrokeStylePatch::Width(f64::INFINITY), false));
+        assert!(drawing.format_strokes(&roots, StrokeStylePatch::Color([90, 90, 90]), false));
+        assert_eq!(current(&drawing, a.id).width, 2.0);
+        assert_eq!(current(&drawing, b.id).width, 4.0);
+        assert_eq!(current(&drawing, a.id).color, [90, 90, 90, 128]);
+        assert_eq!(current(&drawing, b.id).color, [90, 90, 90, 200]);
+        let recolored = drawing.items().to_vec();
+        // The initial sample changes only B. Further samples change both and update group bounds.
+        for (width, merge) in [(2., false), (8., true), (5., true)] {
+            assert!(drawing.format_strokes(&roots, StrokeStylePatch::Width(width), merge));
+        }
+        let edited = drawing.items().to_vec();
+        assert_eq!(current(&drawing, locked.id), &locked);
+        assert_eq!(drawing.parent(a.id), Some(inner));
+        assert_eq!(drawing.parent(inner), Some(outer));
+        assert_eq!(drawing.undo(), vec![outer]);
+        assert_eq!(drawing.items(), recolored);
+        assert_eq!(drawing.undo(), vec![outer]);
+        assert_eq!(drawing.items(), original);
+        assert_eq!(drawing.redo(), vec![outer]);
+        assert_eq!(drawing.redo(), vec![outer]);
+        assert_eq!(drawing.items(), edited);
+    }
+
+    #[test]
+    fn a_drag_back_to_its_original_value_does_not_add_history() {
+        let mut drawing = Drawing::new(&DocumentData::blank(DocumentKind::Whiteboard));
+        let source = ink(&mut drawing, 3.0, [30, 80, 90, 180], 60.0);
+        let ids = HashSet::from([source.id]);
+        let revision = drawing.revision();
+        assert!(!drawing.format_strokes(&ids, StrokeStylePatch::Width(3.0), false));
+        assert_eq!(drawing.revision(), revision);
+        assert!(drawing.format_strokes(&ids, StrokeStylePatch::Width(2.0), false));
+        assert!(drawing.format_strokes(&ids, StrokeStylePatch::Width(3.0), true));
+        assert_eq!(current(&drawing, source.id), &source);
+        drawing.undo();
+        assert!(drawing.strokes().is_empty());
+    }
+}
