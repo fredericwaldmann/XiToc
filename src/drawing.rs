@@ -316,6 +316,10 @@ pub struct Drawing {
     owner: Uuid,
     layout: Layout,
     items: Vec<ObjectSnapshot>,
+    binary_assets: std::collections::HashMap<
+        crate::asset::AssetId,
+        std::sync::Weak<crate::asset::BinaryAsset>,
+    >,
     image_assets: std::collections::HashMap<
         crate::image_object::AssetId,
         std::sync::Weak<crate::image_object::ImageAsset>,
@@ -342,6 +346,7 @@ impl Drawing {
             layout: data.layout().clone(),
             items: Vec::new(),
             image_assets: Default::default(),
+            binary_assets: Default::default(),
             parents: Default::default(),
             editing_group: None,
             live_ids: Default::default(),
@@ -559,6 +564,11 @@ impl Drawing {
     }
     pub fn valid_object(&self, object: &ObjectSnapshot) -> bool {
         match object {
+            ObjectSnapshot::Attachment(a) => {
+                a.valid()
+                    && a.document_id == self.owner
+                    && a.corners().iter().all(|p| self.contains(a.surface, *p))
+            }
             ObjectSnapshot::Image(i) => {
                 i.valid()
                     && i.document_id == self.owner
@@ -594,38 +604,89 @@ impl Drawing {
             }
         }
     }
-    fn intern_images(&mut self, objects: &mut [ObjectSnapshot]) -> bool {
+    fn intern_assets(&mut self, objects: &mut [ObjectSnapshot]) -> bool {
+        self.binary_assets
+            .retain(|_, asset| asset.strong_count() > 0);
         self.image_assets
             .retain(|_, asset| asset.strong_count() > 0);
         let mut assets: std::collections::HashMap<_, _> = self
-            .image_assets
+            .binary_assets
             .iter()
-            .filter_map(|(id, a)| a.upgrade().map(|a| (*id, a)))
+            .filter_map(|(id, asset)| asset.upgrade().map(|asset| (*id, asset)))
             .collect();
         for object in objects.iter() {
-            if let ObjectSnapshot::Image(image) = object {
-                assets
-                    .entry(image.asset.id())
-                    .or_insert_with(|| image.asset.clone());
-            }
+            let binary = match object {
+                ObjectSnapshot::Attachment(a) => &a.asset,
+                ObjectSnapshot::Image(i) => &i.asset.binary,
+                _ => continue,
+            };
+            assets.entry(binary.id()).or_insert_with(|| binary.clone());
         }
-        if assets.len() > 16
-            || assets.values().map(|a| a.bytes().len()).sum::<usize>() > 128 * 1024 * 1024
+        if assets.len() > crate::asset::MAX_ASSETS
+            || assets
+                .values()
+                .map(|asset| asset.bytes().len())
+                .sum::<usize>()
+                > crate::asset::MAX_DOCUMENT_ASSET_BYTES
         {
             return false;
         }
         for object in objects {
-            if let ObjectSnapshot::Image(image) = object {
-                let asset = assets[&image.asset.id()].clone();
-                if !Arc::ptr_eq(&image.asset, &asset) {
-                    Arc::make_mut(image).asset = asset;
+            match object {
+                ObjectSnapshot::Attachment(a) => {
+                    let binary = &assets[&a.asset.id()];
+                    if !Arc::ptr_eq(binary, &a.asset) {
+                        Arc::make_mut(a).asset = binary.clone();
+                    }
                 }
+                ObjectSnapshot::Image(i) => {
+                    let id = i.asset.id();
+                    if let Some(existing) = self
+                        .image_assets
+                        .get(&id)
+                        .and_then(std::sync::Weak::upgrade)
+                    {
+                        if !Arc::ptr_eq(&i.asset, &existing) {
+                            Arc::make_mut(i).asset = existing;
+                        }
+                    } else {
+                        let binary = &assets[&id];
+                        if !Arc::ptr_eq(binary, &i.asset.binary) {
+                            Arc::make_mut(&mut Arc::make_mut(i).asset).binary = binary.clone();
+                        }
+                        self.image_assets.insert(id, Arc::downgrade(&i.asset));
+                    }
+                }
+                _ => {}
             }
         }
-        self.image_assets = assets
+        self.binary_assets = assets
             .into_iter()
             .map(|(id, a)| (id, Arc::downgrade(&a)))
             .collect();
+        true
+    }
+
+    pub fn replace_attachment(&mut self, attachment: crate::attachment::Attachment) -> bool {
+        let id = attachment.id;
+        let mut value = ObjectSnapshot::from(attachment);
+        if self.is_locked(id) || !self.valid_object(&value) {
+            return false;
+        }
+        let Some(&index) = self.object_slots.get(&id) else {
+            return false;
+        };
+        let original = self.items[index].clone();
+        if !matches!(original, ObjectSnapshot::Attachment(_))
+            || original == value
+            || !self.intern_assets(std::slice::from_mut(&mut value))
+        {
+            return false;
+        }
+        self.execute(Command::Replace {
+            before: vec![(index, original)],
+            after: vec![(index, value)],
+        });
         true
     }
     pub fn replace_image(&mut self, image: crate::image_object::ImageObject) -> bool {
@@ -633,7 +694,7 @@ impl Drawing {
     }
     pub fn edit_image(&mut self, image: crate::image_object::ImageObject, merge: bool) -> bool {
         let mut object = ObjectSnapshot::from(image);
-        if !self.intern_images(std::slice::from_mut(&mut object)) {
+        if !self.intern_assets(std::slice::from_mut(&mut object)) {
             return false;
         }
         let id = object.id();
@@ -978,7 +1039,7 @@ impl Drawing {
         self.insert_snapshots(objects.into_iter().map(Into::into).collect())
     }
     pub fn insert_snapshots(&mut self, mut objects: Vec<ObjectSnapshot>) -> bool {
-        if !self.intern_images(&mut objects) {
+        if !self.intern_assets(&mut objects) {
             return false;
         }
         if objects.is_empty() {

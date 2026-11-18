@@ -1104,3 +1104,32 @@ textures per document bound this cache to approximately 256 MiB before overhead.
 
 Assets and image objects are memory-only until M2. No sidecars or PDF payload/codec
 changes are introduced. Existing dirty/export/discard protections apply to images.
+
+## M1.14 embedded file attachments (#53)
+
+Before attachments, Drawing's weak registry interned original image bytes via
+ImageAsset. Object, undo/redo and clipboard snapshots owned the strong Arcs.
+The portable CanvasObject protocol supplied placement, bounds and identity.
+Native and browser import ran through separate adapters.
+
+Attachment extends the same snapshot protocol. It stores identity, page
+ownership, local card dimensions, placement, source filename and editable
+display name. BinaryAsset now owns the original bytes for both attachments
+and visible images. SHA-256 identifies identical bytes even when their names
+differ. ImageAsset wraps the shared content with decoded dimensions. Drawing
+interns the binary Arcs across both kinds and enforces 16 assets and 128 MiB
+of retained original content per document, including history. Each file is
+limited to 16 MiB. History and session clipboard snapshots keep resources
+alive while referenced.
+
+Clipboard v3 writes one binary table for selections containing attachments.
+Image and attachment snapshots reference the same table by hash. Decode
+verifies hashes, limits, identities and relationships before insertion.
+Image-only v2 and object-only v1 still work. Large copies use XiToc's session
+clipboard. Pasting remaps object and document IDs and interns assets into the
+destination. Original bytes remain shared across transforms and copies.
+
+Attachment cards use the oriented editing frame, shared movement, rotation,
+alignment, grouping and journal. Intrinsic corner and side resize changes
+the card dimensions and preserves the anchor. Native picker, export and
+opening run off the UI thread. Browser File reads use bounded async input.

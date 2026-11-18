@@ -1845,3 +1845,14 @@ the pointer along both local axes. Only the local width should change without
 Shift. Group two differently rotated shapes and a stretched image. Rotate the
 group through a full turn and check the pivot, edge lengths, and ring offset.
 Double-click the ring, then undo and redo to verify child-relative angles.
+
+## M1.14 embedded file attachments (#53)
+
+Use Insert → File Attachment to import a PDF, XLSX, ZIP, TXT, and unknown binary. As the
+picker accepts up to four files per operation, use a second batch for the fifth.
+Select and drag a card, resize an oriented side, reset rotation on the ring,
+group with a shape and undo/redo. Copy a card into a Page Note and compare its
+export to the original byte-for-byte after moving the source. Verify same-name
+and same-content imports, export collision detection, locked cards and failed
+imports. On native, check PDF, spreadsheet and text associations and rejection
+of scripts. On the web, use Download and compare the saved bytes.

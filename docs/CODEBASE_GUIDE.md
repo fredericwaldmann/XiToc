@@ -1052,3 +1052,17 @@ canonical state or persistence format is introduced.
 Image tools never read workspace paths implicitly. Source files can be deleted
 following import. Image objects and assets remain unsaved session content until
 M2's single-PDF visible-image/edit-payload round-trip gate.
+
+## M1.14 embedded file attachments (#53)
+
+- `asset.rs` holds bounded SHA-256 original-byte resources. `drawing.rs` interns
+  resources for both image and attachment snapshots. The typed image wrapper and
+  texture cache retain image-specific information.
+- `attachment.rs` holds card metadata and geometry. `canvas_attachments.rs`
+  handles insertion, replacement, rendering and attachment menu commands.
+  `canvas_selection.rs` uses the existing oriented frame, snapping, hit testing
+  and history.
+- `attachment_io.rs` coordinates picker/drop reads, browser downloads, native
+  no-clobber exports and platform application association dispatch.
+- `object_clipboard.rs` supports v3 mixed asset references plus prior clipboard
+  versions. Strong snapshot references retain resources through undo/redo.

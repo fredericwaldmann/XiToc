@@ -1,4 +1,7 @@
 mod app;
+mod asset;
+mod attachment;
+mod attachment_io;
 mod canvas;
 mod connector;
 mod connector_route;

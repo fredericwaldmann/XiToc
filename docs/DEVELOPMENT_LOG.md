@@ -821,3 +821,11 @@ Group frames derive from child-local rectangles projected into the group's
 basis. Rotation rings use the top edge's outward normal at a fixed screen
 offset. Box side grips edit local dimensions and collective corners resize
 around the opposite oriented corner.
+
+## M1.14 embedded file attachments (#53)
+
+Added file cards backed by the original shared binary assets. Existing image
+snapshots retain an image-specific metadata wrapper around the same byte store.
+Reused oriented selection, grouping, transformations and the journal. Added
+mixed asset clipboard interchange and platform-specific opening and export.
+PDF embedding stays in M2.

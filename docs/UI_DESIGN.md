@@ -716,9 +716,9 @@ canvas center after successful decoding. Initial size preserves oriented source
 aspect ratio, caps the longest side at 320 document points without upscaling small
 images, and fits A4 bounds when necessary. Up to four files may be dropped together
 onto the canvas at the pointer with small offsets. Drag-over feedback explicitly
-says these become images. Generic attachments are not implemented, so no competing
-attachment behavior is offered. Unsupported/corrupted input reports a status error
-without creating an object or changing existing content.
+identifies PNG, JPEG and WebP as images. Other dropped files become attachment
+cards. Use Insert → File Attachment to attach an image as a file. Invalid image content
+reports an error without changing existing content.
 
 Selected images use the shared move/rotation/group/lock/Arrange/alignment controls.
 Eight local resize grips stretch freely by default. A corner changes both axes
@@ -742,3 +742,19 @@ files; source/text editing keeps its existing paste behavior. XiToc object copie
 carry the required assets between documents. Large copies have a clearly reported
 session-only clipboard fallback. Imports explicitly report memory-only status;
 images are not saved to PDFs or retained across application restart yet.
+
+## M1.14 file attachments
+
+Use the top-toolbar Insert menu and choose File Attachment to attach files. The picker supports a batch of
+up to four. Drop non-image files on the canvas to position the attachment
+cards. Each card shows a category icon and filename, with a tooltip for the
+full original filename and byte count. The label remains readable when flipped.
+Select, drag, resize or rotate through the regular Selection tool and oriented
+grips. Double-click the card body to open on desktop or download in the browser.
+Double-click the rotation ring to reset rotation.
+
+Right-click to open or export, rename the display label, replace the embedded
+file, or view file information. General transform, order, lock, grouping and
+clipboard commands are shared. Replacing preserves geometry and a custom label.
+External edits are separate snapshots. Use Replace Attached File to import a
+new version. Attachment edits remain in memory until M2.

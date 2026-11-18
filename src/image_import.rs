@@ -142,11 +142,17 @@ impl Imports {
     }
 }
 #[cfg(not(target_arch = "wasm32"))]
-fn read_path(path: &std::path::Path) -> Result<Arc<[u8]>, String> {
+pub(crate) fn read_path(path: &std::path::Path) -> Result<Arc<[u8]>, String> {
     use std::io::Read;
+    if !std::fs::metadata(path)
+        .map_err(|e| e.to_string())?
+        .is_file()
+    {
+        return Err("Choose a regular file.".into());
+    }
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     if file.metadata().map_err(|e| e.to_string())?.len() > MAX_IMAGE_BYTES as u64 {
-        return Err("Image exceeds 16 MiB.".into());
+        return Err("File exceeds 16 MiB.".into());
     }
     let mut bytes = Vec::new();
     file.take(MAX_IMAGE_BYTES as u64 + 1)
@@ -155,13 +161,13 @@ fn read_path(path: &std::path::Path) -> Result<Arc<[u8]>, String> {
     Ok(bytes.into())
 }
 #[cfg(target_arch = "wasm32")]
-async fn read_file(file: &web_sys::File) -> Result<Arc<[u8]>, String> {
+pub(crate) async fn read_file(file: &web_sys::File) -> Result<Arc<[u8]>, String> {
     if file.size() > MAX_IMAGE_BYTES as f64 {
-        return Err("Image exceeds 16 MiB.".into());
+        return Err("File exceeds 16 MiB.".into());
     }
     let buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer())
         .await
-        .map_err(|_| "Browser could not read image.")?;
+        .map_err(|_| "Browser could not read the file.")?;
     Ok(js_sys::Uint8Array::new(&buffer).to_vec().into())
 }
 

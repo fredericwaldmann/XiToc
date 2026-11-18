@@ -60,7 +60,16 @@ pub fn show(
             });
             if icons::button(ui,Icon::Text,"Text · click to type, drag to set width",editor.canvas.tool==Tool::Text).clicked(){editor.canvas.select(Tool::Text);}
             if icons::button(ui, Icon::Formula, "Formula · click the canvas to enter LaTeX", editor.canvas.tool == Tool::Formula).clicked() { editor.canvas.select(Tool::Formula); }
-            if ui.push_id("image-import-tool",|ui|icons::button(ui,Icon::Image,"Image · insert PNG, JPEG or WebP",false)).inner.clicked(){editor.canvas.choose_image(ui.ctx(),None);}
+            ui.menu_button("Insert", |ui| {
+                if ui.button("Image…").clicked() {
+                    editor.canvas.choose_image(ui.ctx(), None);
+                    ui.close();
+                }
+                if ui.button("File Attachment…").clicked() {
+                    editor.canvas.choose_attachment(ui.ctx(), None);
+                    ui.close();
+                }
+            });
             let image_selected=width>=650.0 && editor.canvas.selected_image().is_some();
             if image_selected {ui.push_id("image-format-menu",|ui|ui.menu_button("Image",|ui|editor.canvas.image_controls(ui)));}
             let formula_selection = if editor.canvas.selection.ids.len() == 1 {
@@ -83,7 +92,7 @@ pub fn show(
                 editor.canvas.select(Tool::StickyNote);
             }
             let reserved = if width >= 1000.0 { 480.0 } else if width >= 800.0 { 380.0 } else if width >= 500.0 { 268.0 } else { 210.0 };
-            let reserved=reserved+214.0+if image_selected {60.0}else{0.0}+if formula_selection.is_some(){72.0}else{0.0}+if width>=400.0{30.0}else{0.0};
+            let reserved=reserved+244.0+if image_selected {60.0}else{0.0}+if formula_selection.is_some(){72.0}else{0.0}+if width>=400.0{30.0}else{0.0};
             let strip_width = (width - reserved).max(24.0);
             ui.allocate_ui(egui::vec2(strip_width, style::CONTROL), |ui| {
                 egui::ScrollArea::horizontal().id_salt("pen-presets").min_scrolled_width(24.0).auto_shrink([false, false])

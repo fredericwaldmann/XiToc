@@ -1,48 +1,25 @@
 //! Immutable original-byte assets and portable image objects. No UI or filesystem IO.
+use crate::asset::{BinaryAsset, encoded_bytes};
 use crate::{
     drawing::Surface,
     object::{CanvasObject, ObjectBounds, ObjectId, ObjectType, Placement, Point},
 };
 use image::ImageDecoder;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::{io::Cursor, sync::Arc};
 use uuid::Uuid;
 
-pub type AssetId = [u8; 32];
-pub const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
+pub use crate::asset::AssetId;
+pub const MAX_IMAGE_BYTES: usize = crate::asset::MAX_ASSET_BYTES;
 pub const MAX_IMAGE_PIXELS: u64 = 32 * 1024 * 1024;
 pub const DISPLAY_SIDE: u32 = 2048;
 
 /// Content identity covers original compressed bytes, not a filename or display texture.
-#[derive(Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ImageAsset {
-    id: AssetId,
-    #[serde(with = "encoded_bytes")]
-    bytes: Arc<[u8]>,
+    #[serde(flatten)]
+    pub(crate) binary: Arc<BinaryAsset>,
     dimensions: [u32; 2],
-}
-mod encoded_bytes {
-    use super::*;
-    use base64::Engine;
-    pub fn serialize<S: serde::Serializer>(
-        bytes: &Arc<[u8]>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
-    }
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Arc<[u8]>, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        if s.len() > MAX_IMAGE_BYTES.div_ceil(3) * 4 {
-            return Err(serde::de::Error::custom("Image asset exceeds 16 MiB."));
-        }
-        base64::engine::general_purpose::STANDARD
-            .decode(s)
-            .map(Into::into)
-            .map_err(serde::de::Error::custom)
-    }
 }
 impl<'de> Deserialize<'de> for ImageAsset {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -56,7 +33,7 @@ impl<'de> Deserialize<'de> for ImageAsset {
         }
         let wire = Wire::deserialize(d)?;
         let (asset, _) = Self::import(wire.bytes).map_err(serde::de::Error::custom)?;
-        if asset.id != wire.id || asset.dimensions != wire.dimensions {
+        if asset.id() != wire.id || asset.dimensions != wire.dimensions {
             return Err(serde::de::Error::custom(
                 "Image asset identity/dimensions mismatch.",
             ));
@@ -71,10 +48,10 @@ pub struct DecodedImage {
 }
 impl ImageAsset {
     pub fn id(&self) -> AssetId {
-        self.id
+        self.binary.id()
     }
     pub fn bytes(&self) -> &[u8] {
-        &self.bytes
+        self.binary.bytes()
     }
     pub fn dimensions(&self) -> [u32; 2] {
         self.dimensions
@@ -83,18 +60,16 @@ impl ImageAsset {
         if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES {
             return Err("Image must be 1 byte–16 MiB.".into());
         }
-        let (dimensions, decoded) = decode(&bytes)?;
-        Ok((
-            Arc::new(Self {
-                id: Sha256::digest(&bytes).into(),
-                bytes,
-                dimensions,
-            }),
-            decoded,
-        ))
+        Self::from_binary(BinaryAsset::new(bytes)?)
+    }
+    pub(crate) fn from_binary(
+        binary: Arc<BinaryAsset>,
+    ) -> Result<(Arc<Self>, DecodedImage), String> {
+        let (dimensions, decoded) = decode(binary.bytes())?;
+        Ok((Arc::new(Self { binary, dimensions }), decoded))
     }
     pub fn decode(&self) -> Result<DecodedImage, String> {
-        decode(&self.bytes).map(|(_, d)| d)
+        decode(self.bytes()).map(|(_, d)| d)
     }
 }
 fn decode(bytes: &[u8]) -> Result<([u32; 2], DecodedImage), String> {
@@ -200,20 +175,10 @@ impl ImageObject {
         n
     }
     pub fn rectangle_matches(&self, b: ObjectBounds, crossing: bool) -> bool {
-        let corners = self.corners();
-        let mut polygon = corners.to_vec();
-        polygon.push(corners[0]);
-        crate::selection::rectangle_matches(b, crossing, &polygon, &[], 0., Default::default())
-            || (crossing
-                && b.corners()
-                    .iter()
-                    .any(|p| crate::selection::inside(*p, &corners)))
+        crate::selection::box_rectangle_matches(self.corners(), b, crossing)
     }
     pub fn lasso_matches(&self, r: &crate::selection::LassoRegion) -> bool {
-        let corners = self.corners();
-        let mut p = corners.to_vec();
-        p.push(corners[0]);
-        r.encloses(&p, &[], 0., Default::default())
+        crate::selection::box_lasso_matches(self.corners(), r)
     }
     pub fn handles(&self) -> [Point; 8] {
         let [w, h] = self.dimensions;
