@@ -327,3 +327,9 @@ round trips, cropping and masks remain future work; no image persistence is clai
 All rotatable selections use oriented editing frames and one live ring, hide resize overlays while rotating,
 and support one-step orientation reset by double-click. Group resets retain
 descendant-local orientation and magnetic relationships.
+
+## M1.14 — Embedded file attachments in memory (#53)
+
+File cards share image bytes, oriented editing, history and clipboard.
+Native association opening and browser downloads extract immutable snapshots.
+The single-PDF persistence milestone owns attachment serialization.

@@ -275,6 +275,27 @@ impl Selection {
     }
 }
 
+pub fn box_rectangle_matches(corners: [Point; 4], bounds: ObjectBounds, crossing: bool) -> bool {
+    let [a, b, c, d] = corners;
+    rectangle_matches(
+        bounds,
+        crossing,
+        &[a, b, c, d, a],
+        &[],
+        0.,
+        Default::default(),
+    ) || (crossing
+        && bounds
+            .corners()
+            .iter()
+            .any(|point| inside(*point, &corners)))
+}
+
+pub fn box_lasso_matches(corners: [Point; 4], region: &LassoRegion) -> bool {
+    let [a, b, c, d] = corners;
+    region.encloses(&[a, b, c, d, a], &[], 0., Default::default())
+}
+
 /// Exact rounded, linearly tapered path envelope against an axis-aligned region.
 /// Crossing includes boundary contact; containment includes the whole envelope.
 pub fn rectangle_matches(

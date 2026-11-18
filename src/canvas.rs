@@ -1,4 +1,6 @@
 //! Shared pointer controller and rounded vector renderer for every surface.
+#[path = "canvas_attachments.rs"]
+mod attachments_ui;
 use crate::object::hit_stroke_path as pressure_hit;
 use crate::{
     document::DocumentData,
@@ -278,6 +280,9 @@ const MESH_SEGMENTS: usize = 128;
 pub struct Canvas {
     image_cache_revision: Option<u64>,
     image_imports: crate::image_import::Imports,
+    attachment_io: crate::attachment_io::AttachmentIo,
+    attachment_rename: Option<(Uuid, String)>,
+    attachment_click: Option<(Uuid, f64, Pos2)>,
     image_cache: HashMap<crate::image_object::AssetId, images_ui::ImageTexture>,
     pub latex: crate::latex_config::LatexPreferences,
     pub open_global_latex: bool,
@@ -344,6 +349,9 @@ impl Canvas {
         Self {
             image_cache_revision: None,
             image_imports: Default::default(),
+            attachment_io: Default::default(),
+            attachment_rename: None,
+            attachment_click: None,
             image_cache: Default::default(),
             latex: Default::default(),
             open_global_latex: false,
@@ -557,6 +565,10 @@ impl Canvas {
             return;
         }
         self.poll_images(ui.ctx());
+        self.poll_attachments();
+        if self.attachment_rename_dialog(ui.ctx()) {
+            return;
+        }
         self.selection.refresh(&self.drawing);
         if self.font_browser.is_none()
             && self.text_session.is_none()
@@ -971,6 +983,7 @@ impl Canvas {
             Some(SelectionGesture::ShapeEdit { preview, .. }) => Some(preview),
             _ => None,
         };
+        let attachment_preview = self.attachment_resize_preview().cloned();
         let mut erasing = match &mut self.gesture {
             Some(Gesture::Eraser(e)) => Some(e),
             _ => None,
@@ -984,6 +997,17 @@ impl Canvas {
                 continue;
             }
             let stroke = match object {
+                ObjectSnapshot::Attachment(source) => {
+                    let delta = selection_preview
+                        .filter(|_| preview_ids.contains(&source.id))
+                        .unwrap_or_default();
+                    let attachment = attachment_preview
+                        .as_ref()
+                        .filter(|a| a.id == source.id)
+                        .unwrap_or(source);
+                    Self::paint_attachment(ui, &painter, transform, attachment, delta);
+                    continue;
+                }
                 ObjectSnapshot::Image(image) => {
                     let delta = selection_preview.filter(|_| preview_ids.contains(&image.id));
                     let effective =

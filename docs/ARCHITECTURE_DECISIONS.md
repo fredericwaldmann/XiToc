@@ -780,3 +780,23 @@ The interaction review used Figma's common-center rotation, Illustrator's
 oriented transform box, draw.io's shared group handle and Inkscape's direct
 side and corner scaling. XiToc keeps its top-center ring and its existing
 double-click rotation reset. [Figma](https://help.figma.com/hc/en-us/articles/360039956914-Adjust-alignment-rotation-position-and-dimensions), [Illustrator](https://helpx.adobe.com/illustrator/desktop/manage-objects/reshape-transform-objects/transform-objects.html), [draw.io](https://www.drawio.com/docs/manual/shapes/shape-rotate/), [Inkscape](https://inkscape-manuals.readthedocs.io/en/latest/selector-tool.html).
+
+## Shared binary resources and explicit file opening (#53)
+
+Both image and attachment snapshots own references to shared immutable bytes.
+Names live on attachment cards so content deduplication cannot rename another
+card. The weak registry limits retained assets while allowing snapshots to
+control lifetime. Clipboard v3 deduplicates mixed content and validates the
+bytes by hash before resolving references.
+
+Native opens dispatch only known extensions with expected signatures or
+validated plain text. Executables, scripts and unrecognized content are
+export-only. This policy also applies to names or content received via the
+clipboard. The launcher passes generated paths as arguments to the platform
+association API. Native extraction creates randomly named private directories
+under XiToc's user storage. Opened copies remain available for seven days and
+are eligible for cleanup on a later Open, including after a crash or restart.
+At most 64 recent extraction directories are allowed. Save As publishes
+complete bytes without overwriting an existing destination. Browser downloads
+use the existing File dialog bridge. External edits never update the embedded
+bytes. Magnetic attachment targets still require a connector host generalization.

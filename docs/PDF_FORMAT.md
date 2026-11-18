@@ -217,3 +217,19 @@ orientation and object transforms. It must test ordinary-viewer rendering plus
 editable asset/source round trips and failed-save preservation. No image bytes,
 sidecars, PDF graphics or new payload fields are written by M1.14; restarting or
 discarding unsaved content loses images just as other in-memory canvas objects.
+
+## M1.14 file attachment assets in memory (#53)
+
+File cards currently retain a SHA-256 byte reference, filename metadata,
+placement, dimensions and ownership. The transient clipboard carries the
+resources alongside their references. The blank PDF writer remains scoped to
+blank documents and does not write card geometry or attached files.
+
+For M2, emit original bytes as deduplicated EmbeddedFile streams. Use Filespec
+dictionaries with Unicode names and EF references, and index them in the
+EmbeddedFiles name tree with distinct keys for duplicate filenames. Optional
+file attachment annotations can associate accessible files with their page
+locations. Keep editable card geometry and resource IDs in XiToc's private
+payload. Visible PDF card content and PDF viewer attachment access should be
+tested independently. The viewer's ability to open a file depends on its own
+security policy and platform. [ISO 32000 clause 7](https://pdf-issues.pdfa.org/32000-2-2020/clause07.html), [PDF Association guide](https://pdfa.org/files-inside-pdf/).

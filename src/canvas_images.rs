@@ -182,7 +182,7 @@ impl Canvas {
             ui.painter().text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "Drop PNG, JPEG or WebP to insert an image",
+                "Drop files · PNG, JPEG and WebP insert as images",
                 egui::FontId::proportional(14.),
                 p.text,
             );
@@ -220,17 +220,41 @@ impl Canvas {
             return false;
         }
         self.finish();
+        if files.len() > 4 {
+            self.notice = Some("Only the first four files in this drop were queued.".into());
+        }
         let position = view.to_document([pos.x as f64, pos.y as f64]);
         for (index, file) in files.into_iter().take(4).enumerate() {
-            self.image_imports.drop_file(
-                ui.ctx().clone(),
-                Target {
-                    surface,
-                    position: position.map(|v| v + index as f64 * 16.),
-                    replace: None,
-                },
-                file,
-            );
+            let target = Target {
+                surface,
+                position: position.map(|v| v + index as f64 * 16.),
+                replace: None,
+            };
+            let name = file
+                .path()
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(str::to_owned);
+            #[cfg(target_arch = "wasm32")]
+            let name = file
+                .web_file()
+                .and_then(|f| f.name().rsplit_once('.').map(|(_, ext)| ext.to_owned()))
+                .or(name);
+            if name.is_some_and(|ext| {
+                matches!(
+                    ext.to_ascii_lowercase().as_str(),
+                    "png" | "jpg" | "jpeg" | "webp"
+                )
+            }) {
+                self.image_imports.drop_file(ui.ctx().clone(), target, file);
+            } else {
+                self.attachment_io.drop_file(
+                    ui.ctx().clone(),
+                    target,
+                    self.drawing.editing_group,
+                    file,
+                );
+            }
         }
         true
     }
