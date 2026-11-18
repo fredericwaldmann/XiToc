@@ -717,7 +717,7 @@ aspect ratio, caps the longest side at 320 document points without upscaling sma
 images, and fits A4 bounds when necessary. Up to four files may be dropped together
 onto the canvas at the pointer with small offsets. Drag-over feedback explicitly
 identifies PNG, JPEG and WebP as images. Other dropped files become attachment
-cards. Use the paperclip to attach an image as a file. Invalid image content
+cards. Use Insert → File Attachment to attach an image as a file. Invalid image content
 reports an error without changing existing content.
 
 Selected images use the shared move/rotation/group/lock/Arrange/alignment controls.
@@ -745,7 +745,7 @@ images are not saved to PDFs or retained across application restart yet.
 
 ## M1.14 file attachments
 
-Use the top-toolbar paperclip to attach files. The picker supports a batch of
+Use the top-toolbar Insert menu and choose File Attachment to attach files. The picker supports a batch of
 up to four. Drop non-image files on the canvas to position the attachment
 cards. Each card shows a category icon and filename, with a tooltip for the
 full original filename and byte count. The label remains readable when flipped.

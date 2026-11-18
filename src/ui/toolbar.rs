@@ -60,10 +60,16 @@ pub fn show(
             });
             if icons::button(ui,Icon::Text,"Text · click to type, drag to set width",editor.canvas.tool==Tool::Text).clicked(){editor.canvas.select(Tool::Text);}
             if icons::button(ui, Icon::Formula, "Formula · click the canvas to enter LaTeX", editor.canvas.tool == Tool::Formula).clicked() { editor.canvas.select(Tool::Formula); }
-            if ui.push_id("image-import-tool",|ui|icons::button(ui,Icon::Image,"Image · insert PNG, JPEG or WebP",false)).inner.clicked(){editor.canvas.choose_image(ui.ctx(),None);}
-            if ui.push_id("attach-file", |ui| icons::button(ui, Icon::Paperclip, "Attach File", false)).inner.clicked() {
-                editor.canvas.choose_attachment(ui.ctx(), None);
-            }
+            ui.menu_button("Insert", |ui| {
+                if ui.button("Image…").clicked() {
+                    editor.canvas.choose_image(ui.ctx(), None);
+                    ui.close();
+                }
+                if ui.button("File Attachment…").clicked() {
+                    editor.canvas.choose_attachment(ui.ctx(), None);
+                    ui.close();
+                }
+            });
             let image_selected=width>=650.0 && editor.canvas.selected_image().is_some();
             if image_selected {ui.push_id("image-format-menu",|ui|ui.menu_button("Image",|ui|editor.canvas.image_controls(ui)));}
             let formula_selection = if editor.canvas.selection.ids.len() == 1 {

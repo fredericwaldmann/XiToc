@@ -1848,7 +1848,7 @@ Double-click the ring, then undo and redo to verify child-relative angles.
 
 ## M1.14 embedded file attachments (#53)
 
-Use the paperclip to import a PDF, XLSX, ZIP, TXT, and unknown binary. As the
+Use Insert → File Attachment to import a PDF, XLSX, ZIP, TXT, and unknown binary. As the
 picker accepts up to four files per operation, use a second batch for the fifth.
 Select and drag a card, resize an oriented side, reset rotation on the ring,
 group with a shape and undo/redo. Copy a card into a Page Note and compare its

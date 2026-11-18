@@ -5,8 +5,6 @@ use egui::{Color32, Pos2, Rect, Stroke, StrokeKind, Vec2};
 
 #[derive(Clone, Copy)]
 pub enum Icon {
-    Image,
-    Paperclip,
     Select,
     Shapes,
     Text,
@@ -47,35 +45,6 @@ pub fn paint(painter: &egui::Painter, center: Pos2, icon: Icon, color: Color32) 
     let point = |x: f32, y: f32| center + egui::vec2(x, y);
     let line = |a, b| painter.line_segment([a, b], stroke);
     match icon {
-        Icon::Paperclip => {
-            painter.add(egui::Shape::line(
-                [
-                    (2., -4.),
-                    (-3., 1.),
-                    (-3., 3.),
-                    (-1., 4.),
-                    (1., 3.),
-                    (6., -2.),
-                    (6., -5.),
-                    (4., -7.),
-                    (1., -7.),
-                    (-6., 0.),
-                    (-6., 4.),
-                    (-4., 7.),
-                    (0., 7.),
-                    (6., 1.),
-                ]
-                .map(|(x, y)| point(x, y))
-                .to_vec(),
-                stroke,
-            ));
-        }
-        Icon::Image => {
-            painter.rect_stroke(rect, 1., stroke, StrokeKind::Inside);
-            line(point(-5., 4.), point(-1., -1.));
-            line(point(-1., -1.), point(5., 4.));
-            painter.circle_filled(point(3., -3.), 1.5, color);
-        }
         Icon::Text => {
             line(point(-5., -6.), point(5., -6.));
             line(point(0., -6.), point(0., 6.));
