@@ -1,5 +1,5 @@
-//! Retain per-stroke coverage in viewport tiles. Tiles own disjoint pixels;
-//! their padded geometry includes the neighboring coverage needed for AA.
+//! Retain per-stroke coverage in viewport tiles. Padded geometry supplies AA
+//! on both sides of a tile boundary before triangles are clipped to the tile.
 use super::{Contour, Stroke, StrokePiece, Transform, coverage_mesh, flat_range, round_contours};
 use egui::{Color32, Painter, Rect, pos2};
 use i_overlay::{
@@ -137,6 +137,7 @@ impl Tiles {
         self.tail.extend(tail.keys().copied());
         changed.extend(self.tail.iter().copied());
         for cell in changed {
+            let rect = self.rect(cell);
             let tile = self.tiles.entry(cell).or_default();
             let contours = tail.remove(&cell).unwrap_or_default();
             let mut mesh = if contours.is_empty() {
@@ -144,6 +145,7 @@ impl Tiles {
             } else {
                 coverage_mesh(&merge(&tile.stable, &contours), self.dpi)
             };
+            clip_mesh(&mut mesh, rect);
             tile.alpha.clear();
             tile.alpha.extend(mesh.vertices.iter().map(|v| v.color.a()));
             super::tint(&mut mesh, tint, &tile.alpha);
@@ -242,10 +244,80 @@ impl Tiles {
     }
 
     pub(in crate::canvas) fn paint(&self, painter: &Painter) {
-        for (&cell, tile) in &self.tiles {
-            painter
-                .with_clip_rect(self.rect(cell).intersect(self.clip))
-                .add(egui::Shape::Mesh(tile.mesh.clone()));
+        for tile in self.tiles.values() {
+            painter.add(egui::Shape::Mesh(tile.mesh.clone()));
+        }
+    }
+}
+
+/// Clip triangles after triangulation so their original antialias
+/// interpolation survives and egui can batch all tiles under one scissor.
+fn clip_mesh(mesh: &mut egui::Mesh, rect: Rect) {
+    if mesh.is_empty() || rect.contains_rect(mesh.calc_bounds()) {
+        return;
+    }
+    use egui::epaint::Vertex;
+    let edges = [
+        (0, rect.min.x, 1.0),
+        (0, rect.max.x, -1.0),
+        (1, rect.min.y, 1.0),
+        (1, rect.max.y, -1.0),
+    ];
+    let indices = std::mem::take(&mut mesh.indices);
+    mesh.indices.reserve(indices.len());
+    for &triangle in indices.as_chunks::<3>().0 {
+        let vertices = triangle.map(|index| mesh.vertices[index as usize]);
+        if vertices.iter().all(|vertex| rect.contains(vertex.pos)) {
+            mesh.indices.extend(triangle);
+            continue;
+        }
+        let mut input = [vertices[0]; 7];
+        let mut output = input;
+        input[..3].copy_from_slice(&vertices);
+        let mut len = 3;
+        for (axis, edge, sign) in edges {
+            if len < 3 {
+                break;
+            }
+            let coordinate = |v: Vertex| if axis == 0 { v.pos.x } else { v.pos.y };
+            let mut a = input[len - 1];
+            let mut aa = coordinate(a);
+            let mut written = 0;
+            for &b in &input[..len] {
+                let bb = coordinate(b);
+                let a_in = sign * (aa - edge) >= 0.0;
+                let b_in = sign * (bb - edge) >= 0.0;
+                if a_in != b_in {
+                    let t = (edge - aa) / (bb - aa);
+                    let mut pos = a.pos.lerp(b.pos, t);
+                    if axis == 0 {
+                        pos.x = edge;
+                    } else {
+                        pos.y = edge;
+                    }
+                    let alpha = egui::lerp(f32::from(a.color.a())..=f32::from(b.color.a()), t);
+                    output[written] = Vertex {
+                        pos,
+                        uv: a.uv,
+                        color: Color32::from_white_alpha(alpha.round() as u8),
+                    };
+                    written += 1;
+                }
+                if b_in {
+                    output[written] = b;
+                    written += 1;
+                }
+                (a, aa) = (b, bb);
+            }
+            std::mem::swap(&mut input, &mut output);
+            len = written;
+        }
+        if len >= 3 {
+            let base = mesh.vertices.len() as u32;
+            mesh.vertices.extend_from_slice(&input[..len]);
+            for i in 1..len as u32 - 1 {
+                mesh.indices.extend([base, base + i, base + i + 1]);
+            }
         }
     }
 }
@@ -359,6 +431,13 @@ mod tests {
         tiles.prepare((&points, &pressure), transform, &stroke, color);
         assert!(Arc::ptr_eq(&stable, &tiles.tiles[&(0, 0)].mesh));
         assert!(!Arc::ptr_eq(&prior_tail, &tiles.tiles[&(3, 0)].mesh));
+        for (rect, mesh) in tiles.meshes() {
+            assert!(
+                mesh.indices
+                    .iter()
+                    .all(|&i| rect.contains(mesh.vertices[i as usize].pos))
+            );
+        }
         for x in [127.99, 128.01, 255.99, 256.01] {
             assert_eq!(hits(&tiles, x, 71.4), 1);
         }

@@ -1178,8 +1178,9 @@ path. Very steep radius changes use the containing endpoint disk.
 Translucent strokes maintain stable and provisional coverage in screen tiles.
 A change updates the tiles touched by the previous and revised tail and
 promotes stable batches to each tile's union. Full interior and antialiased
-fringe are triangulated together with a padded working area. Integer-pixel
-scissors assign each pixel to one tile, and each stroke blends once there.
+fringe are triangulated together with a padded working area. Tile meshes are clipped to disjoint physical-pixel-aligned regions while
+retaining interpolated fringe coverage. This lets tiles share the canvas
+scissor and each pixel receives one contribution from the stroke.
 Separate strokes use source-over in document order. The viewport limits
 retained screen tiles per stroke. Working unions are released on completion.
 Pan, zoom, DPI, viewport or geometry style invalidate the derived view.

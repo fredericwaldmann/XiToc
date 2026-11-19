@@ -827,8 +827,8 @@ egui meshes and its native and WebAssembly backend.
 Use tile-local polygon unions through the existing epaint/Glow pipeline.
 Stable coverage joins with a short, mutable smoothing tail. This preserves
 self-overlap, holes and pressure without a frame-sized mask or a second
-graphics backend. Tile clips increase draw submissions compared with one
-whole-stroke mesh. The alternative GPU coverage layer would require
+graphics backend. Clip triangles to the tile before submission so egui can batch them
+under one canvas scissor. The alternative GPU coverage layer would require
 persistent intermediate targets, blend-state management and resource
 lifecycle work on both OpenGL and WebGL. Revisit that option if measured GPU
 or upload cost dominates after the CPU union reduction.

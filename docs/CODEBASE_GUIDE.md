@@ -286,8 +286,8 @@ the full path. Chunk bounds suppress offscreen submissions.
 screen tiles aligned to physical pixels. It promotes immutable path batches
 to stable polygon unions and rebuilds the geometry only in tiles touched by
 the old or new smoothing tail. Padded polygons allow the antialias fringe
-to continue at tile edges. Disjoint scissor rectangles apply the stroke's
-alpha once per covered pixel. A different stroke has independent coverage
+to continue at tile edges. Disjoint tile meshes apply the stroke’s alpha once per covered pixel and
+share the canvas scissor for batching. A different stroke has independent coverage
 and composites in document order. Completion drops the working polygons
 and keeps the exact displayed meshes. Color or opacity inside the same
 coverage mode updates retained vertex alpha. View, DPI, viewport or

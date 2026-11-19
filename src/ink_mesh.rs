@@ -230,34 +230,14 @@ fn flat_range(
         }
         let offset = Vec2::new(-direction.y, direction.x);
         let (start, end) = (offset * ra, offset * rb);
-        // A subpixel shared area keeps independent polygon unions from
-        // rounding merely coincident join edges to opposite sides.
-        let overlap = direction * (tolerance / 3.0);
-        let strip_start = if segments.start + segment[0] == 0 {
-            a
-        } else {
-            a - overlap
-        };
-        let strip_end = if segments.start + segment[1] == path.len() - 1 {
-            b
-        } else {
-            b + overlap
-        };
-        add_contour(
-            vec![
-                strip_start - start,
-                strip_end - end,
-                strip_end + end,
-                strip_start + start,
-            ],
-            contours,
-        );
+        add_contour(vec![a - start, b - end, b + end, a + start], contours);
         if let Some(previous) = previous {
-            // A bevel closes the outside of the join without folding the nib
-            // back across itself when the centerline makes a sharp turn.
-            for side in [-1.0, 1.0] {
-                add_contour(vec![a, a + previous * side, a + start * side], contours);
-            }
+            // The two cross sections form a bevel. Use their convex hull so
+            // the join overlaps the adjacent strips, including at reversals.
+            add_contour(
+                vec![a - previous, a - start, a + previous, a + start],
+                contours,
+            );
         }
         previous = Some(end);
     }
