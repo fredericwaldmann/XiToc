@@ -142,7 +142,7 @@ fn reflected_ink_clipboard_partial_erasure_and_followup_transforms() {
         for (a, b) in old.path().into_iter().zip(new.path()) {
             near(delta.apply(a), b);
         }
-        for p in &new.points {
+        for p in new.points.iter() {
             near(
                 new.placement.inverse(new.placement.apply(p.position)),
                 p.position,

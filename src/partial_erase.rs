@@ -441,7 +441,7 @@ pub fn fragments(stroke: &Stroke, path: &[[f64; 2]], cuts: &Cuts) -> Vec<Stroke>
                 .last()
                 .is_none_or(|p| p.position != position || p.pressure != pressure)
             {
-                piece.points.push(InkPoint { position, pressure });
+                std::sync::Arc::make_mut(&mut piece.points).push(InkPoint { position, pressure });
             }
         });
         if !piece.points.is_empty() {
@@ -468,7 +468,8 @@ mod tests {
                 position: [100.0, 0.0],
                 pressure: Some(0.8),
             },
-        ];
+        ]
+        .into();
         stroke
     }
     fn cut(stroke: &Stroke, from: [f64; 2], to: [f64; 2], radius: f64) -> Vec<Stroke> {
@@ -572,7 +573,7 @@ mod tests {
             assert!(cut(&source, [-10.0, 0.0], [110.0, 0.0], 10.0).is_empty());
         }
         let mut dot = line(2.0);
-        dot.points.truncate(1);
+        std::sync::Arc::make_mut(&mut dot.points).truncate(1);
         assert!(cut(&dot, [0.0, 0.0], [0.0, 0.0], 4.0).is_empty());
     }
     #[test]
@@ -633,7 +634,8 @@ mod tests {
                 [100.0, 20.0],
             ]
             .map(InkPoint::mouse)
-            .to_vec();
+            .to_vec()
+            .into();
             source.smoothing = smoothing;
             let original = source.path();
             let pieces = cut(&source, [50.0, 0.0], [50.0, 40.0], 5.0);

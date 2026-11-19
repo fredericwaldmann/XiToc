@@ -595,10 +595,10 @@ fn partial_erase_inside_group_preserves_fragment_sibling_order_and_history() {
     assert!(c.drawing.enter_group(g));
     let mut left = ink.clone();
     left.id = Uuid::new_v4();
-    left.points[1].position = [100., 200.];
+    std::sync::Arc::make_mut(&mut left.points)[1].position = [100., 200.];
     let mut right = ink.clone();
     right.id = Uuid::new_v4();
-    right.points[0].position = [150., 200.];
+    std::sync::Arc::make_mut(&mut right.points)[0].position = [150., 200.];
     let expected = vec![left.id, right.id, a];
     let before = c.drawing.items().to_vec();
     assert!(

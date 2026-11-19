@@ -552,7 +552,7 @@ mod tests {
         s.placement.position = [f64::MAX; 2];
         assert!(ObjectBundle::capture(std::iter::once(s.clone())).is_err());
         s.placement = Placement::default();
-        s.points[0].pressure = Some(f32::NAN);
+        std::sync::Arc::make_mut(&mut s.points)[0].pressure = Some(f32::NAN);
         assert!(ObjectBundle::capture(std::iter::once(s)).is_err());
     }
 }
