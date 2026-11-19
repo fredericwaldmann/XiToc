@@ -270,20 +270,30 @@ Only custom entries may be deleted. `effective_pressure` enables force thickness
 only for Pressure Pen. The toolbar applies the selected style for subsequent
 strokes; pointer-down snapshots insulate active/existing ink from preference edits.
 
-`Cached` holds document-space path/pressures, placement, view/DPI key, path bounds
-and `Arc<egui::Mesh>` chunks. `Canvas::paint` clips/culls surfaces and strokes;
-`Cached::prepare_meshes` converts logical geometry into view-dependent meshes.
-Chunks cover 128 path segments. Adaptive live ink invalidates only changed trailing
-chunks; idle frames and release reuse stable meshes. Camera/DPI changes rebuild
-mesh coordinates without rewriting semantic points. Each mesh caches its
-screen bounds so the normal paint path skips offscreen chunks before egui
-reassembles and uploads visible geometry. Opaque ink approximates the swept
-disks within 0.2 physical pixels before tessellating round constant- or
-variable-width geometry. The approximation retains chunk endpoints and bounds
-center and pressure-radius error together. Selection and erasing still use the
-full derived path. Translucent ink uses joined ribbon strips to avoid
-overpainting each sample join/chunk seam. Genuine crossings and separate
-strokes composite normally. Highlighter hit envelopes remain conservatively rounded.
+`Cached` retains the document-space path and interpolated pressures across style
+changes. Its mesh key covers view, DPI, base width, pressure response, nib and
+coverage mode. Color and alpha updates within the same coverage mode tint the
+existing vertex coverage. Width, pressure or nib changes rebuild only affected
+stroke outlines. Rotation previews reuse the tinted base mesh until its key or
+tint changes. Rounded opaque ink keeps incremental 128-segment chunks, while
+translucent ink and flat-nib highlighters union the outline and antialias fringe
+across the full stroke in `ink_mesh.rs`. Independent strokes composite in
+document order. Highlighter hit envelopes remain conservatively rounded.
+Before tessellation, each opaque chunk approximates the swept disks within 0.2
+physical pixels of combined center and pressure-radius error. Chunk endpoints
+are retained. Selection and erasing use the full derived path. Cached screen
+bounds skip offscreen meshes before egui assembles the visible geometry.
+
+`Drawing::formatting_strokes` resolves unlocked stroke descendants of selected
+roots in the current group scope. `StrokeStylePatch` edits one appearance field
+at a time. Style snapshots share raw samples by Arc, which serializes as the
+same sample array. The journal keeps exact before/after snapshots and selected
+roots. Continuous pointer edits merge their slot changes, including updated
+ancestor bounds, and a drag back to the starting values drops the history entry.
+`ui/stroke_controls.rs` uses the shared picker and slider styling.
+`Canvas::object_format_controls` places the stroke menus in the same contextual
+selection toolbar as shape, image, and text formatting. Pen presets continue
+to supply defaults for new strokes.
 
 Move/resize use egui's existing translation/scale layer preview. egui's layer
 transform cannot rotate, so `Cached::paint_rotation` reuses base tessellation and

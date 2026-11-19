@@ -24,6 +24,8 @@ mod connectors_ui;
 mod formula_ui;
 #[path = "canvas_images.rs"]
 mod images_ui;
+#[path = "ink_mesh.rs"]
+mod ink_mesh;
 #[path = "canvas_shapes.rs"]
 mod shapes_ui;
 #[path = "canvas_text.rs"]
@@ -61,11 +63,27 @@ struct RotationPreview {
     key: (crate::object::Placement, Transform, f32),
     meshes: Vec<Arc<egui::Mesh>>,
 }
+#[derive(Clone, Copy, PartialEq)]
+struct InkMeshKey {
+    transform: Transform,
+    dpi: f32,
+    width: f64,
+    pressure: drawing::PressureStyle,
+    flat: bool,
+    union: bool,
+}
+
+fn union_ink(stroke: &Stroke) -> bool {
+    stroke.color[3] < 255 || stroke.pen_type == crate::pen::PenType::Highlighter
+}
+
 struct Cached {
     placement: crate::object::Placement,
     path: Vec<[f64; 2]>,
     pressures: Vec<Option<f32>>,
-    view: Option<(Transform, f32)>,
+    view: Option<InkMeshKey>,
+    tint: Option<Color32>,
+    coverage: Vec<Vec<u8>>,
     meshes: Vec<Arc<egui::Mesh>>,
     mesh_bounds: Vec<Rect>,
     rotation_preview: Option<RotationPreview>,
@@ -88,77 +106,82 @@ impl Cached {
                 .unwrap_or_else(|| vec![stroke.points[0].pressure; path.len()]),
             path,
             view: None,
+            tint: None,
+            coverage: Vec::new(),
             meshes: Vec::new(),
             mesh_bounds: Vec::new(),
             rotation_preview: None,
             bounds: (min, max),
         }
     }
-    fn truncate_meshes(&mut self, changed: usize) {
-        let keep = changed.saturating_sub(1) / MESH_SEGMENTS;
+    fn truncate_meshes(&mut self, changed: usize, union: bool) {
+        let keep = if union {
+            0
+        } else {
+            changed.saturating_sub(1) / MESH_SEGMENTS
+        };
         self.meshes.truncate(keep);
+        self.coverage.truncate(keep);
         self.mesh_bounds.truncate(keep);
     }
 
     fn prepare_meshes(&mut self, ui: &egui::Ui, transform: Transform, stroke: &Stroke) {
-        let ppp = ui.ctx().pixels_per_point();
-        if self.view != Some((transform, ppp)) {
+        let dpi = ui.ctx().pixels_per_point();
+        let union = union_ink(stroke);
+        let view = InkMeshKey {
+            transform,
+            dpi,
+            union,
+            width: stroke.visible_width(),
+            pressure: stroke.pressure_style,
+            flat: stroke.pen_type == crate::pen::PenType::Highlighter,
+        };
+        if self.view != Some(view) {
             self.meshes.clear();
+            self.coverage.clear();
             self.mesh_bounds.clear();
             self.rotation_preview = None;
-            self.view = Some((transform, ppp));
+            self.view = Some(view);
         }
-        let chunks = self
-            .path
-            .len()
-            .saturating_sub(1)
-            .div_ceil(MESH_SEGMENTS)
-            .max(1);
+        let color = ink_color(stroke);
+        if self.tint != Some(color) {
+            for (mesh, coverage) in self.meshes.iter_mut().zip(&self.coverage) {
+                ink_mesh::tint(Arc::make_mut(mesh), color, coverage);
+            }
+            self.tint = Some(color);
+            self.rotation_preview = None;
+        }
+        let chunks = if union {
+            1
+        } else {
+            self.path
+                .len()
+                .saturating_sub(1)
+                .div_ceil(MESH_SEGMENTS)
+                .max(1)
+        };
         for index in self.meshes.len()..chunks {
-            let start = index * MESH_SEGMENTS;
-            let end = (start + MESH_SEGMENTS + 1).min(self.path.len());
-            let shapes = if stroke.color[3] < 255 {
-                // Neighboring samples make both sides of a cached chunk seam agree.
-                let lo = start.saturating_sub(1);
-                let hi = (end + 1).min(self.path.len());
-                let points: Vec<_> = self.path[lo..hi]
-                    .iter()
-                    .map(|point| {
-                        let p = transform.to_screen(*point);
-                        Pos2::new(p[0] as f32, p[1] as f32)
-                    })
-                    .collect();
-                translucent_shapes(
-                    &points,
-                    &self.pressures[lo..hi],
-                    (stroke.visible_width() * transform.scale) as f32,
-                    ink_color(stroke),
-                    stroke.pressure_style,
-                    start - lo..end - lo,
-                )
+            let mut mesh = if union {
+                ink_mesh::mesh(&[(&self.path, &self.pressures)], transform, stroke, dpi)
             } else {
-                rounded_shapes(
-                    &self.path[start..end],
-                    &self.pressures[start..end],
-                    transform,
-                    stroke,
-                    index > 0,
-                    ppp,
+                let start = index * MESH_SEGMENTS;
+                let end = (start + MESH_SEGMENTS + 1).min(self.path.len());
+                tessellate(
+                    ui,
+                    rounded_shapes(
+                        &self.path[start..end],
+                        &self.pressures[start..end],
+                        transform,
+                        stroke,
+                        index > 0,
+                        Color32::WHITE,
+                        dpi,
+                    ),
                 )
             };
-            let primitives = ui.ctx().tessellate(
-                shapes
-                    .into_iter()
-                    .map(|shape| egui::epaint::ClippedShape::new(Rect::EVERYTHING, shape))
-                    .collect(),
-                ppp,
-            );
-            let mut mesh = egui::Mesh::default();
-            for primitive in primitives {
-                if let egui::epaint::Primitive::Mesh(part) = primitive.primitive {
-                    mesh.append(part);
-                }
-            }
+            let coverage: Vec<_> = mesh.vertices.iter().map(|v| v.color.a()).collect();
+            ink_mesh::tint(&mut mesh, color, &coverage);
+            self.coverage.push(coverage);
             self.mesh_bounds.push(mesh.calc_bounds());
             self.meshes.push(Arc::new(mesh));
         }
@@ -235,6 +258,40 @@ impl Cached {
         if partial.cut.cuts.covers(cut::end(&self.path)) {
             return;
         }
+        if union_ink(stroke) {
+            let dpi = ui.ctx().pixels_per_point();
+            if partial
+                .meshes
+                .get(&0)
+                .is_some_and(|(view, pixels, _)| *view != transform || *pixels != dpi)
+            {
+                partial.meshes.remove(&0);
+            }
+            let (_, _, mesh) = partial.meshes.entry(0).or_insert_with(|| {
+                let mut pieces = Vec::new();
+                partial
+                    .cut
+                    .cuts
+                    .visit_visible(0.0, cut::end(&self.path), |lo, hi| {
+                        let (mut points, mut pressures) = (Vec::new(), Vec::new());
+                        cut::visit_piece(&self.path, lo, hi, |point, t| {
+                            points.push(point);
+                            pressures.push(pressure_at(&self.pressures, t));
+                        });
+                        pieces.push((points, pressures));
+                    });
+                let pieces: Vec<_> = pieces
+                    .iter()
+                    .map(|(p, f)| (p.as_slice(), f.as_slice()))
+                    .collect();
+                let mut mesh = ink_mesh::mesh(&pieces, transform, stroke, dpi);
+                let coverage: Vec<_> = mesh.vertices.iter().map(|v| v.color.a()).collect();
+                ink_mesh::tint(&mut mesh, ink_color(stroke), &coverage);
+                (transform, dpi, Arc::new(mesh))
+            });
+            painter.add(egui::Shape::Mesh(mesh.clone()));
+            return;
+        }
         self.prepare_meshes(ui, transform, stroke);
         let dpi = ui.ctx().pixels_per_point();
         for (index, original) in self.meshes.iter().enumerate() {
@@ -262,21 +319,16 @@ impl Cached {
                     let skip_cap =
                         index > 0 && lo == start && partial.cut.cuts.connected_before(start);
                     shapes.extend(rounded_shapes(
-                        &points, &pressures, transform, stroke, skip_cap, dpi,
+                        &points,
+                        &pressures,
+                        transform,
+                        stroke,
+                        skip_cap,
+                        ink_color(stroke),
+                        dpi,
                     ));
                 });
-                let mut mesh = egui::Mesh::default();
-                for primitive in ui.ctx().tessellate(
-                    shapes
-                        .into_iter()
-                        .map(|s| egui::epaint::ClippedShape::new(Rect::EVERYTHING, s))
-                        .collect(),
-                    dpi,
-                ) {
-                    if let egui::epaint::Primitive::Mesh(part) = primitive.primitive {
-                        mesh.append(part);
-                    }
-                }
+                let mesh = tessellate(ui, shapes);
                 partial
                     .meshes
                     .insert(index, (transform, dpi, Arc::new(mesh)));
@@ -932,6 +984,10 @@ impl Canvas {
                                 point,
                                 radius,
                                 |lo, hi| {
+                                    if union_ink(stroke) {
+                                        meshes.clear();
+                                        return;
+                                    }
                                     let first = (lo as usize / MESH_SEGMENTS).saturating_sub(1);
                                     let last = hi as usize / MESH_SEGMENTS + 1;
                                     for chunk in first..=last {
@@ -954,6 +1010,8 @@ impl Canvas {
             path: Vec::new(),
             pressures: Vec::new(),
             view: None,
+            tint: None,
+            coverage: Vec::new(),
             meshes: Vec::new(),
             mesh_bounds: Vec::new(),
             rotation_preview: None,
@@ -970,7 +1028,7 @@ impl Canvas {
             cached
                 .pressures
                 .extend_from_slice(&self.preview.pressures[changed..]);
-            cached.truncate_meshes(changed);
+            cached.truncate_meshes(changed, union_ink(stroke));
         }
         // Completion does not change geometry. Bounds are needed only once the
         // stroke joins the committed drawing's normal culling pipeline.
@@ -1264,6 +1322,8 @@ impl Canvas {
                 path: Vec::new(),
                 pressures: Vec::new(),
                 view: None,
+                tint: None,
+                coverage: Vec::new(),
                 meshes: Vec::new(),
                 mesh_bounds: Vec::new(),
                 rotation_preview: None,
@@ -1280,7 +1340,7 @@ impl Canvas {
                 cached
                     .pressures
                     .extend_from_slice(&self.preview.pressures[changed..]);
-                cached.truncate_meshes(changed);
+                cached.truncate_meshes(changed, union_ink(stroke));
             }
             cached.paint(ui, &painter, transform, stroke);
         }
@@ -1347,15 +1407,31 @@ fn ink_color(stroke: &Stroke) -> Color32 {
     )
 }
 
+fn tessellate(ui: &egui::Ui, shapes: Vec<egui::Shape>) -> egui::Mesh {
+    let mut mesh = egui::Mesh::default();
+    for primitive in ui.ctx().tessellate(
+        shapes
+            .into_iter()
+            .map(|shape| egui::epaint::ClippedShape::new(Rect::EVERYTHING, shape))
+            .collect(),
+        ui.ctx().pixels_per_point(),
+    ) {
+        if let egui::epaint::Primitive::Mesh(part) = primitive.primitive {
+            mesh.append(part);
+        }
+    }
+    mesh
+}
+
 fn rounded_shapes(
     path: &[[f64; 2]],
     pressures: &[Option<f32>],
     transform: Transform,
     stroke: &Stroke,
     skip_first_cap: bool,
+    color: Color32,
     pixels_per_point: f32,
 ) -> Vec<egui::Shape> {
-    let color = ink_color(stroke);
     let width = (stroke.visible_width() * transform.scale) as f32;
     let points: Vec<_> = path
         .iter()
@@ -1364,16 +1440,6 @@ fn rounded_shapes(
             Pos2::new(p[0] as f32, p[1] as f32)
         })
         .collect();
-    if stroke.color[3] < 255 {
-        return translucent_shapes(
-            &points,
-            pressures,
-            width,
-            color,
-            stroke.pressure_style,
-            0..points.len(),
-        );
-    }
     let variable = stroke.pressure_style.enabled && pressures.iter().any(Option::is_some);
     let samples: Vec<_> = points
         .into_iter()
@@ -1463,77 +1529,6 @@ fn simplify_swept_disks(samples: &[(Pos2, f32)], tolerance: f32) -> Vec<usize> {
         }
     }
     kept
-}
-
-/// A joined ribbon avoids compositing every segment and cap on top of itself.
-/// Separate strokes (and true self-crossings) still accumulate opacity normally.
-/// Translucent ink has a flat nib; the opaque rounded renderer stays unchanged.
-fn translucent_shapes(
-    points: &[Pos2],
-    pressures: &[Option<f32>],
-    width: f32,
-    color: Color32,
-    pressure: drawing::PressureStyle,
-    visible: std::ops::Range<usize>,
-) -> Vec<egui::Shape> {
-    if points.is_empty() {
-        return Vec::new();
-    }
-    if points.len() == 1 || points.iter().all(|p| *p == points[0]) {
-        let radius = pressures
-            .iter()
-            .map(|p| width * pressure.factor(*p) as f32 * 0.5)
-            .fold(0.0_f32, f32::max);
-        return vec![egui::Shape::circle_filled(points[0], radius, color)];
-    }
-    let directions: Vec<_> = points
-        .windows(2)
-        .map(|p| (p[1] - p[0]).normalized())
-        .collect();
-    let mut mesh = egui::Mesh::default();
-    let mut previous = directions
-        .iter()
-        .copied()
-        .find(|v| v.length_sq() > 0.0)
-        .unwrap_or(egui::Vec2::X);
-    for (i, point) in points.iter().enumerate() {
-        let next = directions
-            .get(i)
-            .copied()
-            .filter(|v| v.length_sq() > 0.0)
-            .unwrap_or(previous);
-        let normal = |v: egui::Vec2| egui::vec2(-v.y, v.x);
-        let average = (normal(previous) + normal(next)).normalized();
-        let miter = if average.length_sq() > 0.0 {
-            average / average.dot(normal(next)).max(0.5)
-        } else {
-            normal(next)
-        };
-        let radius = width * pressure.factor(pressures[i]) as f32 * 0.5;
-        // One feather on each outside edge; adjacent path samples share vertices.
-        for (distance, ink) in [
-            (radius + 0.5, Color32::TRANSPARENT),
-            ((radius - 0.5).max(0.0), color),
-            (-(radius - 0.5).max(0.0), color),
-            (-radius - 0.5, Color32::TRANSPARENT),
-        ] {
-            mesh.vertices.push(egui::epaint::Vertex {
-                pos: *point + miter * distance,
-                uv: egui::epaint::WHITE_UV,
-                color: ink,
-            });
-        }
-        if i > visible.start && i < visible.end {
-            let start = (i as u32 - 1) * 4;
-            for edge in 0..3 {
-                let a = start + edge;
-                mesh.indices
-                    .extend_from_slice(&[a, a + 4, a + 1, a + 1, a + 4, a + 5]);
-            }
-        }
-        previous = next;
-    }
-    vec![egui::Shape::mesh(mesh)]
 }
 
 /// Ordered pen input shared by the browser bridge and synthetic controller tests.
@@ -1658,6 +1653,13 @@ mod tests {
             let mut canvas = Canvas::new(&data);
             canvas.width = width;
             canvas.color = [28, 60, 140, alpha];
+            canvas.pen_type = if alpha < 255 {
+                crate::pen::PenType::Highlighter
+            } else if pressure {
+                crate::pen::PenType::Pressure
+            } else {
+                crate::pen::PenType::Monoline
+            };
             canvas.pressure_style.enabled = pressure;
             for row in 0..existing {
                 let mut stroke = Stroke::new(data.id(), Surface::Canvas, [10, 10, 10, 255], 3.0);
@@ -1975,6 +1977,7 @@ mod tests {
                     transform,
                     &original,
                     false,
+                    ink_color(&original),
                     1.0,
                 );
                 let radii: Vec<_> = shapes
@@ -2016,7 +2019,7 @@ mod tests {
                 let fragments = canvas.drawing.strokes().to_vec();
                 for fragment in &fragments {
                     assert_eq!(fragment.pressure_style, original.pressure_style);
-                    for point in &fragment.points {
+                    for point in fragment.points.iter() {
                         let expected = (point.position[0] - 10.0) / 80.0;
                         assert!((f64::from(point.pressure.unwrap()) - expected).abs() < 1e-6);
                     }

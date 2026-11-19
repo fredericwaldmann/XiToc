@@ -88,7 +88,7 @@ impl EraserIndex {
                     min: [f64::INFINITY; 2],
                     max: [f64::NEG_INFINITY; 2],
                 };
-                for point in &stroke.points {
+                for point in stroke.points.iter() {
                     let position = stroke.placement.apply(point.position);
                     for (i, value) in position.into_iter().enumerate() {
                         bounds.min[i] = bounds.min[i].min(value);

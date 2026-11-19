@@ -801,6 +801,16 @@ complete bytes without overwriting an existing destination. Browser downloads
 use the existing File dialog bridge. External edits never update the embedded
 bytes. Magnetic attachment targets still require a connector host generalization.
 
+## M1.15 — Composite transparent ink per stroke (#55)
+
+Use a vector union and triangulation of existing round or flat nib outlines
+for translucent ink. Joined strips alone still blend twice at self-crossings.
+A per-stroke union makes coverage independent of segment overlap and works in
+the same egui mesh pipeline on desktop and WASM. It also avoids allocating
+offscreen textures. A full-stroke coverage rebuild is needed when a translucent
+stroke's geometry changes. Stable meshes retain coverage for color and opacity
+updates, and ordinary opaque round ink keeps the chunked fast path. Future PDF
+export needs the same single-fill or isolated per-stroke transparency semantics.
 
 ## Keep thick ink reduction in the view mesh (#57)
 
