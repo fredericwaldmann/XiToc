@@ -21,7 +21,15 @@ pub(super) fn mesh(
         if stroke.pen_type == crate::pen::PenType::Highlighter && path.len() > 1 {
             flat_contours(path, pressures, transform, stroke, &mut contours);
         } else {
-            for shape in rounded_shapes(path, pressures, transform, stroke, false, Color32::WHITE) {
+            for shape in rounded_shapes(
+                path,
+                pressures,
+                transform,
+                stroke,
+                false,
+                Color32::WHITE,
+                dpi,
+            ) {
                 let contour = match shape {
                     Shape::Circle(circle) => {
                         let n = ((circle.radius * dpi * 3.0).sqrt() * 4.0)

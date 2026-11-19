@@ -811,3 +811,13 @@ offscreen textures. A full-stroke coverage rebuild is needed when a translucent
 stroke's geometry changes. Stable meshes retain coverage for color and opacity
 updates, and ordinary opaque round ink keeps the chunked fast path. Future PDF
 export needs the same single-fill or isolated per-stroke transparency semantics.
+
+## Keep thick ink reduction in the view mesh (#57)
+
+Use a per-chunk screen-space error bound on the swept disks, with both center
+and radius error contributing to the same 0.2 physical-pixel budget. This
+bounds the silhouette approximation across zoom and preserves exact raw
+samples, smoothing and pressure for the model and hit/erase queries. Cache
+bounds alongside the mesh and invalidate both together. The CPU profile showed
+final mesh assembly as the dominant opaque cost. The renderer continues using
+egui meshes and its native and WebAssembly backend.

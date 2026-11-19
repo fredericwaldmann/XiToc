@@ -85,6 +85,7 @@ struct Cached {
     tint: Option<Color32>,
     coverage: Vec<Vec<u8>>,
     meshes: Vec<Arc<egui::Mesh>>,
+    mesh_bounds: Vec<Rect>,
     rotation_preview: Option<RotationPreview>,
     bounds: ([f64; 2], [f64; 2]),
 }
@@ -108,10 +109,22 @@ impl Cached {
             tint: None,
             coverage: Vec::new(),
             meshes: Vec::new(),
+            mesh_bounds: Vec::new(),
             rotation_preview: None,
             bounds: (min, max),
         }
     }
+    fn truncate_meshes(&mut self, changed: usize, union: bool) {
+        let keep = if union {
+            0
+        } else {
+            changed.saturating_sub(1) / MESH_SEGMENTS
+        };
+        self.meshes.truncate(keep);
+        self.coverage.truncate(keep);
+        self.mesh_bounds.truncate(keep);
+    }
+
     fn prepare_meshes(&mut self, ui: &egui::Ui, transform: Transform, stroke: &Stroke) {
         let dpi = ui.ctx().pixels_per_point();
         let union = union_ink(stroke);
@@ -125,10 +138,11 @@ impl Cached {
         };
         if self.view != Some(view) {
             self.meshes.clear();
+            self.coverage.clear();
+            self.mesh_bounds.clear();
             self.rotation_preview = None;
             self.view = Some(view);
         }
-        self.coverage.truncate(self.meshes.len());
         let color = ink_color(stroke);
         if self.tint != Some(color) {
             for (mesh, coverage) in self.meshes.iter_mut().zip(&self.coverage) {
@@ -161,12 +175,14 @@ impl Cached {
                         stroke,
                         index > 0,
                         Color32::WHITE,
+                        dpi,
                     ),
                 )
             };
             let coverage: Vec<_> = mesh.vertices.iter().map(|v| v.color.a()).collect();
             ink_mesh::tint(&mut mesh, color, &coverage);
             self.coverage.push(coverage);
+            self.mesh_bounds.push(mesh.calc_bounds());
             self.meshes.push(Arc::new(mesh));
         }
     }
@@ -179,8 +195,11 @@ impl Cached {
     ) {
         self.prepare_meshes(ui, transform, stroke);
         self.rotation_preview = None;
-        for mesh in &self.meshes {
-            painter.add(egui::Shape::Mesh(mesh.clone()));
+        let clip = painter.clip_rect();
+        for (mesh, bounds) in self.meshes.iter().zip(&self.mesh_bounds) {
+            if clip.intersects(*bounds) {
+                painter.add(egui::Shape::Mesh(mesh.clone()));
+            }
         }
     }
     /// egui layer transforms cannot rotate. Reuse tessellated base meshes and
@@ -306,6 +325,7 @@ impl Cached {
                         stroke,
                         skip_cap,
                         ink_color(stroke),
+                        dpi,
                     ));
                 });
                 let mesh = tessellate(ui, shapes);
@@ -993,6 +1013,7 @@ impl Canvas {
             tint: None,
             coverage: Vec::new(),
             meshes: Vec::new(),
+            mesh_bounds: Vec::new(),
             rotation_preview: None,
             bounds: ([0.0; 2], [0.0; 2]),
         });
@@ -1007,11 +1028,7 @@ impl Canvas {
             cached
                 .pressures
                 .extend_from_slice(&self.preview.pressures[changed..]);
-            cached.meshes.truncate(if union_ink(stroke) {
-                0
-            } else {
-                changed.saturating_sub(1) / MESH_SEGMENTS
-            });
+            cached.truncate_meshes(changed, union_ink(stroke));
         }
         // Completion does not change geometry. Bounds are needed only once the
         // stroke joins the committed drawing's normal culling pipeline.
@@ -1308,6 +1325,7 @@ impl Canvas {
                 tint: None,
                 coverage: Vec::new(),
                 meshes: Vec::new(),
+                mesh_bounds: Vec::new(),
                 rotation_preview: None,
                 bounds: ([0.0; 2], [0.0; 2]),
             });
@@ -1322,11 +1340,7 @@ impl Canvas {
                 cached
                     .pressures
                     .extend_from_slice(&self.preview.pressures[changed..]);
-                cached.meshes.truncate(if union_ink(stroke) {
-                    0
-                } else {
-                    changed.saturating_sub(1) / MESH_SEGMENTS
-                });
+                cached.truncate_meshes(changed, union_ink(stroke));
             }
             cached.paint(ui, &painter, transform, stroke);
         }
@@ -1416,6 +1430,7 @@ fn rounded_shapes(
     stroke: &Stroke,
     skip_first_cap: bool,
     color: Color32,
+    pixels_per_point: f32,
 ) -> Vec<egui::Shape> {
     let width = (stroke.visible_width() * transform.scale) as f32;
     let points: Vec<_> = path
@@ -1425,34 +1440,38 @@ fn rounded_shapes(
             Pos2::new(p[0] as f32, p[1] as f32)
         })
         .collect();
-    let mut shapes = Vec::with_capacity(points.len() * 2);
-    // Keep the existing fast path and antialiasing for ordinary opaque
-    // monoline ink. The per-stroke union consumes explicit outline polygons.
-    if !union_ink(stroke)
-        && (!stroke.pressure_style.enabled || pressures.iter().all(Option::is_none))
-    {
-        for pair in points.windows(2) {
-            shapes.push(egui::Shape::line_segment(
-                [pair[0], pair[1]],
-                Line::new(width, color),
-            ));
-        }
-        for point in points.into_iter().skip(usize::from(skip_first_cap)) {
-            shapes.push(egui::Shape::circle_filled(point, width * 0.5, color));
-        }
-        return shapes;
-    }
-    let radii: Vec<_> = pressures
-        .iter()
-        .map(|p| width * stroke.pressure_style.factor(*p) as f32 * 0.5)
+    let union = union_ink(stroke);
+    let outlines =
+        union || (stroke.pressure_style.enabled && pressures.iter().any(Option::is_some));
+    let samples: Vec<_> = points
+        .into_iter()
+        .zip(pressures)
+        .map(|(point, pressure)| {
+            (
+                point,
+                width * stroke.pressure_style.factor(*pressure) as f32 * 0.5,
+            )
+        })
         .collect();
-    for (i, pair) in points.windows(2).enumerate() {
-        let delta = pair[1] - pair[0];
+    let kept = if union {
+        (0..samples.len()).collect()
+    } else {
+        simplify_swept_disks(&samples, 0.2 / pixels_per_point)
+    };
+    let mut shapes = Vec::with_capacity(kept.len() * 2);
+    for pair in kept.windows(2) {
+        let (a, ra) = samples[pair[0]];
+        let (b, rb) = samples[pair[1]];
+        let delta = b - a;
         if delta.length_sq() == 0.0 {
             continue;
         }
+        if !outlines {
+            shapes.push(egui::Shape::line_segment([a, b], Line::new(width, color)));
+            continue;
+        }
         let length = delta.length();
-        let slope = (radii[i] - radii[i + 1]) / length;
+        let slope = (ra - rb) / length;
         if slope.abs() >= 1.0 {
             continue;
         } // one disk contains the other
@@ -1461,24 +1480,61 @@ fn rounded_shapes(
         let left = unit * slope + normal;
         let right = unit * slope - normal;
         shapes.push(egui::Shape::convex_polygon(
-            vec![
-                pair[0] + left * radii[i],
-                pair[1] + left * radii[i + 1],
-                pair[1] + right * radii[i + 1],
-                pair[0] + right * radii[i],
-            ],
+            vec![a + left * ra, b + left * rb, b + right * rb, a + right * ra],
             color,
             Line::NONE,
         ));
     }
-    for (i, point) in points
-        .into_iter()
-        .enumerate()
-        .skip(usize::from(skip_first_cap))
-    {
-        shapes.push(egui::Shape::circle_filled(point, radii[i], color));
+    for &i in kept.iter().skip(usize::from(skip_first_cap)) {
+        let (point, radius) = samples[i];
+        shapes.push(egui::Shape::circle_filled(point, radius, color));
     }
     shapes
+}
+
+/// Simplify only view geometry. At each discarded sample the sum of the
+/// center displacement and radius error bounds the displacement of its disk.
+/// The same bound holds between samples by linear interpolation.
+fn simplify_swept_disks(samples: &[(Pos2, f32)], tolerance: f32) -> Vec<usize> {
+    if samples.len() < 3 {
+        return (0..samples.len()).collect();
+    }
+    let mut kept = vec![0];
+    let mut ranges = vec![(0, samples.len() - 1)];
+    while let Some((first, last)) = ranges.pop() {
+        let (a, ra) = samples[first];
+        let (b, rb) = samples[last];
+        let axis = b - a;
+        let length_sq = axis.length_sq();
+        let mut split = None;
+        let mut max_error = tolerance;
+        let mut previous_t = 0.0;
+        for (i, &(p, radius)) in samples.iter().enumerate().take(last).skip(first + 1) {
+            // Enforce monotonic correspondence so retracing and reversals cannot
+            // disappear. Repeated pressure-only samples use index interpolation.
+            let t = if length_sq > 0.0 {
+                (p - a).dot(axis) / length_sq
+            } else {
+                (i - first) as f32 / (last - first) as f32
+            };
+            if t < previous_t || t > 1.0 {
+                split = Some(i);
+                break;
+            }
+            previous_t = t;
+            let error = (p - (a + t * axis)).length() + (radius - (ra + t * (rb - ra))).abs();
+            if error > max_error {
+                max_error = error;
+                split = Some(i);
+            }
+        }
+        if let Some(mid) = split {
+            ranges.extend([(mid, last), (first, mid)]);
+        } else {
+            kept.push(last);
+        }
+    }
+    kept
 }
 
 /// Ordered pen input shared by the browser bridge and synthetic controller tests.
@@ -1519,6 +1575,201 @@ pub(crate) fn pen_events(
 mod tests {
     use super::*;
     use crate::document::DocumentKind;
+
+    #[test]
+    fn swept_disk_reduction_preserves_pressure_peaks_and_retracing() {
+        let p = egui::pos2;
+        let samples = [
+            (p(0.0, 0.0), 15.0),
+            (p(1.0, 0.05), 15.1),
+            (p(2.0, 0.0), 15.0),
+            (p(3.0, 0.0), 30.0),
+            (p(3.0, 0.0), 15.0),
+            (p(1.0, 0.0), 15.0),
+            (p(0.0, 0.0), 15.0),
+        ];
+        let kept = simplify_swept_disks(&samples, 0.2);
+        assert!(kept.contains(&3) && kept.contains(&4));
+        assert!(!kept.contains(&1));
+        assert_eq!(kept.first(), Some(&0));
+        assert_eq!(kept.last(), Some(&6));
+        assert!(kept.windows(2).all(|indices| indices[0] < indices[1]));
+    }
+
+    #[test]
+    fn thick_mesh_is_compact_and_continuous_across_chunks_and_zoom() {
+        let ctx = egui::Context::default();
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        for scale in [0.5, 1.0, 2.0, 4.0] {
+            let mut canvas = Canvas::new(&data);
+            let mut stroke = Stroke::new(data.id(), Surface::Canvas, [40, 60, 80, 255], 15.0);
+            stroke.smoothing = drawing::Smoothing::PolylineV1;
+            for i in 0..387 {
+                stroke.push([20.0 + i as f64 * 0.2, 50.0]);
+            }
+            let id = stroke.id;
+            assert!(canvas.drawing.add(stroke));
+            frame_transform(
+                &ctx,
+                &mut canvas,
+                Surface::Canvas,
+                vec![],
+                Transform {
+                    origin: [0.0; 2],
+                    center: [0.0; 2],
+                    scale,
+                },
+            );
+            let cached = &canvas.cache[&id];
+            let meshes = &cached.meshes;
+            assert_eq!(meshes.len(), 4);
+            assert!(meshes.iter().map(|mesh| mesh.vertices.len()).sum::<usize>() < 2000);
+            for (i, adjacent) in cached.mesh_bounds.windows(2).enumerate() {
+                let seam = ((20.0 + (i + 1) as f64 * MESH_SEGMENTS as f64 * 0.2) * scale) as f32;
+                let center = egui::pos2(seam, (50.0 * scale) as f32);
+                assert!(
+                    adjacent
+                        .iter()
+                        .all(|bounds| bounds.expand(0.001).contains(center))
+                );
+            }
+            assert_eq!(canvas.drawing.strokes()[0].points.len(), 387);
+        }
+    }
+
+    /// Deterministic CPU frame workload. Run with --ignored --nocapture.
+    #[test]
+    #[ignore]
+    fn ink_frame_benchmark() {
+        use std::time::Instant;
+        for (name, width, alpha, pressure, frames, batch, existing, scale) in [
+            ("thin", 2.0, 255, false, 360, 2, 0, 1.0),
+            ("medium", 8.0, 255, false, 360, 2, 0, 1.0),
+            ("thick", 25.0, 255, false, 360, 2, 0, 1.0),
+            ("very thick", 60.0, 255, false, 360, 2, 0, 1.0),
+            ("highlight", 25.0, 89, false, 360, 2, 0, 1.0),
+            ("wide highlight", 60.0, 89, false, 360, 2, 0, 1.0),
+            ("long", 60.0, 255, false, 1440, 2, 0, 1.0),
+            ("rapid", 60.0, 255, false, 360, 8, 0, 1.0),
+            ("pressure", 60.0, 255, true, 360, 2, 0, 2.0),
+            ("over ink", 60.0, 89, false, 360, 2, 36, 1.0),
+        ] {
+            let ctx = egui::Context::default();
+            let data = DocumentData::blank(DocumentKind::Whiteboard);
+            let mut canvas = Canvas::new(&data);
+            canvas.width = width;
+            canvas.color = [28, 60, 140, alpha];
+            canvas.pen_type = if alpha < 255 {
+                crate::pen::PenType::Highlighter
+            } else if pressure {
+                crate::pen::PenType::Pressure
+            } else {
+                crate::pen::PenType::Monoline
+            };
+            canvas.pressure_style.enabled = pressure;
+            for row in 0..existing {
+                let mut stroke = Stroke::new(data.id(), Surface::Canvas, [10, 10, 10, 255], 3.0);
+                for i in 0..180 {
+                    stroke.push([
+                        50.0 + i as f64 * 4.0,
+                        30.0 + row as f64 * 17.0 + (i as f64 * 0.1).sin() * 4.0,
+                    ]);
+                }
+                assert!(canvas.drawing.add(stroke));
+            }
+            let point = |i: usize| {
+                let t = i as f32 * 0.012;
+                egui::pos2(585.0 + 460.0 * t.sin(), 360.0 + 250.0 * (t * 1.71).sin())
+            };
+            let mut frame_times = Vec::new();
+            let mut stroke_times = Vec::new();
+            let mut tess_times = Vec::new();
+            let (mut vertices, mut triangles, mut textures) = (0, 0, 0);
+            for frame in 0..=frames {
+                let events = if frame == 0 {
+                    vec![]
+                } else if frame == 1 {
+                    pen_events(0, point(0), 0.4, egui::Modifiers::NONE)
+                } else {
+                    ((frame - 2) * batch + 1..=(frame - 1) * batch)
+                        .flat_map(|i| {
+                            pen_events(
+                                1,
+                                point(i),
+                                0.5 + 0.45 * (i as f32 * 0.09).sin(),
+                                egui::Modifiers::NONE,
+                            )
+                        })
+                        .collect()
+                };
+                let start = Instant::now();
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            Pos2::ZERO,
+                            egui::vec2(1280.0, 800.0),
+                        )),
+                        focused: true,
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        canvas.begin_frame(ui);
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::vec2(1200.0, 720.0),
+                            egui::Sense::click_and_drag(),
+                        );
+                        canvas.surface(
+                            ui,
+                            rect,
+                            Surface::Canvas,
+                            Transform {
+                                origin: [0.0; 2],
+                                center: [0.0; 2],
+                                scale,
+                            },
+                        );
+                        canvas.end_frame(ui);
+                    },
+                );
+                let stroke_end = Instant::now();
+                let meshes = ctx.tessellate(output.shapes, output.pixels_per_point);
+                let end = Instant::now();
+                let texture_updates = output.textures_delta.set.len();
+                output.textures_delta.clear();
+                if frame <= 1 {
+                    continue;
+                }
+                textures += texture_updates;
+                vertices = 0;
+                triangles = 0;
+                for primitive in meshes {
+                    if let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive {
+                        vertices += mesh.vertices.len();
+                        triangles += mesh.indices.len() / 3;
+                    }
+                }
+                frame_times.push((end - start).as_secs_f64() * 1000.0);
+                stroke_times.push((stroke_end - start).as_secs_f64() * 1000.0);
+                tess_times.push((end - stroke_end).as_secs_f64() * 1000.0);
+            }
+            let mean = |times: &[f64]| times.iter().sum::<f64>() / times.len() as f64;
+            let quarter = frame_times.len() / 4;
+            let first = mean(&frame_times[..quarter]);
+            let last = mean(&frame_times[frame_times.len() - quarter..]);
+            frame_times.sort_by(f64::total_cmp);
+            println!(
+                "{name:15} frame mean/p95/max {:.3}/{:.3}/{:.3} ms, canvas {:.3}, final tess {:.3}, first/last {:.3}/{:.3}, vertices {vertices}, triangles {triangles}, texture deltas {textures}",
+                mean(&frame_times),
+                frame_times[frame_times.len() * 95 / 100],
+                frame_times[frame_times.len() - 1],
+                mean(&stroke_times),
+                mean(&tess_times),
+                first,
+                last
+            );
+        }
+    }
 
     #[test]
     fn pen_presets_capture_style_and_survive_partial_erase_history() {
@@ -1733,6 +1984,7 @@ mod tests {
                     &original,
                     false,
                     ink_color(&original),
+                    1.0,
                 );
                 let radii: Vec<_> = shapes
                     .iter()

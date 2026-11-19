@@ -341,3 +341,11 @@ or Lasso.
 Support mixed batches, nested group descendants and one-step history while
 retaining samples, IDs and placement. Transparent self-intersections composite
 once per stroke. Editable PDF serialization and viewer equivalence belong to M2.
+
+## Thick ink rendering follow-up (#57)
+
+Reduce opaque mesh assembly and upload volume through a subpixel approximation
+of the displayed stroke. Keep canonical input and pressure for editing, select
+and erase against the full path, and compare long strokes in the CPU benchmark.
+M1.15 supplies correct highlighter self-overlap. GPU timing remains a
+follow-up gate for #57.

@@ -370,7 +370,11 @@ out-of-range/nonfinite values and oversized names/libraries. Local preferences
 are bounded to 64 KiB; note content is never included. Unsupported preferences are
 preserved by the existing app guard until an explicit user change.
 
-Opaque round-nib ink uses cached tessellation chunks. Translucent and flat-nib
+Opaque ink keeps round caps and joins. Each view mesh chunk simplifies the
+derived opaque sweep within 0.2 physical pixels of combined center and pressure
+radius error. Raw samples and the full hit/erase path stay canonical to their
+respective layers. Cached screen bounds reject offscreen chunks before egui
+assembles the visible mesh. Translucent and flat-nib
 ink use a union of per-stroke vector outlines with a separately triangulated
 antialias fringe. A self-crossing belongs to that stroke's coverage once.
 Independent strokes composite in object order.

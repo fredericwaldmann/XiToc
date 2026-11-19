@@ -279,6 +279,10 @@ tint changes. Rounded opaque ink keeps incremental 128-segment chunks, while
 translucent ink and flat-nib highlighters union the outline and antialias fringe
 across the full stroke in `ink_mesh.rs`. Independent strokes composite in
 document order. Highlighter hit envelopes remain conservatively rounded.
+Before tessellation, each opaque chunk approximates the swept disks within 0.2
+physical pixels of combined center and pressure-radius error. Chunk endpoints
+are retained. Selection and erasing use the full derived path. Cached screen
+bounds skip offscreen meshes before egui assembles the visible geometry.
 
 `Drawing::formatting_strokes` resolves unlocked stroke descendants of selected
 roots in the current group scope. `StrokeStylePatch` edits one appearance field
