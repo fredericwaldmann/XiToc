@@ -12,11 +12,11 @@ pdf-writer = "0.15"
 lopdf = { version = "0.45", default-features = false, features = ["wasm_js"] }
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "file-handle-inner"] }
 
-egui = { version = "=0.37.0", default-features = false, features = ["web_file"] }
+egui = { version = "=0.37.0", default-features = false }
 eframe = { version = "=0.37.0", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "persistence"] }
 latex-rust = "=3.0.3"
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
-sha2 = "0.10"
+sha2 = "0.11"
 base64 = "0.22"
 resvg = { version = "=0.50.0", default-features = false }
 unicode-segmentation = "1.13.3"

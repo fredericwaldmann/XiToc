@@ -71,3 +71,22 @@ pub(crate) mod encoded_bytes {
             .map_err(serde::de::Error::custom)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sha256_asset_id_and_wire_encoding_match_known_vector() {
+        let asset = BinaryAsset::new(Arc::from(&b"abc"[..])).unwrap();
+        let expected = [
+            0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae,
+            0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61,
+            0xf2, 0x00, 0x15, 0xad,
+        ];
+        assert_eq!(asset.id(), expected);
+        let wire = serde_json::json!({ "id": expected, "bytes": "YWJj" });
+        assert_eq!(serde_json::to_value(&asset).unwrap(), wire);
+        assert_eq!(serde_json::from_value::<BinaryAsset>(wire).unwrap(), *asset);
+    }
+}
