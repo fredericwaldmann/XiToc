@@ -9,7 +9,8 @@ PDF saving/reopening of handwriting arrives in M2.
 
 Technical orientation: [Codebase guide](docs/CODEBASE_GUIDE.md),
 [Architecture decisions](docs/ARCHITECTURE_DECISIONS.md),
-[Development log](docs/DEVELOPMENT_LOG.md).
+[Development log](docs/DEVELOPMENT_LOG.md),
+[ink rendering benchmark](docs/TEST_PLAN.md#thick-ink-rendering-57).
 
 Editable Formula Boxes use Latin Modern Math with antialiased, zoom/DPI-aware rendering.
 Edit → Settings → LaTeX configures global defaults and preambles/postambles;

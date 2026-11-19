@@ -1856,3 +1856,28 @@ export to the original byte-for-byte after moving the source. Verify same-name
 and same-content imports, export collision detection, locked cards and failed
 imports. On native, check PDF, spreadsheet and text associations and rejection
 of scripts. On the web, use Download and compare the saved bytes.
+
+
+## Thick ink rendering (#57)
+
+Run `cargo test --release ink_frame_benchmark -- --ignored --nocapture`
+for the deterministic 1280×800 CPU workload. It drives the shared Canvas input
+controller, live smoothing and mesh cache, then runs egui tessellation.
+The canvas column includes input, UI traversal and new chunk tessellation. The
+final tessellation column includes assembly of the visible mesh. Texture counts
+are egui texture update requests. The harness excludes GPU submission, pixel
+processing and display latency. Widths 25 and 60 are stress inputs for the live
+renderer above the current 24-point preset limit. A 24-point preset can reach
+60 screen points at 250% zoom.
+
+Automated tests cover pressure peaks, stationary force, reversals, compact wide
+meshes, continuity at chunk boundaries at 50%, 100%, 200% and 400%, and reuse of
+stable live meshes. Existing controller tests cover lasso, selection transforms,
+groups, partial erasing and undo/redo.
+
+For a GUI check, draw with the widest permitted opaque and highlighter presets
+on a Whiteboard, repeat at higher zoom, hold the pointer down for 15–30 seconds,
+and draw over previously committed ink. Check caps and joins, perform a lasso
+move and rotation, and undo/redo. For transparency, draw one crossing gesture
+then a second separate crossing stroke. True self-crossings currently darken
+with the translucent ribbon renderer and remain an open item in #57.

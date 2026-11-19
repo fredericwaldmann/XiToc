@@ -333,3 +333,11 @@ descendant-local orientation and magnetic relationships.
 File cards share image bytes, oriented editing, history and clipboard.
 Native association opening and browser downloads extract immutable snapshots.
 The single-PDF persistence milestone owns attachment serialization.
+
+
+## Thick ink rendering follow-up (#57)
+
+Reduce opaque mesh assembly and upload volume through a subpixel approximation
+of the displayed stroke. Keep canonical input and pressure for editing, select
+and erase against the full path, and compare long strokes in the CPU benchmark.
+Highlighter self-overlap and GPU timing remain follow-up gates for #57.

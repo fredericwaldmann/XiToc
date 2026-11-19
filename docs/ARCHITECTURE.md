@@ -370,7 +370,11 @@ out-of-range/nonfinite values and oversized names/libraries. Local preferences
 are bounded to 64 KiB; note content is never included. Unsupported preferences are
 preserved by the existing app guard until an explicit user change.
 
-Opaque ink keeps the existing rounded renderer. Translucent strokes use joined,
+Opaque ink keeps round caps and joins. Each view mesh chunk simplifies the
+derived opaque sweep within 0.2 physical pixels of combined center and pressure
+radius error. Raw samples and the full hit/erase path stay canonical to their
+respective layers. Cached screen bounds reject offscreen chunks before egui
+assembles the visible mesh. Translucent strokes use joined,
 anti-aliased vector ribbon strips to avoid overpainting every segment/cap. Adjacent
 cached chunks include neighbor samples for matching seam normals, preserving the
 incremental mesh architecture. Width response comes from the same PressureStyle

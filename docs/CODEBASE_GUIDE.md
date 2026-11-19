@@ -275,9 +275,14 @@ and `Arc<egui::Mesh>` chunks. `Canvas::paint` clips/culls surfaces and strokes;
 `Cached::prepare_meshes` converts logical geometry into view-dependent meshes.
 Chunks cover 128 path segments. Adaptive live ink invalidates only changed trailing
 chunks; idle frames and release reuse stable meshes. Camera/DPI changes rebuild
-mesh coordinates without rewriting semantic points. Opaque ink uses round
-constant/variable-width geometry; translucent ink uses joined ribbon strips to
-avoid overpainting each sample join/chunk seam. Genuine crossings and separate
+mesh coordinates without rewriting semantic points. Each mesh caches its
+screen bounds so the normal paint path skips offscreen chunks before egui
+reassembles and uploads visible geometry. Opaque ink approximates the swept
+disks within 0.2 physical pixels before tessellating round constant- or
+variable-width geometry. The approximation retains chunk endpoints and bounds
+center and pressure-radius error together. Selection and erasing still use the
+full derived path. Translucent ink uses joined ribbon strips to avoid
+overpainting each sample join/chunk seam. Genuine crossings and separate
 strokes composite normally. Highlighter hit envelopes remain conservatively rounded.
 
 Move/resize use egui's existing translation/scale layer preview. egui's layer

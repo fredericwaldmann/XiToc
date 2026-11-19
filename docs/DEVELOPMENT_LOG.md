@@ -829,3 +829,15 @@ snapshots retain an image-specific metadata wrapper around the same byte store.
 Reused oriented selection, grouping, transformations and the journal. Added
 mixed asset clipboard interchange and platform-specific opening and export.
 PDF embedding stays in M2.
+
+
+## 2026-11-19 — Thick opaque ink mesh cost (#57)
+
+The measured CPU cost came primarily from assembling visible ink meshes each
+frame. Smooth input could generate several path points per sample and each wide
+opaque point produced a tessellated round disk. Stable chunks already reused
+smoothing and tessellation work. The view mesh now bounds the combined center
+and radius approximation to 0.2 physical pixels and keeps a clip bound per
+chunk. This reduces mesh copies, indices and vertices while retaining raw
+pressure and editable vector ink. The highlighter ribbon has width-independent
+vertex count and still composites true self-crossings multiple times.
