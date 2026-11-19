@@ -349,3 +349,11 @@ of the displayed stroke. Keep canonical input and pressure for editing, select
 and erase against the full path, and compare long strokes in the CPU benchmark.
 M1.15 supplies correct highlighter self-overlap. GPU timing remains a
 follow-up gate for #57.
+
+
+### M1.15 follow-up — Wide and translucent ink performance (#57)
+
+Use incremental viewport-local coverage for translucent ink and a compact
+pressure-aware sweep for wide opaque ink. Keep one coverage contribution per
+stroke at self-crossings. Release benchmarks track continuous input and mixed
+documents through the actual canvas controller and egui mesh assembly.

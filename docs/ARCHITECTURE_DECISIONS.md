@@ -807,8 +807,7 @@ Use a vector union and triangulation of existing round or flat nib outlines
 for translucent ink. Joined strips alone still blend twice at self-crossings.
 A per-stroke union makes coverage independent of segment overlap and works in
 the same egui mesh pipeline on desktop and WASM. It also avoids allocating
-offscreen textures. A full-stroke coverage rebuild is needed when a translucent
-stroke's geometry changes. Stable meshes retain coverage for color and opacity
+offscreen textures. Phase 2 retains tile-local coverage for ordinary drawing. Stable meshes retain coverage for color and opacity
 updates, and ordinary opaque round ink keeps the chunked fast path. Future PDF
 export needs the same single-fill or isolated per-stroke transparency semantics.
 
@@ -821,3 +820,15 @@ samples, smoothing and pressure for the model and hit/erase queries. Cache
 bounds alongside the mesh and invalidate both together. The CPU profile showed
 final mesh assembly as the dominant opaque cost. The renderer continues using
 egui meshes and its native and WebAssembly backend.
+
+
+## Bound translucent geometry updates to affected view tiles (#57)
+
+Use tile-local polygon unions through the existing epaint/Glow pipeline.
+Stable coverage joins with a short, mutable smoothing tail. This preserves
+self-overlap, holes and pressure without a frame-sized mask or a second
+graphics backend. Tile clips increase draw submissions compared with one
+whole-stroke mesh. The alternative GPU coverage layer would require
+persistent intermediate targets, blend-state management and resource
+lifecycle work on both OpenGL and WebGL. Revisit that option if measured GPU
+or upload cost dominates after the CPU union reduction.
