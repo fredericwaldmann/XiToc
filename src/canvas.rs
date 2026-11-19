@@ -1440,7 +1440,9 @@ fn rounded_shapes(
             Pos2::new(p[0] as f32, p[1] as f32)
         })
         .collect();
-    let variable = stroke.pressure_style.enabled && pressures.iter().any(Option::is_some);
+    let union = union_ink(stroke);
+    let outlines =
+        union || (stroke.pressure_style.enabled && pressures.iter().any(Option::is_some));
     let samples: Vec<_> = points
         .into_iter()
         .zip(pressures)
@@ -1451,7 +1453,11 @@ fn rounded_shapes(
             )
         })
         .collect();
-    let kept = simplify_swept_disks(&samples, 0.2 / pixels_per_point);
+    let kept = if union {
+        (0..samples.len()).collect()
+    } else {
+        simplify_swept_disks(&samples, 0.2 / pixels_per_point)
+    };
     let mut shapes = Vec::with_capacity(kept.len() * 2);
     for pair in kept.windows(2) {
         let (a, ra) = samples[pair[0]];
@@ -1460,7 +1466,7 @@ fn rounded_shapes(
         if delta.length_sq() == 0.0 {
             continue;
         }
-        if !variable {
+        if !outlines {
             shapes.push(egui::Shape::line_segment([a, b], Line::new(width, color)));
             continue;
         }
