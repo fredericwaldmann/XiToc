@@ -880,3 +880,14 @@ Added five coordinate presets, 1D points and intervals, 2D functions, and
 orthographic 3D surface wireframes. One equation-style dialog previews and
 commits configuration using the shared editor journal. Coordinate geometry
 and sampled mathematical data are cached independently.
+
+### Configuration dialog and editable TikZ subset
+
+Continued the open coordinate-system PR #66. Replaced the stacked preview/form
+with a resizable two-column modal: General, Functions and editable TikZ Editor
+tabs on the left, and the shared live renderer on the right. Coordinate objects
+retain applied source alongside structured configuration. A bounded parser
+synchronizes supported axis, grid, plot, 1D marker and 3D surface edits without
+executing TeX. Invalid/incomplete text remains in the editor, keeps the last
+valid preview and blocks Apply. Documented that this is a TikZ-inspired subset,
+not general TikZ/PGFPlots compilation.

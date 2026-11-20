@@ -860,4 +860,6 @@ canvas transforms, and independent vector PDF output later. A rendered TikZ
 image would lose editable mathematical structure and complicate WASM. Use a
 small numerical grammar and orthographic wireframes with bounded adaptive
 sampling. Tex-like standalone Greek axis labels map to Unicode and render in
-the app's italic scientific typography. TikZ/PGFPlots export is future work.
+the app's italic scientific typography. A bounded editable TikZ-inspired source
+subset is stored with the structured model and parsed locally without TeX.
+General-purpose TikZ and PGFPlots compatibility remain out of scope.

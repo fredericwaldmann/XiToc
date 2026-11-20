@@ -1111,6 +1111,8 @@ M2's single-PDF visible-image/edit-payload round-trip gate.
 - `coordinate_expression.rs` parses and evaluates the bounded numeric grammar.
   `coordinate_geometry.rs` samples, clips, caches, and projects logical curves
   and surface wires. It also generates axes, grids, ticks and markers.
+- `coordinate_tikz.rs` generates and parses the bounded, editable TikZ subset;
+  source text is stored with each coordinate object.
 - `canvas_coordinates.rs` handles placement, the transactional modal, and the
   vector renderer shared with preview.
 - `object.rs`, `drawing.rs`, `canvas_selection.rs` and `object_clipboard.rs`

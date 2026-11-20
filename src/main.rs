@@ -9,6 +9,7 @@ mod connector_route;
 mod coordinate;
 mod coordinate_expression;
 mod coordinate_geometry;
+mod coordinate_tikz;
 mod document;
 mod drawing;
 mod editor;

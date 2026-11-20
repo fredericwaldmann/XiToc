@@ -2000,3 +2000,13 @@ available, then lasso the ink, change its width and test undo and redo.
 - Resize, group, lock, align, snap and paste between Whiteboard and Page Note.
   Verify logical placement, fresh clipboard IDs and no extra history entries.
   Exercise the desktop and browser builds.
+
+Dialog/TikZ enhancement regressions cover the three left tabs with an always-
+visible right preview, source generation and multiline source parsing, all five
+preset representations, 1D marker and 3D surface extensions, axis range/color/
+label and 2D expression/style edits, comments across graphical edits, invalid
+and unsupported commands, last-valid preview retention, Apply/Cancel and one-
+step undo. For manual GUI verification, edit an axis endpoint and a curve
+expression/color in TikZ Editor, then confirm General/Functions and the preview
+reflect them. Type an incomplete command, confirm the preview is unchanged and
+Apply is disabled, correct it, Apply, and undo/redo. Repeat on native and WASM.

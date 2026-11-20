@@ -58,5 +58,36 @@ removal or lighting.
 The renderer caches source samples separately from the projected vector
 geometry. Viewpoint and style changes can reuse the samples. Object panning
 and rotation reuse both caches. No external TeX installation or new package
-dependency is required. TikZ/PGFPlots import and export are outside this
-implementation. PDF persistence remains M2 work.
+dependency is required. PDF persistence remains M2 work.
+
+## Configuration dialog and TikZ source
+
+The resizable **Coordinate System** dialog has a two-column layout. **General**,
+**Functions**, and **TikZ Editor** tabs and their vertical scrolling stay on the
+left. The right column remains a live preview rendered through the same vector
+renderer as the canvas. Apply writes configuration and source in one journal
+operation; Cancel and Escape discard the draft.
+
+TikZ Editor is an editable multiline monospace field. Its source is retained on
+the coordinate object and copied with that object. XiToc does not invoke TeX.
+The parser accepts a single `tikzpicture`, bounded to 32 KiB and 512 commands.
+It supports `\draw` horizontal and vertical axes, axis labels as simple math
+text, known colors or `#RRGGBB`, `line width`, arrow options `->`, `open`, `-`,
+grid commands with `step`/`opacity`, plot commands in the form
+`plot (\x, {expression})` with a `domain`, solid/dashed/dotted style, and
+`\node` (for the origin label). A small `% xitoc key=value` extension records
+viewpoint, ranges, tick/grid styling, frame-independent settings, 1D endpoint
+metadata and 3D surface definitions that ordinary 2D TikZ commands cannot
+represent. Surface expressions use the same bounded native math grammar.
+
+Editing a supported source command reparses into the structured `Config`, so
+the preview, Functions/General controls, and committed canvas object use the
+same values. General or Functions changes regenerate managed source while
+retaining user comments. Tab switches alone do not regenerate or overwrite
+source. Unknown commands, unsupported colors, incomplete environments,
+invalid values and excessive input are rejected with line-level feedback; the
+text remains editable, Apply is disabled, and the preview keeps the last valid
+configuration. Correct the source or Cancel. Arbitrary macros, `\input`,
+external resources, scripts, shell escape, PGFPlots and full TikZ compatibility
+are not supported. 3D surfaces use the XiToc extension because the preview uses
+its bounded orthographic wireframe renderer rather than TeX.

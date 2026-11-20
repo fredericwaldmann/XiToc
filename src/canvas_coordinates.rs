@@ -43,9 +43,19 @@ pub(super) struct CoordinateDraft {
     id: Uuid,
     value: Config,
     size: Point,
+    tab: CoordinateTab,
+    tikz_source: String,
+    tikz_error: Option<String>,
     validation: Option<(Arc<Config>, Result<(), String>)>,
     preview: CoordinateCache,
     error: Option<String>,
+}
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum CoordinateTab {
+    #[default]
+    General,
+    Functions,
+    Tikz,
 }
 
 fn color(value: [u8; 3], alpha: u8) -> Color32 {
@@ -284,10 +294,19 @@ impl Canvas {
         let Some(ObjectSnapshot::Coordinate(object)) = self.drawing.snapshot(id) else {
             return;
         };
+        let tikz_source = if object.tikz_source.is_empty() {
+            crate::coordinate_tikz::generate(&object.config)
+        } else {
+            object.tikz_source.clone()
+        };
+        let tikz_error = crate::coordinate_tikz::parse(&tikz_source, &object.config).err();
         self.coordinate_draft = Some(CoordinateDraft {
             id,
             value: (*object.config).clone(),
             size: object.size,
+            tab: CoordinateTab::General,
+            tikz_source,
+            tikz_error,
             validation: None,
             preview: Default::default(),
             error: None,
@@ -305,38 +324,67 @@ impl Canvas {
         let locked = self.drawing.is_locked(draft.id);
         let mut cancel = false;
         let mut apply = false;
-        let result =
-            egui::Modal::new(egui::Id::unique(("coordinate-system", draft.id))).show(ctx, |ui| {
-                ui.set_width(
-                    (ctx.content_rect().width() - 48.)
-                        .clamp(180., crate::ui::style::SETTINGS_WIDTH),
-                );
+        let result = egui::Modal::new(egui::Id::unique(("coordinate-system", draft.id))).show(ctx, |ui| {
+            let max_size = (ctx.content_rect().size() - egui::vec2(40., 40.)).max(egui::vec2(320., 320.));
+            let min_size = egui::vec2(760., 500.).min(max_size);
+            egui::Resize::default()
+                .id_salt(("coordinate-dialog-resize", draft.id))
+                .default_size(egui::vec2(1000., 700.).min(max_size))
+                .min_size(min_size)
+                .max_size(max_size)
+                .show(ui, |ui| {
+                let frame_before = draft.value.clone();
                 ui.horizontal(|ui| {
                     ui.heading("Coordinate System");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         cancel |= ui.button("×").on_hover_text("Close").clicked();
                     });
                 });
-                ui.label("Preview");
-                let (rect, painter) = ui
-                    .allocate_painter(egui::vec2(ui.available_width(), 160.), egui::Sense::hover());
-                painter.rect_filled(rect.rect, 3., crate::ui::style::palette(ui).board);
-                draw_preview(
-                    &mut draft,
-                    &object,
-                    &painter,
-                    rect.rect,
-                    crate::ui::style::palette(ui).text,
-                );
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, true])
-                    .max_height((ctx.content_rect().height() - 300.).max(60.))
-                    .show(ui, |ui| {
-                        ui.add_enabled_ui(!locked, |ui| {
-                            config_fields(ui, &mut draft.value, &mut draft.size)
+                ui.separator();
+                let body_height = (ui.available_height() - 64.).max(280.);
+                ui.horizontal_top(|ui| {
+                    let left_width = (ui.available_width() * 0.50).max(320.);
+                    ui.allocate_ui_with_layout(egui::vec2(left_width, body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(&mut draft.tab, CoordinateTab::General, "General");
+                            ui.selectable_value(&mut draft.tab, CoordinateTab::Functions, "Functions");
+                            ui.selectable_value(&mut draft.tab, CoordinateTab::Tikz, "TikZ Editor");
+                        });
+                        ui.separator();
+                        egui::ScrollArea::vertical().id_salt(("coordinate-tab", draft.id)).auto_shrink([false, false]).show(ui, |ui| {
+                            match draft.tab {
+                                CoordinateTab::General => { ui.add_enabled_ui(!locked && draft.tikz_error.is_none(), |ui| general_fields(ui, &mut draft.value, &mut draft.size)); }
+                                CoordinateTab::Functions => { ui.add_enabled_ui(!locked && draft.tikz_error.is_none(), |ui| function_fields(ui, &mut draft.value)); }
+                                CoordinateTab::Tikz => {
+                                    ui.label("Supported TikZ subset · edits update the preview");
+                                    let response = ui.add(egui::TextEdit::multiline(&mut draft.tikz_source)
+                                        .code_editor().font(egui::TextStyle::Monospace)
+                                        .desired_width(f32::INFINITY).desired_rows(24)
+                                        .lock_focus(true));
+                                    if response.changed() {
+                                        match crate::coordinate_tikz::parse(&draft.tikz_source, &frame_before) {
+                                            Ok(config) => { draft.value = config; draft.tikz_error = None; draft.error = None; }
+                                            Err(error) => draft.tikz_error = Some(error),
+                                        }
+                                    }
+                                }
+                            }
                         });
                     });
-                if let Some(error) = draft.error.as_ref().or_else(|| {
+                    ui.separator();
+                    let right_width = ui.available_width();
+                    ui.allocate_ui_with_layout(egui::vec2(right_width, body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui.label("Live Preview");
+                        let (rect, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::hover());
+                        painter.rect_filled(rect.rect, 4., crate::ui::style::palette(ui).board);
+                        draw_preview(&mut draft, &object, &painter, rect.rect.shrink(8.), crate::ui::style::palette(ui).text);
+                    });
+                });
+                if draft.tab != CoordinateTab::Tikz && draft.value != frame_before {
+                    draft.tikz_source = crate::coordinate_tikz::generate_preserving(&draft.value, &draft.tikz_source);
+                    draft.tikz_error = None;
+                }
+                if let Some(error) = draft.tikz_error.as_ref().or(draft.error.as_ref()).or_else(|| {
                     draft
                         .validation
                         .as_ref()
@@ -347,13 +395,15 @@ impl Canvas {
                 if locked {
                     ui.weak("Unlock this coordinate system to apply changes.");
                 }
+                ui.separator();
                 ui.horizontal(|ui| {
                     cancel |= ui.button("Cancel").clicked();
                     apply = ui
-                        .add_enabled(!locked, egui::Button::new("Apply"))
+                        .add_enabled(!locked && draft.tikz_error.is_none(), egui::Button::new("Apply"))
                         .clicked();
                 });
                 cancel |= ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                });
             });
         if cancel || result.backdrop_response.clicked() {
             return true;
@@ -364,6 +414,7 @@ impl Canvas {
                     let mut next = (*object).clone();
                     next.config = Arc::new(draft.value.clone());
                     next.size = draft.size;
+                    next.tikz_source = draft.tikz_source.clone();
                     if next == *object || self.drawing.replace_coordinate(next) {
                         self.selection.refresh(&self.drawing);
                         return true;
@@ -465,150 +516,164 @@ fn optional_color(ui: &mut egui::Ui, label: &str, value: &mut Option<[u8; 3]>, i
         }
     });
 }
-fn config_fields(ui: &mut egui::Ui, config: &mut Config, size: &mut Point) {
-    ui.label("Preset");
-    let mut preset = config.preset;
-    egui::ComboBox::from_id_salt("coordinate-preset")
-        .selected_text(preset.label())
-        .show_ui(ui, |ui| {
-            for option in Preset::ALL {
-                ui.selectable_value(&mut preset, option, option.label());
-            }
-        });
-    if preset != config.preset {
-        // Preserve the chosen frame. A new dimension reuses compatible authored values.
-        config.set_preset(preset);
-    }
-    let dimension = preset.dimension();
-    egui::CollapsingHeader::new("Axes")
-        .default_open(true)
-        .show(ui, |ui| {
-            for (i, axis) in config.axes.iter_mut().enumerate().take(dimension) {
-                ui.push_id(i, |ui| {
-                    let name = ["X", "Y", "Z"][i];
-                    range_fields(
-                        ui,
-                        &format!("{name} range"),
-                        &mut axis.range,
-                        !matches!(preset, Preset::Signed | Preset::FourQuadrants),
-                    );
-                    ui.horizontal_wrapped(|ui| {
-                        ui.checkbox(&mut axis.visible, format!("Show {name} axis"));
-                        ui.checkbox(&mut axis.show_label, "Label");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut axis.label)
-                                .desired_width(72.)
-                                .char_limit(32),
+fn config_fields(ui: &mut egui::Ui, config: &mut Config, size: &mut Point, functions_only: bool) {
+    let mut dimension = config.preset.dimension();
+    if !functions_only {
+        ui.label("Preset");
+        let mut preset = config.preset;
+        egui::ComboBox::from_id_salt("coordinate-preset")
+            .selected_text(preset.label())
+            .show_ui(ui, |ui| {
+                for option in Preset::ALL {
+                    ui.selectable_value(&mut preset, option, option.label());
+                }
+            });
+        if preset != config.preset {
+            // Preserve the chosen frame. A new dimension reuses compatible authored values.
+            config.set_preset(preset);
+        }
+        dimension = config.preset.dimension();
+        egui::CollapsingHeader::new("Axes")
+            .default_open(true)
+            .show(ui, |ui| {
+                for (i, axis) in config.axes.iter_mut().enumerate().take(dimension) {
+                    ui.push_id(i, |ui| {
+                        let name = ["X", "Y", "Z"][i];
+                        range_fields(
+                            ui,
+                            &format!("{name} range"),
+                            &mut axis.range,
+                            !matches!(preset, Preset::Signed | Preset::FourQuadrants),
                         );
+                        ui.horizontal_wrapped(|ui| {
+                            ui.checkbox(&mut axis.visible, format!("Show {name} axis"));
+                            ui.checkbox(&mut axis.show_label, "Label");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut axis.label)
+                                    .desired_width(72.)
+                                    .char_limit(32),
+                            );
+                        });
                     });
+                }
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut config.origin, "Show origin");
+                    ui.add_enabled(
+                        config.origin,
+                        egui::TextEdit::singleline(&mut config.origin_label)
+                            .desired_width(64.)
+                            .char_limit(32),
+                    );
                 });
-            }
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut config.origin, "Show origin");
-                ui.add_enabled(
-                    config.origin,
-                    egui::TextEdit::singleline(&mut config.origin_label)
-                        .desired_width(64.)
-                        .char_limit(32),
-                );
-            });
-            ui.checkbox(&mut config.numbers, "Show numeric labels");
-            if dimension == 2 {
-                ui.checkbox(&mut config.equal_units, "Equal X and Y units");
-            }
-            optional_color(
-                ui,
-                "Custom axis color",
-                &mut config.axis_color,
-                [35, 43, 53],
-            );
-            number_field(ui, "Axis thickness", &mut config.axis_width, 0.15..=8., 0.1);
-            egui::ComboBox::from_id_salt("coordinate-arrow")
-                .selected_text(format!("{:?} arrowheads", config.arrow))
-                .show_ui(ui, |ui| {
-                    for (option, name) in [
-                        (Arrow::Scientific, "Scientific"),
-                        (Arrow::Open, "Open"),
-                        (Arrow::None, "No arrowheads"),
-                    ] {
-                        ui.selectable_value(&mut config.arrow, option, name);
-                    }
-                });
-        });
-    ui.collapsing("Grid and ticks", |ui| {
-        if dimension >= 2 {
-            ui.checkbox(
-                &mut config.grid,
-                if dimension == 3 {
-                    "Show XY reference grid"
-                } else {
-                    "Show grid"
-                },
-            );
-            if config.grid {
-                number_field(
+                ui.checkbox(&mut config.numbers, "Show numeric labels");
+                if dimension == 2 {
+                    ui.checkbox(&mut config.equal_units, "Equal X and Y units");
+                }
+                optional_color(
                     ui,
-                    "Major grid spacing",
-                    &mut config.grid_step,
-                    1e-6..=1e6,
-                    0.1,
+                    "Custom axis color",
+                    &mut config.axis_color,
+                    [35, 43, 53],
                 );
-                ui.horizontal(|ui| {
-                    ui.label("Grid color");
-                    crate::ui::shape_controls::color_control(ui, &mut config.grid_color, 255);
-                    ui.label("Opacity");
-                    ui.add(egui::DragValue::new(&mut config.grid_opacity).range(0..=255));
-                });
-                number_field(ui, "Grid thickness", &mut config.grid_width, 0.15..=8., 0.1);
-                ui.horizontal(|ui| {
-                    ui.label("Minor divisions per major interval");
-                    ui.add(egui::DragValue::new(&mut config.grid_subdivisions).range(1..=8));
-                });
+                number_field(ui, "Axis thickness", &mut config.axis_width, 0.15..=8., 0.1);
+                egui::ComboBox::from_id_salt("coordinate-arrow")
+                    .selected_text(format!("{:?} arrowheads", config.arrow))
+                    .show_ui(ui, |ui| {
+                        for (option, name) in [
+                            (Arrow::Scientific, "Scientific"),
+                            (Arrow::Open, "Open"),
+                            (Arrow::None, "No arrowheads"),
+                        ] {
+                            ui.selectable_value(&mut config.arrow, option, name);
+                        }
+                    });
+            });
+        ui.collapsing("Grid and ticks", |ui| {
+            if dimension >= 2 {
+                ui.checkbox(
+                    &mut config.grid,
+                    if dimension == 3 {
+                        "Show XY reference grid"
+                    } else {
+                        "Show grid"
+                    },
+                );
+                if config.grid {
+                    number_field(
+                        ui,
+                        "Major grid spacing",
+                        &mut config.grid_step,
+                        1e-6..=1e6,
+                        0.1,
+                    );
+                    ui.horizontal(|ui| {
+                        ui.label("Grid color");
+                        crate::ui::shape_controls::color_control(ui, &mut config.grid_color, 255);
+                        ui.label("Opacity");
+                        ui.add(egui::DragValue::new(&mut config.grid_opacity).range(0..=255));
+                    });
+                    number_field(ui, "Grid thickness", &mut config.grid_width, 0.15..=8., 0.1);
+                    ui.horizontal(|ui| {
+                        ui.label("Minor divisions per major interval");
+                        ui.add(egui::DragValue::new(&mut config.grid_subdivisions).range(1..=8));
+                    });
+                }
             }
-        }
-        ui.checkbox(&mut config.ticks, "Show tick marks");
-        if config.ticks || config.numbers {
-            number_field(ui, "Tick spacing", &mut config.tick_step, 1e-6..=1e6, 0.1);
-        }
-        if config.ticks {
-            number_field(ui, "Tick length", &mut config.tick_length, 1. ..=24., 0.2);
-            number_field(ui, "Tick thickness", &mut config.tick_width, 0.15..=8., 0.1);
-            optional_color(
-                ui,
-                "Custom tick color",
-                &mut config.tick_color,
-                [35, 43, 53],
-            );
-        }
-    });
-    if dimension == 3 {
-        ui.collapsing("Orthographic view", |ui| {
-            number_field(ui, "Azimuth (°)", &mut config.azimuth, -180. ..=180., 1.);
-            number_field(ui, "Elevation (°)", &mut config.elevation, 5. ..=85., 1.);
+            ui.checkbox(&mut config.ticks, "Show tick marks");
+            if config.ticks || config.numbers {
+                number_field(ui, "Tick spacing", &mut config.tick_step, 1e-6..=1e6, 0.1);
+            }
+            if config.ticks {
+                number_field(ui, "Tick length", &mut config.tick_length, 1. ..=24., 0.2);
+                number_field(ui, "Tick thickness", &mut config.tick_width, 0.15..=8., 0.1);
+                optional_color(
+                    ui,
+                    "Custom tick color",
+                    &mut config.tick_color,
+                    [35, 43, 53],
+                );
+            }
         });
-    }
-    match dimension {
-        1 => {
-            ui.collapsing("Points and intervals", |ui| {
-                markers(ui, &mut config.markers)
+        if dimension == 3 {
+            ui.collapsing("Orthographic view", |ui| {
+                number_field(ui, "Azimuth (°)", &mut config.azimuth, -180. ..=180., 1.);
+                number_field(ui, "Elevation (°)", &mut config.elevation, 5. ..=85., 1.);
             });
         }
-        2 => {
-            egui::CollapsingHeader::new("Functions")
-                .default_open(true)
-                .show(ui, |ui| plots(ui, &mut config.curves, false));
-        }
-        _ => {
-            egui::CollapsingHeader::new("Surfaces")
-                .default_open(true)
-                .show(ui, |ui| plots(ui, &mut config.surfaces, true));
+    }
+    if functions_only {
+        match dimension {
+            1 => {
+                ui.collapsing("Points and intervals", |ui| {
+                    markers(ui, &mut config.markers)
+                });
+            }
+            2 => {
+                egui::CollapsingHeader::new("Functions")
+                    .default_open(true)
+                    .show(ui, |ui| plots(ui, &mut config.curves, false));
+            }
+            _ => {
+                egui::CollapsingHeader::new("Surfaces")
+                    .default_open(true)
+                    .show(ui, |ui| plots(ui, &mut config.surfaces, true));
+            }
         }
     }
-    ui.collapsing("Frame", |ui| {
-        number_field(ui, "Width", &mut size[0], 48. ..=1e6, 1.);
-        number_field(ui, "Height", &mut size[1], 48. ..=1e6, 1.);
-        optional_color(ui, "Background fill", &mut config.background, [255; 3]);
-    });
+    if !functions_only {
+        ui.collapsing("Frame", |ui| {
+            number_field(ui, "Width", &mut size[0], 48. ..=1e6, 1.);
+            number_field(ui, "Height", &mut size[1], 48. ..=1e6, 1.);
+            optional_color(ui, "Background fill", &mut config.background, [255; 3]);
+        });
+    }
+}
+
+fn general_fields(ui: &mut egui::Ui, config: &mut Config, size: &mut Point) {
+    config_fields(ui, config, size, false);
+}
+fn function_fields(ui: &mut egui::Ui, config: &mut Config) {
+    config_fields(ui, config, &mut [0., 0.], true);
 }
 fn plots(ui: &mut egui::Ui, plots: &mut Vec<Plot>, surface: bool) {
     let mut remove = None;
@@ -772,6 +837,7 @@ mod tests {
                 ..Plot::new(1, false)
             },
         ];
+        configured.tikz_source = crate::coordinate_tikz::generate(&configured.config);
         assert!(board.drawing.replace_coordinate(configured.clone()));
         let snapshot = board.drawing.snapshot(id).unwrap().clone();
         let moved = snapshot.transformed(Placement {
@@ -805,6 +871,7 @@ mod tests {
         };
         assert_ne!(*new_id, id);
         assert_eq!(copy.config, configured.config);
+        assert_eq!(copy.tikz_source, configured.tikz_source);
         assert_eq!(copy.placement.rotation, moved.placement.rotation);
         assert_eq!(copy.surface, page_surface);
 
@@ -826,6 +893,7 @@ mod tests {
     fn unified_dialog_drafts_are_transactional_and_preview_invalid_input_safely() {
         let ctx = egui::Context::default();
         let (mut board, surface) = setup(DocumentKind::Whiteboard);
+        board.coordinate_preset = Preset::FourQuadrants;
         board.insert_coordinate(surface, [320., 250.]);
         let id = board.selected_coordinate().unwrap().id;
         let before = board.drawing.snapshot(id).unwrap().clone();
@@ -842,18 +910,27 @@ mod tests {
             })
         };
         frame(vec![]);
+        let visible = frame(vec![]);
+        assert!(visible.contains_key("General"));
+        assert!(visible.contains_key("Functions"));
+        assert!(visible.contains_key("TikZ Editor"));
+        assert!(visible.contains_key("Live Preview"));
         let cancel = frame(vec![])["Cancel"];
         frame(pointer(cancel, true));
         frame(pointer(cancel, false));
         assert!(board.coordinate_draft.is_none());
         assert_eq!(board.drawing.snapshot(id), Some(&before));
 
+        let baseline = board.selected_coordinate().unwrap().config.clone();
         board.open_coordinate(id);
         {
             let draft = board.coordinate_draft.as_mut().unwrap();
-            draft.value.set_preset(Preset::Octant);
-            draft.value.surfaces.push(Plot::new(0, true));
-            draft.value.azimuth = 62.;
+            draft.tab = CoordinateTab::Tikz;
+            let range = draft.value.axes[0].range;
+            let old = format!("({},0) -- ({},0)", range[0], range[1]);
+            draft.tikz_source =
+                crate::coordinate_tikz::generate(&draft.value).replace(&old, "(-9,0) -- (9,0)");
+            draft.value = crate::coordinate_tikz::parse(&draft.tikz_source, &draft.value).unwrap();
         }
         let mut frame = |events| {
             render(&ctx, events, |ui| {
@@ -867,8 +944,9 @@ mod tests {
         assert!(board.coordinate_draft.is_none());
         let committed = board.selected_coordinate().unwrap();
         assert_eq!(committed.id, id);
-        assert_eq!(committed.config.preset, Preset::Octant);
-        assert_eq!(committed.config.azimuth, 62.);
+        assert_eq!(committed.config.preset, baseline.preset);
+        assert_eq!(committed.config.axes[0].range, [-9., 9.]);
+        assert!(committed.tikz_source.contains("(-9,0) -- (9,0)"));
         board.undo();
         assert_eq!(board.drawing.snapshot(id), Some(&before));
     }

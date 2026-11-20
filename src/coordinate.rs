@@ -272,6 +272,9 @@ pub struct Coordinate {
     pub size: Point,
     pub locked: bool,
     pub config: std::sync::Arc<Config>,
+    /// Last valid, editable TikZ-subset source applied to this diagram.
+    #[serde(default)]
+    pub tikz_source: String,
 }
 
 impl Coordinate {
@@ -288,6 +291,7 @@ impl Coordinate {
             size,
             locked: false,
             config: std::sync::Arc::new(Config::new(preset)),
+            tikz_source: String::new(),
         }
     }
     pub fn valid(&self) -> bool {

@@ -1232,6 +1232,16 @@ coordinates. Color and viewpoint edits reuse unchanged samples. Canvas
 translation and rotation compose with that frame and reuse the geometry.
 Preview and canvas share the same vector renderer.
 
+The authored coordinate snapshot also retains its last valid TikZ-subset source.
+The modal keeps a private draft containing structured settings and editor text.
+Parsing is bounded and allowlisted, with no TeX process or external resources.
+Supported edits update the same `Config`; malformed source leaves the last valid
+configuration available for preview and cannot be applied. Tab switches do not
+regenerate source. A graphical edit regenerates managed statements while
+retaining authored comments. The source parser and generator live in
+`coordinate_tikz.rs`; the dialog and shared preview layout live in
+`canvas_coordinates.rs`.
+
 The 2D mapping centers ranges in the frame and uses equal distances per unit
 unless explicitly disabled. The 3D orthographic basis projects the positive
 octant and a bounded wireframe. Surface domain and axis clipping are in
