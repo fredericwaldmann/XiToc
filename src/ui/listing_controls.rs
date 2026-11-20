@@ -27,27 +27,49 @@ fn number<T: egui::emath::Numeric>(
     });
 }
 
+/// A ComboBox opens a root popup, so use a submenu inside contextual menus.
+pub(crate) fn choice(
+    ui: &mut egui::Ui,
+    id: impl egui::AsIdSalt,
+    label: impl Into<egui::WidgetText>,
+    options: impl FnOnce(&mut egui::Ui),
+) {
+    let label = label.into();
+    if egui::containers::menu::is_in_menu(ui) {
+        ui.push_id(id, |ui| ui.menu_button(label, options));
+    } else {
+        egui::ComboBox::from_id_salt(id)
+            .selected_text(label)
+            .show_ui(ui, options);
+    }
+}
+
 pub(crate) fn style_fields(ui: &mut egui::Ui, style: &mut Style) {
-    egui::ComboBox::from_id_salt("listing-typeface")
-        .selected_text(match style.typeface {
+    choice(
+        ui,
+        "listing-typeface",
+        match style.typeface {
             Typeface::DejaVu => "DejaVu Sans Mono",
             Typeface::UiMonospace => "Interface Monospace",
-        })
-        .show_ui(ui, |ui| {
+        },
+        |ui| {
             ui.selectable_value(&mut style.typeface, Typeface::DejaVu, "DejaVu Sans Mono");
             ui.selectable_value(
                 &mut style.typeface,
                 Typeface::UiMonospace,
                 "Interface Monospace",
             );
-        });
+        },
+    );
     number(ui, "Font size", &mut style.size, 6. ..=72.);
     number(ui, "Line spacing", &mut style.spacing, 1. ..=3.);
     color(ui, "Background", &mut style.background);
     number(ui, "Background opacity", &mut style.opacity, 0..=255);
-    egui::ComboBox::from_id_salt("listing-frame")
-        .selected_text(format!("{:?}", style.frame))
-        .show_ui(ui, |ui| {
+    choice(
+        ui,
+        "listing-frame",
+        format!("Frame · {:?}", style.frame),
+        |ui| {
             for (frame, name) in [
                 (Frame::None, "No frame"),
                 (Frame::Single, "Single"),
@@ -56,18 +78,22 @@ pub(crate) fn style_fields(ui: &mut egui::Ui, style: &mut Style) {
             ] {
                 ui.selectable_value(&mut style.frame, frame, name);
             }
-        });
+        },
+    );
     if style.frame != Frame::None {
         color(ui, "Frame color", &mut style.rule);
         number(ui, "Frame thickness", &mut style.thickness, 0. ..=12.);
     }
-    egui::ComboBox::from_id_salt("listing-numbers")
-        .selected_text(format!("Line numbers · {:?}", style.numbers))
-        .show_ui(ui, |ui| {
+    choice(
+        ui,
+        "listing-numbers",
+        format!("Line numbers · {:?}", style.numbers),
+        |ui| {
             for mode in [Numbers::None, Numbers::Left, Numbers::Right] {
                 ui.selectable_value(&mut style.numbers, mode, format!("{mode:?}"));
             }
-        });
+        },
+    );
     if style.numbers != Numbers::None {
         color(ui, "Number color", &mut style.number_color);
         number(ui, "Number size", &mut style.number_size, 6. ..=72.);

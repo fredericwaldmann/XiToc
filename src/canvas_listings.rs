@@ -543,14 +543,12 @@ impl Canvas {
         ui.weak("Read-only source");
         ui.add_enabled_ui(!self.drawing.is_locked(file.id), |ui| {
             let lang = Self::listing_language(file, model, &style).to_owned();
-            egui::ComboBox::from_id_salt(("listing-language", file.id))
-                .selected_text(lang)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut model.language, None, "Automatic / style");
-                    for &(language, _) in listing::LANGUAGES {
-                        ui.selectable_value(&mut model.language, Some(language.into()), language);
-                    }
-                });
+            crate::ui::listing_controls::choice(ui, ("listing-language", file.id), lang, |ui| {
+                ui.selectable_value(&mut model.language, None, "Automatic / style");
+                for &(language, _) in listing::LANGUAGES {
+                    ui.selectable_value(&mut model.language, Some(language.into()), language);
+                }
+            });
             let names: std::collections::BTreeSet<_> = listing::PRESETS
                 .into_iter()
                 .chain(global.keys().map(String::as_str))
@@ -561,31 +559,29 @@ impl Canvas {
             } else {
                 model.style_name.clone()
             };
-            egui::ComboBox::from_id_salt(("listing-style", file.id))
-                .selected_text(caption)
-                .show_ui(ui, |ui| {
-                    for name in names {
-                        let scope = if document.contains_key(name) {
-                            " · Document"
-                        } else if global.contains_key(name) {
-                            " · Global"
-                        } else {
-                            ""
-                        };
-                        if ui
-                            .selectable_label(
-                                model.style_name == name && model.overrides.is_none(),
-                                format!("{name}{scope}"),
-                            )
-                            .clicked()
-                        {
-                            model.style_name = name.into();
-                            model.fallback = listing::effective(name, document, global).unwrap();
-                            model.overrides = None;
-                            style = model.fallback.clone();
-                        }
+            crate::ui::listing_controls::choice(ui, ("listing-style", file.id), caption, |ui| {
+                for name in names {
+                    let scope = if document.contains_key(name) {
+                        " · Document"
+                    } else if global.contains_key(name) {
+                        " · Global"
+                    } else {
+                        ""
+                    };
+                    if ui
+                        .selectable_label(
+                            model.style_name == name && model.overrides.is_none(),
+                            format!("{name}{scope}"),
+                        )
+                        .clicked()
+                    {
+                        model.style_name = name.into();
+                        model.fallback = listing::effective(name, document, global).unwrap();
+                        model.overrides = None;
+                        style = model.fallback.clone();
                     }
-                });
+                }
+            });
             let before = style.clone();
             egui::ScrollArea::vertical()
                 .max_height(300.)

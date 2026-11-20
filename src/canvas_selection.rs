@@ -2009,7 +2009,7 @@ impl Canvas {
     fn object_format_controls(&mut self, ui: &mut egui::Ui) {
         if let Some(attachment) = self.selected_attachment() {
             if attachment.listing.is_some() {
-                ui.menu_button("Code Listing", |ui| {
+                crate::ui::shape_controls::menu(ui, "Code Listing", |ui| {
                     self.listing_controls(ui, &attachment);
                     ui.separator();
                     self.attachment_menu(ui, attachment);
