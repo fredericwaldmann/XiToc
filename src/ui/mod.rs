@@ -42,5 +42,3 @@ pub fn new_choices(ui: &mut egui::Ui, folder: &str, action: &mut Option<Action>)
         });
     }
 }
-
-pub(crate) mod listing_controls;

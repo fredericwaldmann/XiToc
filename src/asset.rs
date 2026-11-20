@@ -8,13 +8,19 @@ pub const MAX_ASSET_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_ASSETS: usize = 16;
 pub const MAX_DOCUMENT_ASSET_BYTES: usize = 128 * 1024 * 1024;
 
+#[derive(Debug)]
+struct ListingSource {
+    text: Arc<str>,
+    lines: usize,
+}
+
 #[derive(Debug, Serialize)]
 pub struct BinaryAsset {
     id: AssetId,
     #[serde(with = "encoded_bytes")]
     bytes: Arc<[u8]>,
     #[serde(skip)]
-    listing_text: std::sync::OnceLock<Option<Arc<str>>>,
+    listing_text: std::sync::OnceLock<Option<ListingSource>>,
 }
 
 impl BinaryAsset {
@@ -32,16 +38,24 @@ impl BinaryAsset {
         self.listing_source().is_some()
     }
     pub fn listing_source(&self) -> Option<&str> {
+        self.decoded_listing().map(|source| source.text.as_ref())
+    }
+    pub fn listing_line_count(&self) -> usize {
+        self.decoded_listing().map_or(0, |source| source.lines)
+    }
+    fn decoded_listing(&self) -> Option<&ListingSource> {
         self.listing_text
             .get_or_init(|| {
-                let text = crate::code_listing::source(&self.bytes).ok()?;
-                if text.contains('\r') {
-                    Some(text.replace("\r\n", "\n").replace('\r', "\n").into())
+                let original = crate::code_listing::source(&self.bytes).ok()?;
+                let text: Arc<str> = if original.contains('\r') {
+                    original.replace("\r\n", "\n").replace('\r', "\n").into()
                 } else {
-                    Some(text.into())
-                }
+                    original.into()
+                };
+                let lines = crate::code_listing::line_count(&text);
+                Some(ListingSource { text, lines })
             })
-            .as_deref()
+            .as_ref()
     }
     pub fn id(&self) -> AssetId {
         self.id

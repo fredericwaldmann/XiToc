@@ -65,7 +65,6 @@ impl Editor {
         let clip = ui.clip_rect();
         ui.set_clip_rect(clip.intersect(ui.available_rect_before_wrap()));
         self.canvas.begin_frame(ui);
-        self.canvas.scroll_listing(ui);
         match data.layout() {
             Layout::Page { pages } => self.pages(ui, data, pages),
             Layout::Whiteboard { .. } => self.whiteboard(ui),
@@ -106,21 +105,50 @@ impl Editor {
             .show(ui, |ui| {
                 let width = (available.x - 2.0 * style::PAGE_GAP).clamp(210.0, 794.0)
                     * self.viewport.zoom as f32;
-                let content_width = available.x.max(width + 2.0 * style::PAGE_GAP);
+                let extents: Vec<_> = pages
+                    .iter()
+                    .enumerate()
+                    .map(|(index, page)| {
+                        let paper = [
+                            page.width_mm * POINTS_PER_MM,
+                            page.height_mm * POINTS_PER_MM,
+                        ];
+                        let scale = f64::from(width) / paper[0];
+                        let bounds = self.canvas.page_listing_bounds(Surface::Page(index), paper);
+                        let extent = Vec2::new(
+                            ((bounds.max[0] - bounds.min[0]) * scale) as f32,
+                            ((bounds.max[1] - bounds.min[1]) * scale) as f32,
+                        );
+                        let offset = Vec2::new(
+                            (-bounds.min[0] * scale) as f32,
+                            (-bounds.min[1] * scale) as f32,
+                        );
+                        (scale, extent, offset)
+                    })
+                    .collect();
+                let widest = extents
+                    .iter()
+                    .map(|(_, extent, _)| extent.x)
+                    .fold(width, f32::max);
+                let content_width = available.x.max(widest + 2.0 * style::PAGE_GAP);
                 ui.set_min_width(content_width);
                 ui.add_space(style::PAGE_GAP);
-                for (index, page) in pages.iter().enumerate() {
+                for (index, (page, (scale, extent, offset))) in
+                    pages.iter().zip(extents).enumerate()
+                {
                     let size = Vec2::new(width, width * (page.height_mm / page.width_mm) as f32);
                     ui.horizontal(|ui| {
-                        ui.add_space((content_width - width) * 0.5);
-                        let (response, painter) = ui.allocate_painter(
-                            size,
+                        ui.add_space((content_width - extent.x) * 0.5);
+                        let (response, _) = ui.allocate_painter(
+                            extent,
                             if pan {
                                 Sense::hover()
                             } else {
                                 Sense::click_and_drag()
                             },
                         );
+                        let paper = egui::Rect::from_min_size(response.rect.min + offset, size);
+                        let painter = ui.painter().with_clip_rect(paper.intersect(ui.clip_rect()));
                         // Shadow extends beyond the page allocation, but stays clipped
                         // to the surrounding scroll viewport.
                         ui.painter().add(
@@ -130,25 +158,24 @@ impl Editor {
                                 spread: 1,
                                 color: Color32::from_black_alpha(28),
                             }
-                            .as_shape(response.rect, 0),
+                            .as_shape(paper, 0),
                         );
-                        painter.rect_filled(response.rect, 0.0, Color32::WHITE);
+                        painter.rect_filled(paper, 0.0, Color32::WHITE);
                         painter.rect_stroke(
-                            response.rect,
+                            paper,
                             0.0,
                             Stroke::new(0.75, Color32::from_gray(194)),
                             StrokeKind::Inside,
                         );
                         let view = Transform {
-                            origin: [response.rect.left() as f64, response.rect.top() as f64],
+                            origin: [paper.left() as f64, paper.top() as f64],
                             center: [0.0; 2],
-                            scale: width as f64 / (page.width_mm * POINTS_PER_MM),
+                            scale,
                         };
                         if self.grid_visible() {
-                            self.grid(&painter, response.rect, view, p.dot);
+                            self.grid(&painter, paper, view, p.dot);
                         }
-                        self.canvas
-                            .surface(ui, response.rect, Surface::Page(index), view);
+                        self.canvas.surface(ui, paper, Surface::Page(index), view);
                     });
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {

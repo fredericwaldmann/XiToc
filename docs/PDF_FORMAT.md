@@ -236,12 +236,12 @@ security policy and platform. [ISO 32000 clause 7](https://pdf-issues.pdfa.org/3
 
 ## Code listing preparation (#64)
 
-Future serialization pairs readable PDF text and frame graphics with structured
-listing metadata in the private payload. Persist identity, ownership, geometry,
-language override, named style, fallback style, local appearance overrides and
-document style definitions. Preserve the original filename and resource hash
-and deduplicate original source bytes into EmbeddedFile streams alongside other
-assets. A resolved style snapshot supports portable reopening when a global style
-is unavailable. Use the existing font and glyph-fallback strategy for visible
-text. Transient scroll position, grammar spans and selections are excluded.
-The blank PDF writer does not serialize listing objects.
+M2 must embed the last valid source snapshot and original filename with
+ownership, identity, placement, dimensions, preferred width, preset
+reference and resolved style, authored configuration, line selection and
+title state. Render every selected source line in the conventional PDF
+representation, with predictable pagination for page overflow. Preserve
+original source-line identities. A persisted path or portable relative
+reference is an untrusted reconnect hint. Reopening a PDF must never read a
+local link without explicit approval and must display the embedded snapshot
+without requiring the original source. This feature adds no PDF serialization.

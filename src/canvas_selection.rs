@@ -28,7 +28,7 @@ pub(super) enum SelectionGesture {
         revision: u64,
         surface: Surface,
         source: Arc<crate::attachment::Attachment>,
-        preview: crate::attachment::Attachment,
+        preview: Box<crate::attachment::Attachment>,
         index: usize,
         start: Point,
     },
@@ -118,7 +118,7 @@ pub(super) fn selection_preview_ids<'a>(
 impl Canvas {
     pub fn selection_action(&mut self, command: SelectionCommand, ctx: &egui::Context) {
         use SelectionCommand::*;
-        if self.listing_inspector.is_some() {
+        if self.listing_config.is_some() {
             return;
         }
         if self.text_action(command, ctx) {
@@ -207,7 +207,7 @@ impl Canvas {
             }
             Duplicate => {
                 self.finish();
-                if let Some(bundle) = self.selected_bundle(false) {
+                if let Some(bundle) = self.selected_bundle() {
                     let ids = bundle.duplicate(&mut self.drawing, self.selection.surface);
                     self.selection
                         .change(ids, Membership::Replace, &self.drawing);
@@ -289,7 +289,7 @@ impl Canvas {
         }
     }
     fn copy_selection(&mut self, ctx: &egui::Context) -> bool {
-        let Some(bundle) = self.selected_bundle(true) else {
+        let Some(bundle) = self.selected_bundle() else {
             return false;
         };
         match bundle.encode() {
@@ -370,7 +370,7 @@ impl Canvas {
             self.notice = Some("No XiToc session copy available. Copy a selection first, or use Ctrl/Cmd+V for a system clipboard payload.".into());
         }
     }
-    fn selected_bundle(&mut self, freeze_listing_style: bool) -> Option<ObjectBundle> {
+    fn selected_bundle(&mut self) -> Option<ObjectBundle> {
         if self.selection.ids.is_empty() {
             return None;
         }
@@ -380,13 +380,7 @@ impl Canvas {
                 .items()
                 .iter()
                 .filter(|o| expanded.contains(&o.id()))
-                .map(|object| {
-                    if freeze_listing_style {
-                        self.effective_listing_for_clipboard(object)
-                    } else {
-                        object.clone()
-                    }
-                }),
+                .cloned(),
         ) {
             Ok(bundle) => Some(bundle),
             Err(e) => {
@@ -880,6 +874,7 @@ impl Canvas {
         scale: f64,
         shift: bool,
         bypass: bool,
+        painter: Option<&egui::Painter>,
     ) {
         match &mut self.selection_gesture {
             Some(SelectionGesture::AttachmentResize {
@@ -891,7 +886,7 @@ impl Canvas {
                 ..
             }) if *s == surface => {
                 let movement = [point[0] - start[0], point[1] - start[1]];
-                if movement[0].hypot(movement[1]) * scale < 3. && *preview == **source {
+                if movement[0].hypot(movement[1]) * scale < 3. && **preview == **source {
                     return;
                 }
                 let original = source.handles();
@@ -899,7 +894,22 @@ impl Canvas {
                     original[*index][0] + movement[0],
                     original[*index][1] + movement[1],
                 ];
+                let mut fit = |file: &mut crate::attachment::Attachment| {
+                    if let Some(painter) = painter
+                        && file.listing.is_some()
+                    {
+                        let layout = self.listing_measurements.entry(source.id).or_default();
+                        listings_ui::fit_resize(
+                            &mut self.listing_cache,
+                            layout,
+                            painter,
+                            file,
+                            *index,
+                        );
+                    }
+                };
                 let mut next = source.resized(*index, target);
+                fit(&mut next);
                 if let Some(snap) = &mut self.snap_session {
                     let grip = next.handles()[*index];
                     let anchor = original[(*index + 4) % 8];
@@ -916,6 +926,7 @@ impl Canvas {
                     );
                     if point != grip {
                         next = source.resized(*index, point);
+                        fit(&mut next);
                     }
                     let grip = next.handles()[*index];
                     snap.reconcile(if rotated {
@@ -928,7 +939,7 @@ impl Canvas {
                     });
                 }
                 if self.drawing.valid_object(&next.clone().into()) {
-                    *preview = next;
+                    **preview = next;
                 }
             }
             Some(SelectionGesture::ImageResize {
@@ -1314,7 +1325,8 @@ impl Canvas {
             Some(SelectionGesture::AttachmentResize {
                 revision, preview, ..
             }) => {
-                if self.drawing.revision() == revision && self.drawing.replace_attachment(preview) {
+                if self.drawing.revision() == revision && self.drawing.replace_attachment(*preview)
+                {
                     self.prune_cache();
                 }
             }
@@ -1535,7 +1547,7 @@ impl Canvas {
                         self.selection_gesture = Some(SelectionGesture::AttachmentResize {
                             revision: self.drawing.revision(),
                             surface,
-                            preview: (*source).clone(),
+                            preview: Box::new((*source).clone()),
                             source,
                             index,
                             start: point,
@@ -1642,6 +1654,7 @@ impl Canvas {
                             transform.scale,
                             modifiers.shift,
                             modifiers.alt,
+                            Some(ui.painter()),
                         );
                     }
                 }
@@ -1651,6 +1664,7 @@ impl Canvas {
                     transform.scale,
                     ui.input(|i| i.modifiers.shift),
                     ui.input(|i| i.modifiers.alt),
+                    Some(ui.painter()),
                 ),
                 Event::PointerButton {
                     pos,
@@ -1677,6 +1691,7 @@ impl Canvas {
                             transform.scale,
                             modifiers.shift,
                             modifiers.alt,
+                            Some(ui.painter()),
                         );
                         if let Some(SelectionGesture::Rotate {
                             moved, started_at, ..
@@ -2007,16 +2022,10 @@ impl Canvas {
         }
     }
     fn object_format_controls(&mut self, ui: &mut egui::Ui) {
-        if let Some(attachment) = self.selected_attachment() {
-            if attachment.listing.is_some() {
-                crate::ui::shape_controls::menu(ui, "Code Listing", |ui| {
-                    self.listing_controls(ui, &attachment);
-                    ui.separator();
-                    self.attachment_menu(ui, attachment);
-                });
-            } else {
-                ui.menu_button("Attachment", |ui| self.attachment_menu(ui, attachment));
-            }
+        if let Some(attachment) = self.selected_attachment()
+            && attachment.listing.is_none()
+        {
+            ui.menu_button("Attachment", |ui| self.attachment_menu(ui, attachment));
         }
         if self.selected_image().is_some() {
             ui.menu_button("Image", |ui| self.image_controls(ui));

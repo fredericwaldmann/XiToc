@@ -869,3 +869,7 @@ binary resources, offline grammar highlighting, three presets, reusable
 global and document styles, validated listing directives, and the existing
 file and canvas commands. Source replacement and document styles participate
 in history. PDF round-trip support remains M2 work.
+
+## Scientific Code Listings
+
+Revised #64 to replace contextual controls and source inspection with one LaTeX-style dialog. Added persisted presets and default, original-line selection, content-sized frames, and native link refresh with snapshot fallback.

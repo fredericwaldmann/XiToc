@@ -598,7 +598,10 @@ impl Drawing {
             ObjectSnapshot::Attachment(a) => {
                 a.valid()
                     && a.document_id == self.owner
-                    && a.corners().iter().all(|p| self.contains(a.surface, *p))
+                    && (a.corners().iter().all(|p| self.contains(a.surface, *p))
+                        || (a.listing.is_some()
+                            && self.bounds(a.surface).is_some()
+                            && self.contains(a.surface, a.placement.apply([0.; 2]))))
             }
             ObjectSnapshot::Image(i) => {
                 i.valid()
@@ -695,6 +698,32 @@ impl Drawing {
             .into_iter()
             .map(|(id, a)| (id, Arc::downgrade(&a)))
             .collect();
+        true
+    }
+
+    /// Reconcile derived listing layout and linked bytes without advancing the journal.
+    pub fn sync_listing(&mut self, attachment: crate::attachment::Attachment) -> bool {
+        let id = attachment.id;
+        let Some(&index) = self.object_slots.get(&id) else {
+            return false;
+        };
+        let ObjectSnapshot::Attachment(original) = &self.items[index] else {
+            return false;
+        };
+        if original.listing.is_none()
+            || attachment.listing.is_none()
+            || *original.as_ref() == attachment
+        {
+            return false;
+        }
+        let mut value = ObjectSnapshot::from(attachment);
+        if !self.valid_object(&value) || !self.intern_assets(std::slice::from_mut(&mut value)) {
+            return false;
+        }
+        self.items[index] = value;
+        self.normalize_groups();
+        self.refresh_ink_view();
+        self.revision += 1;
         true
     }
 

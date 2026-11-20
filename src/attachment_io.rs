@@ -6,7 +6,7 @@ use crate::{
 };
 use std::sync::{Arc, mpsc};
 
-type FileData = (String, Arc<BinaryAsset>);
+pub(crate) type FileData = (String, Arc<BinaryAsset>);
 
 pub enum ResultEvent {
     Import(
@@ -15,6 +15,7 @@ pub enum ResultEvent {
         Result<FileData, String>,
         bool,
         Option<bool>,
+        Option<String>,
     ),
     PickerClosed,
     Done(String),
@@ -85,6 +86,7 @@ impl AttachmentIo {
                         loaded(name, crate::image_import::read_path(&path)),
                         false,
                         listing,
+                        listing.and_then(|_| approve_path(&path)),
                     ),
                 );
             }
@@ -107,10 +109,46 @@ impl AttachmentIo {
                 send(
                     &tx,
                     &ctx,
-                    ResultEvent::Import(offset(target, index), scope, result, false, listing),
+                    ResultEvent::Import(offset(target, index), scope, result, false, listing, None),
                 );
             }
             finish_picker(&tx, &ctx, extra);
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn listing_path(
+        &mut self,
+        ctx: egui::Context,
+        target: Target,
+        scope: uuid::Uuid,
+        path: String,
+    ) {
+        if self.picker_open {
+            return;
+        }
+        self.picker_open = true;
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let path = std::path::PathBuf::from(path);
+            let result =
+                if path.is_absolute() && path.to_str().is_some_and(|value| value.len() <= 16384) {
+                    load_link(&path)
+                } else {
+                    Err("Use an absolute UTF-8 file path up to 16 KiB.".into())
+                };
+            let link = result.as_ref().ok().and_then(|_| approve_path(&path));
+            let result = result.and_then(|data| {
+                link.as_ref()
+                    .map(|_| data)
+                    .ok_or_else(|| "Use an absolute UTF-8 file path.".into())
+            });
+            send(
+                &tx,
+                &ctx,
+                ResultEvent::Import(target, Some(scope), result, false, Some(false), link),
+            );
+            finish_picker(&tx, &ctx, false);
         });
     }
 
@@ -144,7 +182,7 @@ impl AttachmentIo {
             send(
                 &tx,
                 &ctx,
-                ResultEvent::Import(target, scope, result, true, None),
+                ResultEvent::Import(target, scope, result, true, None, None),
             );
         });
         #[cfg(target_arch = "wasm32")]
@@ -157,7 +195,7 @@ impl AttachmentIo {
             send(
                 &tx,
                 &ctx,
-                ResultEvent::Import(target, scope, result, true, None),
+                ResultEvent::Import(target, scope, result, true, None, None),
             );
         });
     }
@@ -527,5 +565,135 @@ mod tests {
         );
         assert_eq!(original_name("../../test.xlsx"), Some("test.xlsx"));
         assert_eq!(original_name("folder\\payload.zip"), Some("payload.zip"));
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn approved_paths() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static PATHS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    PATHS.get_or_init(Default::default)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn approve_path(path: &std::path::Path) -> Option<String> {
+    let path = path
+        .is_absolute()
+        .then(|| path.to_str())
+        .flatten()?
+        .to_owned();
+    approved_paths().lock().ok()?.insert(path.clone());
+    Some(path)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn approved_link(path: &str) -> bool {
+    approved_paths()
+        .lock()
+        .is_ok_and(|paths| paths.contains(path))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_link(path: &std::path::Path) -> Result<FileData, String> {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("Use a UTF-8 source filename.")?;
+    let data = loaded(name, crate::image_import::read_path(path))?;
+    if !data.1.listing_text() {
+        return Err("The source is not valid UTF-8 text.".into());
+    }
+    Ok(data)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LinkStamp {
+    modified: std::time::SystemTime,
+    created: Option<std::time::SystemTime>,
+    len: u64,
+    #[cfg(unix)]
+    identity: (u64, u64, i64, i64),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl LinkStamp {
+    fn read(path: &std::path::Path) -> Result<Self, String> {
+        let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+        if !metadata.is_file() {
+            return Err("Source is not a regular file.".into());
+        }
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Ok(Self {
+            modified: metadata.modified().map_err(|e| e.to_string())?,
+            created: metadata.created().ok(),
+            len: metadata.len(),
+            #[cfg(unix)]
+            identity: (
+                metadata.dev(),
+                metadata.ino(),
+                metadata.ctime(),
+                metadata.ctime_nsec(),
+            ),
+        })
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn poll_link(
+    path: &str,
+    previous: Option<LinkStamp>,
+) -> Result<Option<(LinkStamp, FileData)>, String> {
+    let path = std::path::Path::new(path);
+    let stamp = LinkStamp::read(path)?;
+    if previous.as_ref() == Some(&stamp) {
+        return Ok(None);
+    }
+    let data = load_link(path)?;
+    if LinkStamp::read(path)? != stamp {
+        return Err("Source changed during reading. Retrying.".into());
+    }
+    Ok(Some((stamp, data)))
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod listing_links_tests {
+    use super::*;
+
+    #[test]
+    fn polling_skips_unchanged_files_and_recovers_from_missing_and_invalid_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("source.rs");
+        let link = path.to_str().unwrap();
+        std::fs::write(&path, b"first\r\n").unwrap();
+        let (stamp, (_, snapshot)) = poll_link(link, None).unwrap().unwrap();
+        assert!(poll_link(link, Some(stamp.clone())).unwrap().is_none());
+        std::fs::remove_file(&path).unwrap();
+        assert!(poll_link(link, Some(stamp.clone())).is_err());
+        assert_eq!(snapshot.bytes(), b"first\r\n");
+        std::fs::write(&path, b"\0invalid").unwrap();
+        assert!(poll_link(link, None).is_err());
+        std::fs::write(&path, b"restored\r\n").unwrap();
+        let (restored_stamp, (_, restored)) = poll_link(link, None).unwrap().unwrap();
+        assert_eq!(restored.bytes(), b"restored\r\n");
+        assert_ne!(snapshot.id(), restored.id());
+        assert!(poll_link(link, Some(restored_stamp)).unwrap().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn polling_follows_atomic_replacement_at_the_original_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("source.py");
+        let tmp = dir.path().join("replacement.tmp");
+        std::fs::write(&path, b"first").unwrap();
+        let (stamp, _) = poll_link(path.to_str().unwrap(), None).unwrap().unwrap();
+        std::fs::write(&tmp, b"other").unwrap();
+        std::fs::rename(tmp, &path).unwrap();
+        let (_, (_, new)) = poll_link(path.to_str().unwrap(), Some(stamp))
+            .unwrap()
+            .unwrap();
+        assert_eq!(new.bytes(), b"other");
     }
 }

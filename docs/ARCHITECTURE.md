@@ -1193,28 +1193,24 @@ opaque mesh payload and translucent rebuild work using the existing renderer.
 It adds no stroke textures, shaders or native/WASM-specific GPU resources.
 The canonical editable path and independent PDF storage rules are unaffected.
 
-## File-based code listings (#64)
+## Scientific Code Listings (#64)
 
-A listing is a distinct CanvasObject type carried by the file-backed attachment
-snapshot. It shares the original-byte BinaryAsset, page ownership, oriented
-frame, intrinsic resize, placement, clipboard resource table and history.
-The byte asset owns a lazily initialized UTF-8 display view shared by copies.
-Display removes a UTF-8 BOM and normalizes CRLF and CR to LF. File export and
-native snapshot opening use the original bytes. Source inspection uses an
-immutable egui text buffer. No source-edit command or writable buffer exists.
+Listings share Attachment geometry and the original-byte BinaryAsset.
+Authored state includes source path, preset snapshot, configuration text,
+line-range expression, title policy and preferred width. The app's existing
+LaTeX preferences persist named style snapshots and the import default.
+Listing directives stay separate from mathematical configuration.
 
-A style reference resolves against document styles, global styles, then
-built-ins. A listing can carry an individual appearance override and holds a
-fallback snapshot. Cross-document clipboard captures the effective appearance
-so a same-named style in the destination cannot change a pasted listing.
-Document styles travel through the LaTeX configuration history. The listing
-directive parser is separate from math source processing. Application styles
-use the existing LaTeX preferences storage.
+Canvas caches decoded text, offline highlighting, measured dimensions and
+text galleys. Layout uses all selected original lines and computes its frame
+from wrapped rows and title. Rendering culls source rows against the canvas
+viewport. Page overflow reserves editor margin without changing paper
+geometry. The same oriented frame and journal carry placement and geometry.
 
-The render adapter uses two-face/Syntect grammar scopes and a pure-Rust regex
-backend on desktop and WASM. Grammar spans and line offsets are cached by asset
-and language. Only visible canvas rows are laid out. Object movement and
-rotation reuse layout; font, style, zoom, width, height, language, source and
-scroll changes invalidate it. Highlight parsing is bounded to the first 8,192
-lines or 512 KiB, with plain text beyond the budget and on oversized lines.
-Display and original file exports retain the full source.
+Native polling does metadata checks and reads changed paths on a worker.
+Only paths explicitly chosen in this process are approved. Clipboard links
+are hints unless that path is already approved. Automatic synchronization
+updates the live object and derived bounds outside journal entries. Undo
+restores authored state, then the watcher reconciles the restored active
+link. Invalid or missing files retain the last valid snapshot. Web uses
+snapshots and explicit reselection. See [Code Listings](CODE_LISTINGS.md).

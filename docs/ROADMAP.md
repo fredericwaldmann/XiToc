@@ -358,10 +358,10 @@ pressure-aware sweep for wide opaque ink. Keep one coverage contribution per
 stroke at self-crossings. Release benchmarks track continuous input and mixed
 documents through the actual canvas controller and egui mesh assembly.
 
-## File-based Code Listings (#64)
+## Scientific Code Listings (#64)
 
-Whiteboards and Page Notes can display read-only, restylable code from imported
-files. The shared binary asset and journal retain originals and support source
-replacement, cross-document clipboard and standard transforms. Global and
-document LaTeX settings expose reusable listing styles. Object persistence
-and the visible PDF listing representation remain M2.
+Import source into a read-only listing on either canvas. A single LaTeX-style
+configuration dialog manages the source path, presets, formatting, exact line
+ranges and title. Native links update in the background with snapshot
+fallback. Canvas layout grows with visible content and reports page overflow.
+M2 owns the visible PDF output and round trip.

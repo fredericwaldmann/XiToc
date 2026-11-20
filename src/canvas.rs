@@ -32,7 +32,6 @@ mod listings_ui;
 mod shapes_ui;
 #[path = "canvas_text.rs"]
 mod text_ui;
-pub(crate) use listings_ui::listing_style_preview;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
@@ -399,12 +398,12 @@ const MESH_SEGMENTS: usize = 128;
 pub struct Canvas {
     image_cache_revision: Option<u64>,
     image_imports: crate::image_import::Imports,
-    listing_inspector: Option<Uuid>,
-    listing_focus: bool,
-    listing_page: usize,
-    listing_inspector_galley: Option<listings_ui::InspectorGalley>,
+    listing_config: Option<listings_ui::ListingDraft>,
+    listing_preview: Option<crate::attachment::Attachment>,
+    #[cfg(not(target_arch = "wasm32"))]
+    listing_watch: listings_ui::ListingWatch,
     listing_layouts: HashMap<Uuid, listings_ui::ListingLayout>,
-    listing_scroll: HashMap<Uuid, f32>,
+    listing_measurements: HashMap<Uuid, listings_ui::ListingLayout>,
     listing_cache: HashMap<(crate::asset::AssetId, String), listings_ui::SourcePreview>,
     attachment_io: crate::attachment_io::AttachmentIo,
     attachment_rename: Option<(Uuid, String)>,
@@ -475,12 +474,12 @@ impl Canvas {
         Self {
             image_cache_revision: None,
             image_imports: Default::default(),
-            listing_inspector: None,
-            listing_focus: false,
-            listing_page: 0,
-            listing_inspector_galley: None,
+            listing_config: None,
+            listing_preview: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            listing_watch: Default::default(),
             listing_layouts: Default::default(),
-            listing_scroll: Default::default(),
+            listing_measurements: Default::default(),
             listing_cache: Default::default(),
             attachment_io: Default::default(),
             attachment_rename: None,
@@ -562,9 +561,12 @@ impl Canvas {
             || self.drawing.dirty()
             || matches!(&self.gesture, Some(Gesture::Pen(stroke)) if !stroke.points.is_empty())
     }
+    pub fn dismiss_listing_configuration(&mut self) {
+        self.listing_config = None;
+        self.listing_preview = None;
+    }
+
     pub fn finish(&mut self) {
-        self.listing_inspector = None;
-        self.listing_inspector_galley = None;
         self.snap_session = None;
         self.font_browser = None;
         self.finish_text();
@@ -644,7 +646,7 @@ impl Canvas {
     fn prune_cache(&mut self) {
         self.listing_layouts
             .retain(|id, _| self.drawing.snapshot(*id).is_some());
-        self.listing_scroll
+        self.listing_measurements
             .retain(|id, _| self.drawing.snapshot(*id).is_some());
         let live: HashMap<_, _> = self
             .drawing
@@ -705,6 +707,9 @@ impl Canvas {
         }
         self.poll_images(ui.ctx());
         self.poll_attachments();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.poll_listing_sources(ui);
+        self.measure_listings(ui);
         if self.listing_dialog(ui.ctx()) || self.attachment_rename_dialog(ui.ctx()) {
             return;
         }
@@ -762,6 +767,10 @@ impl Canvas {
     }
 
     pub fn surface(&mut self, ui: &egui::Ui, bounds: Rect, surface: Surface, transform: Transform) {
+        if self.listing_config.is_some() {
+            self.paint(ui, bounds, surface, transform);
+            return;
+        }
         if self.image_surface(ui, bounds, surface, transform) {
             self.paint(ui, bounds, surface, transform);
             return;
@@ -1154,27 +1163,51 @@ impl Canvas {
                     let attachment = attachment_preview
                         .as_ref()
                         .filter(|a| a.id == source.id)
+                        .or_else(|| self.listing_preview.as_ref().filter(|a| a.id == source.id))
                         .unwrap_or(source);
-                    if let Some(model) = &attachment.listing {
-                        let style = model.style(
-                            &self.drawing.latex.listing_styles,
-                            &self.latex.listing_styles,
-                        );
-                        let language = Self::listing_language(attachment, model, &style);
+                    if attachment.listing.is_some() {
+                        let listing_painter = if matches!(surface, Surface::Page(_)) {
+                            ui.painter()
+                        } else {
+                            &painter
+                        };
                         listings_ui::paint(
                             &mut self.listing_cache,
                             self.listing_layouts.entry(attachment.id).or_default(),
-                            &painter,
+                            listing_painter,
                             transform,
                             attachment,
                             delta,
-                            &style,
-                            language,
-                            self.listing_scroll
-                                .get(&attachment.id)
-                                .copied()
-                                .unwrap_or_default(),
                         );
+                        if self.drawing.bounds(surface).is_some()
+                            && attachment
+                                .corners()
+                                .iter()
+                                .any(|&point| !self.drawing.contains(surface, point))
+                        {
+                            let anchor = transform.to_screen(attachment.placement.apply([0.; 2]));
+                            let label = egui::pos2(
+                                (anchor[0] as f32).clamp(
+                                    bounds.left() + 4.,
+                                    (bounds.right() - 112.).max(bounds.left() + 4.),
+                                ),
+                                (anchor[1] as f32).clamp(
+                                    bounds.top() + 4.,
+                                    (bounds.bottom() - 20.).max(bounds.top() + 4.),
+                                ),
+                            );
+                            let galley = painter.layout_no_wrap(
+                                "Listing exceeds page".into(),
+                                egui::FontId::proportional(11.),
+                                egui::Color32::from_rgb(92, 44, 0),
+                            );
+                            painter.rect_filled(
+                                egui::Rect::from_min_size(label, galley.size()).expand(3.),
+                                3.,
+                                egui::Color32::from_rgb(255, 227, 176),
+                            );
+                            painter.galley(label, galley, egui::Color32::from_rgb(92, 44, 0));
+                        }
                     } else {
                         Self::paint_attachment(ui, &painter, transform, attachment, delta);
                     }

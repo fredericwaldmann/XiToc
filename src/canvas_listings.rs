@@ -1,10 +1,10 @@
-//! Drawing and read-only inspection of source listings.
+//! Read-only source listing configuration and rendering.
 use super::*;
 use crate::{
     asset::{AssetId, BinaryAsset},
     attachment::Attachment,
     code_listing::{self as listing, Frame, Numbers, Style},
-    object::Placement,
+    object::{ObjectBounds, Placement},
 };
 use std::{ops::Range, sync::OnceLock};
 use two_face::re_exports::syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxSet};
@@ -20,6 +20,7 @@ enum Token {
 }
 
 struct SourceLine {
+    #[cfg(test)]
     range: Range<usize>,
     tokens: Vec<(Range<usize>, Token)>,
 }
@@ -47,7 +48,7 @@ impl SourcePreview {
         Self {
             asset: Arc::downgrade(file),
             checkpoints,
-            line_count,
+            line_count: listing::line_count(source),
             lines: parse_preview(source, language),
         }
     }
@@ -71,12 +72,24 @@ impl SourcePreview {
     }
 }
 
-type LayoutKey = (AssetId, String, Style, [f32; 2], f32, usize);
+#[derive(PartialEq)]
+struct LayoutKey {
+    asset: AssetId,
+    name: String,
+    style: Style,
+    line_ranges: String,
+    title: Option<String>,
+    width: f32,
+    scale: f32,
+    pixels_per_point: f32,
+}
 
 #[derive(Default)]
 pub(super) struct ListingLayout {
     key: Option<LayoutKey>,
     glyphs: Vec<(f32, f32, Arc<egui::Galley>)>,
+    dimensions: [f64; 2],
+    max_glyph_height: f32,
 }
 
 const MAX_HIGHLIGHT_BYTES: usize = 512 * 1024;
@@ -168,7 +181,11 @@ fn parse_preview(source: &str, language: &str) -> Vec<SourceLine> {
                 Vec::new()
             };
             at += line.len();
-            SourceLine { range, tokens }
+            SourceLine {
+                #[cfg(test)]
+                range,
+                tokens,
+            }
         })
         .collect()
 }
@@ -235,14 +252,12 @@ fn line_job(
     tokens: &[(Range<usize>, Token)],
     style: &Style,
     width: f32,
-    rows: usize,
     scale: f32,
 ) -> egui::text::LayoutJob {
     let mut job = egui::text::LayoutJob::default();
     job.wrap.max_width = width;
-    job.wrap.max_rows = if style.wrap { rows } else { 1 };
     job.wrap.break_anywhere = !style.break_at_space;
-    let end = source.floor_char_boundary(source.len().min(MAX_LINE_BYTES));
+    let end = source.len();
     let mut column = 0;
     if tokens.is_empty() {
         append_span(
@@ -268,336 +283,485 @@ fn line_job(
     job
 }
 
+pub(super) struct ListingDraft {
+    id: Uuid,
+    token: Uuid,
+    model: listing::Listing,
+    path: String,
+    selected_file: Option<(String, Arc<BinaryAsset>, Option<String>)>,
+    style_name: Option<String>,
+    error: Option<String>,
+    applying_path: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type LinkResult = Result<
+    Option<(
+        crate::attachment_io::LinkStamp,
+        crate::attachment_io::FileData,
+    )>,
+    String,
+>;
+
+#[cfg(not(target_arch = "wasm32"))]
+type WatchResults = Vec<(String, LinkResult)>;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+pub(super) struct ListingWatch {
+    next: f64,
+    pending: Option<std::sync::mpsc::Receiver<WatchResults>>,
+    reconciled: Option<u64>,
+    files: HashMap<String, WatchedFile>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct WatchedFile {
+    stamp: Option<crate::attachment_io::LinkStamp>,
+    data: Option<crate::attachment_io::FileData>,
+    unavailable: bool,
+}
+
 impl Canvas {
     pub(crate) fn choose_listing(&mut self, ctx: &egui::Context, replace: Option<Uuid>) {
         self.finish();
-        self.attachment_io.pick(
-            ctx.clone(),
-            self.image_target(replace),
-            self.drawing.editing_group,
-            Some(ctx.theme() == egui::Theme::Dark),
-        );
+        let scope = if replace.is_some() {
+            self.listing_config.as_ref().map(|draft| draft.token)
+        } else {
+            self.drawing.editing_group
+        };
+        self.attachment_io
+            .pick(ctx.clone(), self.image_target(replace), scope, Some(false));
+    }
+
+    fn listing_preset(&self, name: &str) -> Option<Style> {
+        listing::effective(
+            name,
+            &self.drawing.latex.listing_styles,
+            &self.latex.listing_styles,
+        )
+    }
+
+    fn preset_text(&self, name: &str) -> String {
+        self.latex
+            .listing_configurations
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| listing::preset_configuration(name))
+    }
+
+    pub(super) fn default_listing(&self) -> listing::Listing {
+        let preferred = &self.latex.listing_default;
+        let name = if self.listing_preset(preferred).is_some() {
+            preferred.as_str()
+        } else {
+            listing::LIGHT
+        };
+        listing::Listing {
+            style_name: name.into(),
+            configuration: self.preset_text(name),
+            fallback: self.listing_preset(name).unwrap(),
+            overrides: None,
+            ..Default::default()
+        }
     }
 
     pub(super) fn open_listing(&mut self, id: Uuid) {
-        self.listing_page = 0;
-        self.listing_inspector_galley = None;
-        self.listing_inspector = Some(id);
-        self.listing_focus = true;
-    }
-
-    pub(super) fn listing_language<'a>(
-        file: &'a Attachment,
-        model: &'a listing::Listing,
-        style: &'a Style,
-    ) -> &'a str {
-        model
-            .language
-            .as_deref()
-            .or(style.language.as_deref())
-            .unwrap_or_else(|| listing::detect(&file.original_name))
-    }
-
-    pub(super) fn effective_listing_for_clipboard(
-        &self,
-        object: &ObjectSnapshot,
-    ) -> ObjectSnapshot {
-        let ObjectSnapshot::Attachment(file) = object else {
-            return object.clone();
-        };
-        let Some(listing) = &file.listing else {
-            return object.clone();
-        };
-        let mut copy = (**file).clone();
-        let style = listing.style(
-            &self.drawing.latex.listing_styles,
-            &self.latex.listing_styles,
-        );
-        let listing = copy.listing.as_mut().unwrap();
-        listing.fallback = style.clone();
-        // Freeze the copied appearance, including when the destination shadows its name.
-        listing.overrides = Some(style);
-        copy.into()
-    }
-
-    pub(crate) fn scroll_listing(&mut self, ui: &egui::Ui) {
-        if self.listing_inspector.is_some() || !matches!(self.tool, Tool::Select | Tool::Lasso) {
-            return;
-        }
-        let Some(file) = self
-            .selected_attachment()
-            .filter(|file| file.listing.is_some())
-        else {
+        let Some(mut model) = self.attachment(id).and_then(|file| file.listing.clone()) else {
             return;
         };
-        let Some((surface, view, bounds)) = self.selection_view else {
-            return;
-        };
-        let Some(position) = ui.input(|i| i.pointer.hover_pos()) else {
-            return;
-        };
-        if file.surface != surface
-            || !bounds.contains(position)
-            || !ui.clip_rect().contains(position)
-            || ui.ctx().layer_id_at(position) != Some(ui.layer_id())
-            || !file.hit_test(
-                view.to_document([f64::from(position.x), f64::from(position.y)]),
-                0.,
-            )
-        {
-            return;
-        }
-        ui.input_mut(|i| {
-            if i.modifiers.is_none() && i.smooth_scroll_delta.y != 0. {
-                let line = self.listing_scroll.entry(file.id).or_default();
-                *line = (*line - i.smooth_scroll_delta.y / 16.).max(0.);
-                if let Some(max) = self
-                    .listing_cache
-                    .values()
-                    .find(|preview| {
-                        preview
-                            .asset
-                            .upgrade()
-                            .is_some_and(|asset| asset.id() == file.asset.id())
-                    })
-                    .map(|p| p.line_count.saturating_sub(1))
-                {
-                    *line = (*line).min(max as f32);
-                }
-                i.smooth_scroll_delta.y = 0.;
+        if model.configuration.is_empty() {
+            if let Some(style) = model.overrides.take() {
+                model.fallback = style;
             }
+            model.configuration = r"\lstset{}".into();
+        }
+        self.listing_config = Some(ListingDraft {
+            id,
+            token: Uuid::new_v4(),
+            path: model.source_path.clone().unwrap_or_default(),
+            model,
+            selected_file: None,
+            style_name: None,
+            error: None,
+            applying_path: false,
         });
     }
 
+    pub(super) fn listing_file_selected(
+        &mut self,
+        token: Option<Uuid>,
+        result: Result<crate::attachment_io::FileData, String>,
+        path: Option<String>,
+    ) {
+        let Some(draft) = self
+            .listing_config
+            .as_mut()
+            .filter(|d| Some(d.token) == token)
+        else {
+            return;
+        };
+        match result {
+            Ok((name, asset)) if asset.listing_text() => {
+                draft.path = path.clone().unwrap_or_default();
+                draft.selected_file = Some((name, asset, path));
+                draft.error = None;
+            }
+            Ok(_) => {
+                draft.error = Some("Choose a valid UTF-8 source file.".into());
+                draft.applying_path = false;
+            }
+            Err(error) => {
+                draft.error = Some(error);
+                draft.applying_path = false;
+            }
+        }
+    }
+
+    fn draft_style(&self, draft: &ListingDraft) -> Result<Style, String> {
+        // The selected preset is a snapshot. Reapplying an unchanged draft uses its
+        // stored appearance even after a named preference is updated or removed.
+        let base = draft.model.fallback.clone();
+        let input = &draft.model.configuration;
+        listing::parse(input, base.clone(), |name| {
+            if name == draft.model.style_name {
+                Some(base.clone())
+            } else {
+                self.listing_preset(name)
+            }
+        })
+        .map(|(_, style)| style)
+    }
+
     pub(super) fn listing_dialog(&mut self, ctx: &egui::Context) -> bool {
-        let Some(id) = self.listing_inspector else {
+        self.listing_preview = None;
+        let Some(mut draft) = self.listing_config.take() else {
             return false;
         };
-        let Some(file) = self.attachment(id) else {
-            self.listing_inspector = None;
+        let Some(file) = self.attachment(draft.id) else {
             return false;
         };
-        let Some(model) = &file.listing else {
-            self.listing_inspector = None;
-            return false;
-        };
-        let Some(source) = file.asset.listing_source() else {
-            return false;
-        };
-        let style = model.style(
-            &self.drawing.latex.listing_styles,
-            &self.latex.listing_styles,
-        );
-        let language = Self::listing_language(&file, model, &style);
-        let width = (ctx.content_rect().width() - 56.).clamp(200., 880.);
-        let mut close = false;
-        const WINDOW_BYTES: usize = 256 * 1024;
-        let start = source.floor_char_boundary(
-            self.listing_page
-                .saturating_mul(WINDOW_BYTES)
-                .min(source.len()),
-        );
-        let end = source.floor_char_boundary(
-            (self.listing_page + 1)
-                .saturating_mul(WINDOW_BYTES)
-                .min(source.len()),
-        );
-        let window = &source[start..end];
-        let key = (file.asset.id(), language.to_owned());
-        let preview = cache_source(&mut self.listing_cache, key, &file.asset, source, language);
-        let response =
-            egui::Modal::new(egui::Id::unique(("listing-inspector", id))).show(ctx, |ui| {
-                ui.set_width(width);
-                ui.heading(&file.original_name);
-                ui.weak(format!("{language} · Read-only source"));
-                if source.len() > WINDOW_BYTES {
+        let locked = self.drawing.is_locked(file.id);
+        let candidate = draft
+            .selected_file
+            .as_ref()
+            .map(|(_, asset, _)| asset)
+            .unwrap_or(&file.asset);
+        let count = candidate.listing_line_count();
+        let ranges = listing::parse_ranges(&draft.model.line_ranges, Some(count));
+        let style = self.draft_style(&draft);
+        let filename = draft
+            .selected_file
+            .as_ref()
+            .map_or(file.original_name.as_str(), |value| value.0.as_str())
+            .to_owned();
+        let mut browse = false;
+        let mut apply =
+            draft.applying_path && !self.attachment_io.picker_open && draft.error.is_none();
+        let mut cancel = false;
+        let mut preset_change = None;
+        let mut save = false;
+        let mut set_default = false;
+        let mut names: std::collections::BTreeSet<_> = listing::PRESETS.into_iter().collect();
+        names.extend(self.latex.listing_styles.keys().map(String::as_str));
+        names.extend(self.drawing.latex.listing_styles.keys().map(String::as_str));
+        let response = egui::Modal::new(egui::Id::unique(("code-listing", file.id))).show(ctx, |ui| {
+            ui.set_width((ctx.content_rect().width() - 48.).clamp(180., crate::ui::style::SETTINGS_WIDTH));
+            ui.horizontal(|ui| {
+                ui.heading("Code Listing");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    cancel |= ui.button("×").on_hover_text("Close").clicked();
+                });
+            });
+            egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - 160.).max(60.)).show(ui, |ui| {
+                ui.label("Source File");
+                ui.horizontal(|ui| {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    ui.add(egui::TextEdit::singleline(&mut draft.path)
+                        .hint_text(filename.clone()).desired_width((ui.available_width() - 72.).max(60.)));
+                    #[cfg(target_arch = "wasm32")]
+                    ui.label(&filename);
+                    browse = ui.add_enabled(!locked && !self.attachment_io.picker_open, egui::Button::new("Browse…")).clicked();
+                });
+                #[cfg(target_arch = "wasm32")]
+                ui.weak("Automatic synchronization is unavailable in this browser. Browse to refresh the embedded copy.");
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(path) = file.listing.as_ref().and_then(|model| model.source_path.as_deref()) {
+                    if self.listing_watch.files.get(path).is_some_and(|f| f.unavailable) {
+                        ui.weak("Source file unavailable or invalid. Showing embedded copy.");
+                    } else if !crate::attachment_io::approved_link(path) {
+                        ui.weak("Browse to reconnect this source. Showing embedded copy.");
+                    }
+                }
+                ui.label("Style Preset");
+                egui::ComboBox::from_id_salt("listing-preset").selected_text(&draft.model.style_name)
+                    .show_ui(ui, |ui| {
+                        for name in &names {
+                            if ui.selectable_label(draft.model.style_name == *name, *name).clicked() {
+                                preset_change = Some((*name).to_owned());
+                            }
+                        }
+                    });
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("Save Custom Style").clicked() { draft.style_name.get_or_insert_with(String::new); }
+                    set_default = ui.add_enabled((listing::PRESETS.contains(&draft.model.style_name.as_str()) || self.latex.listing_styles.contains_key(&draft.model.style_name)) && style.is_ok(), egui::Button::new("Set as Default")).clicked();
+                });
+                if let Some(name) = &mut draft.style_name {
                     ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(start > 0, egui::Button::new("Previous section"))
-                            .clicked()
-                        {
-                            self.listing_page -= 1;
-                            self.listing_focus = true;
-                        }
-                        ui.label(format!(
-                            "Section {} of {}",
-                            self.listing_page + 1,
-                            source.len().div_ceil(WINDOW_BYTES)
-                        ));
-                        if ui
-                            .add_enabled(end < source.len(), egui::Button::new("Next section"))
-                            .clicked()
-                        {
-                            self.listing_page += 1;
-                            self.listing_focus = true;
-                        }
+                        ui.label("Style name");
+                        ui.add(egui::TextEdit::singleline(name).char_limit(80));
+                        save = ui.add_enabled(style.is_ok(), egui::Button::new("Save")).clicked();
                     });
                 }
-                egui::ScrollArea::new([!style.wrap, true])
-                    .id_salt(("inspection-scroll", start))
-                    .max_height((ctx.content_rect().height() - 160.).max(70.))
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let background = ui.painter().add(egui::Shape::Noop);
-                        let mut buffer = window;
-                        let mut layouter =
-                            |ui: &egui::Ui, _buffer: &dyn egui::TextBuffer, wrap_width: f32| {
-                                let wrap_width = if style.wrap {
-                                    wrap_width
-                                } else {
-                                    f32::INFINITY
-                                };
-                                let key = (
-                                    file.asset.id(),
-                                    language.to_owned(),
-                                    style.clone(),
-                                    start,
-                                    wrap_width,
-                                );
-                                if self
-                                    .listing_inspector_galley
-                                    .as_ref()
-                                    .is_none_or(|entry| entry.0 != key)
-                                {
-                                    let mut job = egui::text::LayoutJob::default();
-                                    job.wrap.max_width = wrap_width;
-                                    job.wrap.break_anywhere = !style.break_at_space;
-                                    let mut cursor = start;
-                                    for line in preview
-                                        .lines
-                                        .iter()
-                                        .skip_while(|line| line.range.end <= start)
-                                        .take_while(|line| line.range.start < end)
-                                    {
-                                        for (range, token) in &line.tokens {
-                                            let begin = (line.range.start + range.start).max(start);
-                                            let stop = (line.range.start + range.end).min(end);
-                                            if begin >= stop {
-                                                continue;
-                                            }
-                                            if begin > cursor {
-                                                job.append(
-                                                    &source[cursor..begin],
-                                                    0.,
-                                                    format(Token::Text, &style, 1.),
-                                                );
-                                            }
-                                            job.append(
-                                                &source[begin..stop],
-                                                0.,
-                                                format(*token, &style, 1.),
-                                            );
-                                            cursor = stop;
-                                        }
-                                    }
-                                    job.append(
-                                        &source[cursor..end],
-                                        0.,
-                                        format(Token::Text, &style, 1.),
-                                    );
-                                    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
-                                    self.listing_inspector_galley = Some((key, galley));
-                                }
-                                self.listing_inspector_galley.as_ref().unwrap().1.clone()
-                            };
-                        let response = ui.add(
-                            egui::TextEdit::multiline(&mut buffer)
-                                .id(egui::Id::unique(("listing-source", id, start)))
-                                .desired_width(if style.wrap { width } else { f32::INFINITY })
-                                .font(font(&style, style.size))
-                                .layouter(&mut layouter)
-                                .frame(egui::Frame::NONE),
-                        );
-                        ui.painter().set(
-                            background,
-                            egui::Shape::rect_filled(response.rect, 0., rgb(style.background)),
-                        );
-                        if self.listing_focus {
-                            response.request_focus();
-                            self.listing_focus = false;
-                        }
-                    });
-                ui.horizontal(|ui| {
-                    if ui.button("Copy Entire Source").clicked() {
-                        ctx.copy_text(source.into());
-                    }
-                    close = ui.button("Close").clicked();
-                });
-                close |= ui
-                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                ui.label("LaTeX Listings Configuration");
+                ui.add(egui::TextEdit::multiline(&mut draft.model.configuration).code_editor().desired_rows(6).desired_width(f32::INFINITY));
+                ui.label("Source Lines to Display");
+                ui.add(egui::TextEdit::singleline(&mut draft.model.line_ranges).hint_text("All lines · e.g. 1-20, 25-32, 35, 37").desired_width(f32::INFINITY));
+                ui.checkbox(&mut draft.model.show_title, "Show Title");
+                if draft.model.show_title {
+                    ui.label("Title");
+                    ui.add(egui::TextEdit::singleline(&mut draft.model.custom_title).hint_text(&filename).char_limit(128).desired_width(f32::INFINITY));
+                }
+                if file.corners().iter().any(|&p| !self.drawing.contains(file.surface, p)) {
+                    ui.weak("Listing exceeds the page. Reduce the line selection or adjust its width, font size, or placement.");
+                }
+                if let Some(error) = draft.error.as_ref().or_else(|| style.as_ref().err()).or_else(|| ranges.as_ref().err()) {
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                }
+                if locked { ui.weak("Unlock this listing to apply changes."); }
             });
-        if close || response.backdrop_response.clicked() {
-            self.listing_inspector = None;
-            self.listing_inspector_galley = None;
+            ui.horizontal(|ui| {
+                cancel |= ui.button("Cancel").clicked();
+                apply |= ui.add_enabled(!locked && !self.attachment_io.picker_open, egui::Button::new("Apply")).clicked();
+            });
+            cancel |= ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        });
+        if cancel || response.backdrop_response.clicked() {
+            return true;
+        }
+        if let Some(name) = preset_change {
+            draft.model.fallback = self.listing_preset(&name).unwrap();
+            draft.model.overrides = None;
+            draft.model.configuration = self.preset_text(&name);
+            draft.model.style_name = name;
+            draft.error = None;
+        }
+        if save
+            && let (Some(name), Ok(style)) = (draft.style_name.clone(), self.draft_style(&draft))
+        {
+            let name = name.trim().to_owned();
+            if !listing::valid_name(&name)
+                || names.contains(name.as_str())
+                || self.latex.listing_styles.len() >= 64
+            {
+                draft.error =
+                    Some("Use an unused style name. Up to 64 custom styles are supported.".into());
+            } else {
+                self.latex
+                    .listing_styles
+                    .insert(name.clone(), style.clone());
+                self.latex
+                    .listing_configurations
+                    .insert(name.clone(), draft.model.configuration.clone());
+                draft.model.style_name = name;
+                draft.model.fallback = style;
+                draft.model.overrides = None;
+                draft.style_name = None;
+                draft.error = None;
+            }
+        }
+        if set_default {
+            self.latex.listing_default = draft.model.style_name.clone();
+        }
+        if apply && !locked {
+            draft.applying_path = false;
+            #[cfg(not(target_arch = "wasm32"))]
+            let read_path = draft.path.trim()
+                != draft
+                    .selected_file
+                    .as_ref()
+                    .and_then(|f| f.2.as_deref())
+                    .or_else(|| file.listing.as_ref().and_then(|f| f.source_path.as_deref()))
+                    .unwrap_or_default();
+            #[cfg(not(target_arch = "wasm32"))]
+            if read_path && !draft.path.trim().is_empty() {
+                self.attachment_io.listing_path(
+                    ctx.clone(),
+                    self.image_target(Some(file.id)),
+                    draft.token,
+                    draft.path.trim().to_owned(),
+                );
+                draft.applying_path = true;
+                draft.error = None;
+                self.listing_config = Some(draft);
+                return true;
+            }
+            match self.configured_listing(&file, &draft, count) {
+                Err(error) => draft.error = Some(error),
+                Ok(next) => {
+                    if next == *file || self.drawing.replace_attachment(next) {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if let Some((_, _, Some(path))) = &draft.selected_file {
+                            self.listing_watch.files.remove(path);
+                            self.listing_watch.pending = None;
+                            self.listing_watch.next = 0.;
+                        }
+                        self.selection.refresh(&self.drawing);
+                        ctx.request_repaint();
+                        return true;
+                    }
+                    draft.error = Some("Could not apply listing changes. Check permissions, title, and asset limits.".into());
+                }
+            }
+        }
+        if let Ok(preview) = self.configured_listing(&file, &draft, count) {
+            let mut preview = preview;
+            let painter = ctx.layer_painter(egui::LayerId::background());
+            let layout = self.listing_measurements.entry(preview.id).or_default();
+            prepare_layout(&mut self.listing_cache, layout, &painter, &preview, 1.);
+            preview.dimensions = layout.dimensions;
+            layout.glyphs.clear();
+            self.listing_preview = Some(preview);
+        }
+        self.listing_config = Some(draft);
+        if browse {
+            self.choose_listing(ctx, Some(file.id));
         }
         true
     }
 
-    pub(super) fn listing_controls(&mut self, ui: &mut egui::Ui, file: &Attachment) {
+    fn configured_listing(
+        &self,
+        file: &Attachment,
+        draft: &ListingDraft,
+        count: usize,
+    ) -> Result<Attachment, String> {
+        let style = self.draft_style(draft)?;
+        let ranges = listing::parse_ranges(&draft.model.line_ranges, Some(count))?;
         let mut next = file.clone();
-        let model = next.listing.as_mut().unwrap();
-        let document = &self.drawing.latex.listing_styles;
-        let global = &self.latex.listing_styles;
-        let mut style = model.style(document, global);
-        ui.label(&file.original_name);
-        ui.weak("Read-only source");
-        ui.add_enabled_ui(!self.drawing.is_locked(file.id), |ui| {
-            let lang = Self::listing_language(file, model, &style).to_owned();
-            crate::ui::listing_controls::choice(ui, ("listing-language", file.id), lang, |ui| {
-                ui.selectable_value(&mut model.language, None, "Automatic / style");
-                for &(language, _) in listing::LANGUAGES {
-                    ui.selectable_value(&mut model.language, Some(language.into()), language);
-                }
-            });
-            let names: std::collections::BTreeSet<_> = listing::PRESETS
-                .into_iter()
-                .chain(global.keys().map(String::as_str))
-                .chain(document.keys().map(String::as_str))
-                .collect();
-            let caption = if model.overrides.is_some() {
-                format!("{} · Overrides", model.style_name)
-            } else {
-                model.style_name.clone()
-            };
-            crate::ui::listing_controls::choice(ui, ("listing-style", file.id), caption, |ui| {
-                for name in names {
-                    let scope = if document.contains_key(name) {
-                        " · Document"
-                    } else if global.contains_key(name) {
-                        " · Global"
-                    } else {
-                        ""
-                    };
-                    if ui
-                        .selectable_label(
-                            model.style_name == name && model.overrides.is_none(),
-                            format!("{name}{scope}"),
-                        )
-                        .clicked()
-                    {
-                        model.style_name = name.into();
-                        model.fallback = listing::effective(name, document, global).unwrap();
-                        model.overrides = None;
-                        style = model.fallback.clone();
+        let mut model = draft.model.clone();
+        if let Some((name, asset, path)) = &draft.selected_file {
+            next.original_name = name.clone();
+            next.display_name = name.clone();
+            next.asset = asset.clone();
+            model.source_path = path.clone();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if draft.path.trim().is_empty() {
+            model.source_path = None;
+        }
+        model.line_ranges = listing::format_ranges(&ranges);
+        model.overrides = Some(style);
+        model.language = None;
+        if !model.valid() {
+            return Err("Invalid title, source path, or listing configuration.".into());
+        }
+        next.listing = Some(model);
+        Ok(next)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn poll_listing_sources(&mut self, ui: &egui::Ui) {
+        let watch = &mut self.listing_watch;
+        if let Some(results) = watch.pending.as_ref().and_then(|r| r.try_recv().ok()) {
+            watch.pending = None;
+            watch.reconciled = None;
+            for (path, value) in results {
+                let file = watch.files.entry(path).or_default();
+                match value {
+                    Ok(Some((stamp, data))) => {
+                        file.stamp = Some(stamp);
+                        file.data = Some(data);
+                        file.unavailable = false;
+                    }
+                    Ok(None) => file.unavailable = false,
+                    Err(_) => {
+                        file.unavailable = true;
+                        file.stamp = None;
                     }
                 }
-            });
-            let before = style.clone();
-            egui::ScrollArea::vertical()
-                .max_height(300.)
-                .show(ui, |ui| {
-                    crate::ui::listing_controls::style_fields(ui, &mut style);
+            }
+        }
+        let now = ui.input(|i| i.time);
+        let due = watch.pending.is_none() && now >= watch.next;
+        let reconcile =
+            self.selection_gesture.is_none() && watch.reconciled != Some(self.drawing.revision());
+        if !due && !reconcile {
+            return;
+        }
+        let links = self
+            .drawing
+            .items()
+            .iter()
+            .filter_map(|object| {
+                let ObjectSnapshot::Attachment(file) = object else {
+                    return None;
+                };
+                let path = file.listing.as_ref()?.source_path.as_deref()?;
+                Some((file.clone(), path.to_owned()))
+            })
+            .collect::<Vec<_>>();
+        if links.is_empty() {
+            watch.files.clear();
+            watch.reconciled = Some(self.drawing.revision());
+            return;
+        }
+        if reconcile {
+            for (file, path) in &links {
+                if let Some((name, asset)) = watch.files.get(path).and_then(|f| f.data.as_ref())
+                    && file.asset.id() != asset.id()
+                {
+                    let mut next = (**file).clone();
+                    next.original_name = name.clone();
+                    next.display_name = name.clone();
+                    next.asset = asset.clone();
+                    if !self.drawing.sync_listing(next)
+                        && let Some(watched) = watch.files.get_mut(path)
+                    {
+                        watched.unavailable = true;
+                    }
+                }
+            }
+            watch.reconciled = Some(self.drawing.revision());
+        }
+        if due {
+            watch.next = now + 0.85;
+            let paths: HashSet<_> = links
+                .into_iter()
+                .map(|(_, path)| path)
+                .filter(|path| crate::attachment_io::approved_link(path))
+                .collect();
+            watch.files.retain(|path, _| paths.contains(path));
+            if !paths.is_empty() {
+                let jobs = paths
+                    .into_iter()
+                    .map(|path| {
+                        let stamp = watch.files.get(&path).and_then(|file| file.stamp.clone());
+                        (path, stamp)
+                    })
+                    .collect::<Vec<_>>();
+                let (tx, rx) = std::sync::mpsc::channel();
+                watch.pending = Some(rx);
+                let ctx = ui.ctx().clone();
+                std::thread::spawn(move || {
+                    let results = jobs
+                        .into_iter()
+                        .map(|(path, stamp)| {
+                            let result = crate::attachment_io::poll_link(&path, stamp);
+                            (path, result)
+                        })
+                        .collect();
+                    let _ = tx.send(results);
+                    ctx.request_repaint();
                 });
-            if style != before && style.valid() {
-                model.overrides = Some(style.clone());
             }
-            if model.overrides.is_some() && ui.button("Reset Individual Overrides").clicked() {
-                model.overrides = None;
-            }
-        });
-        if next != *file && self.drawing.replace_attachment(next) {
-            self.selection.refresh(&self.drawing);
-            ui.ctx().request_repaint();
+        }
+        if !watch.files.is_empty() || watch.pending.is_some() {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(
+                    (watch.next - now).max(0.1),
+                ));
         }
     }
 }
@@ -620,9 +784,220 @@ fn cache_source<'a>(
         .or_insert_with(|| SourcePreview::new(asset, source, language))
 }
 
-pub(super) type InspectorGalley = ((AssetId, String, Style, usize, f32), Arc<egui::Galley>);
+impl Canvas {
+    /// Extend the editor's scrollable margin when an intact listing exceeds its paper.
+    pub(crate) fn page_listing_bounds(&self, surface: Surface, paper: [f64; 2]) -> ObjectBounds {
+        let mut bounds = ObjectBounds {
+            min: [0.; 2],
+            max: paper,
+        };
+        for object in self.drawing.items() {
+            let ObjectSnapshot::Attachment(file) = object else {
+                continue;
+            };
+            if file.listing.is_none() || file.surface != surface {
+                continue;
+            }
+            let file = self
+                .listing_preview
+                .as_ref()
+                .filter(|f| f.id == file.id)
+                .unwrap_or(file);
+            if let Some(extents) = file.world_bounds() {
+                bounds = bounds.union(extents);
+            }
+        }
+        bounds
+    }
 
-#[allow(clippy::too_many_arguments)]
+    pub(super) fn measure_listings(&mut self, ui: &egui::Ui) {
+        if self.selection_gesture.is_some() {
+            return;
+        }
+        let files = self
+            .drawing
+            .items()
+            .iter()
+            .filter_map(|object| match object {
+                ObjectSnapshot::Attachment(file) if file.listing.is_some() => Some(file.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        self.listing_measurements
+            .retain(|id, _| self.drawing.snapshot(*id).is_some());
+        for file in files {
+            let layout = self.listing_measurements.entry(file.id).or_default();
+            prepare_layout(&mut self.listing_cache, layout, ui.painter(), &file, 1.);
+            layout.glyphs.clear();
+            if layout.dimensions != file.dimensions {
+                let mut next = (*file).clone();
+                next.dimensions = layout.dimensions;
+                self.drawing.sync_listing(next);
+            }
+        }
+    }
+}
+
+pub(super) fn fit_resize(
+    cache: &mut HashMap<(AssetId, String), SourcePreview>,
+    layout: &mut ListingLayout,
+    painter: &egui::Painter,
+    file: &mut Attachment,
+    moving_handle: usize,
+) {
+    if file.listing.is_none() {
+        return;
+    }
+    let opposite = (moving_handle + 4) % 8;
+    let fixed = file.handles()[opposite];
+    prepare_layout(cache, layout, painter, file, 1.);
+    file.dimensions = layout.dimensions;
+    layout.glyphs.clear();
+    let moved = file.handles()[opposite];
+    for axis in 0..2 {
+        file.placement.position[axis] += fixed[axis] - moved[axis];
+    }
+}
+
+fn prepare_layout(
+    cache: &mut HashMap<(AssetId, String), SourcePreview>,
+    layout: &mut ListingLayout,
+    painter: &egui::Painter,
+    file: &Attachment,
+    scale: f32,
+) {
+    let model = file.listing.as_ref().unwrap();
+    let style = model.overrides.as_ref().unwrap_or(&model.fallback);
+    let width = model.preferred_width.unwrap_or(342.) as f32;
+    let key = LayoutKey {
+        asset: file.asset.id(),
+        name: file.original_name.clone(),
+        style: style.clone(),
+        line_ranges: model.line_ranges.clone(),
+        title: model.show_title.then(|| model.custom_title.clone()),
+        width,
+        scale,
+        pixels_per_point: painter.ctx().pixels_per_point(),
+    };
+    if layout.key.as_ref() == Some(&key) {
+        return;
+    }
+    let Some(source) = file.asset.listing_source() else {
+        return;
+    };
+    let language = listing::detect(&file.original_name);
+    let preview = cache_source(
+        cache,
+        (file.asset.id(), language.to_owned()),
+        &file.asset,
+        source,
+        language,
+    );
+    let count = preview.line_count;
+    let ranges = listing::parse_ranges(&model.line_ranges, None).unwrap_or_default();
+    let ranges = if ranges.is_empty() {
+        vec![(1, count)]
+    } else {
+        ranges
+    };
+    let left = style.padding + style.left;
+    let right = style.padding + style.right;
+    let scale = scale.max(0.001);
+    let gutter = if style.numbers == Numbers::None {
+        0.
+    } else {
+        painter
+            .layout_no_wrap(
+                "9".repeat(count.max(1).ilog10() as usize + 1),
+                font(style, style.number_size * scale),
+                rgb(style.number_color),
+            )
+            .size()
+            .x
+            / scale
+            + style.number_sep
+    };
+    let body_x = left
+        + if style.numbers == Numbers::Left {
+            gutter
+        } else {
+            0.
+        };
+    let line_height = (style.size * style.spacing).max(if style.numbers != Numbers::None {
+        style.number_size
+    } else {
+        0.
+    });
+    let wrap_width = (width - left - right - gutter - 2.).max(style.size * 2.);
+    let actual_width = if style.wrap {
+        wrap_width * scale
+    } else {
+        f32::INFINITY
+    };
+    let mut widest: f32 = wrap_width;
+    let mut y = style.padding;
+    let mut glyphs = Vec::new();
+    let mut number_glyphs = Vec::new();
+    if model.show_title {
+        let title = if !model.custom_title.trim().is_empty() {
+            model.custom_title.as_str()
+        } else if !style.caption.is_empty() {
+            style.caption.as_str()
+        } else {
+            file.original_name.as_str()
+        };
+        let galley = painter.layout_job(line_job(title, &[], style, actual_width, scale));
+        widest = widest.max(galley.size().x / scale);
+        let height = (galley.size().y / scale).max(line_height);
+        glyphs.push((left, y, galley));
+        y += height + 3.;
+    }
+    for (start, end) in ranges {
+        if start > count {
+            break;
+        }
+        for (i, (line, tokens)) in preview
+            .visible_from(source, start - 1)
+            .take(end.min(count) - start + 1)
+            .enumerate()
+        {
+            let number = start + i;
+            let galley = painter.layout_job(line_job(line, tokens, style, actual_width, scale));
+            widest = widest.max(galley.size().x / scale);
+            let height = (galley.size().y / scale).max(line_height);
+            if style.numbers != Numbers::None && (number - 1).is_multiple_of(style.step as usize) {
+                let label = painter.layout_no_wrap(
+                    number.to_string(),
+                    font(style, style.number_size * scale),
+                    rgb(style.number_color),
+                );
+                if style.numbers == Numbers::Left {
+                    glyphs.push((body_x - style.number_sep - label.size().x / scale, y, label));
+                } else {
+                    number_glyphs.push((y, label));
+                }
+            }
+            glyphs.push((body_x, y, galley));
+            y += height;
+        }
+    }
+    let width = (left + widest + gutter + right + 2.).max(width);
+    for (y, galley) in number_glyphs {
+        glyphs.push((width - right - galley.size().x / scale, y, galley));
+    }
+    glyphs.sort_by(|a, b| a.1.total_cmp(&b.1));
+    layout.dimensions = [
+        f64::from(width),
+        f64::from((y + style.padding + 2.).max(16.)),
+    ];
+    layout.max_glyph_height = glyphs
+        .iter()
+        .map(|(_, _, galley)| galley.size().y / scale)
+        .fold(0., f32::max);
+    layout.glyphs = glyphs;
+    layout.key = Some(key);
+}
+
 pub(super) fn paint(
     cache: &mut HashMap<(AssetId, String), SourcePreview>,
     layout: &mut ListingLayout,
@@ -630,10 +1005,9 @@ pub(super) fn paint(
     view: Transform,
     file: &Attachment,
     delta: Placement,
-    style: &Style,
-    language: &str,
-    scroll: f32,
 ) {
+    let model = file.listing.as_ref().unwrap();
+    let style = model.overrides.as_ref().unwrap_or(&model.fallback);
     let placement = file.placement.then(delta, [0.; 2]);
     let to_screen = |point| {
         let xy = view.to_screen(placement.apply(point));
@@ -644,6 +1018,17 @@ pub(super) fn paint(
     if !painter.clip_rect().intersects(Rect::from_points(&corners)) {
         return;
     }
+    let scale = (view.scale * placement.scale) as f32;
+    let text_visible = (3. ..=768.).contains(&(scale * style.size));
+    if text_visible {
+        prepare_layout(cache, layout, painter, file, scale);
+    }
+    let [w, h] = if text_visible {
+        layout.dimensions
+    } else {
+        [w, h]
+    };
+    let corners = [[0., 0.], [w, 0.], [w, h], [0., h]].map(to_screen);
     let [r, g, b] = style.background;
     let background = egui::Color32::from_rgba_unmultiplied(r, g, b, style.opacity);
     painter.add(egui::Shape::convex_polygon(
@@ -651,7 +1036,6 @@ pub(super) fn paint(
         background,
         egui::Stroke::NONE,
     ));
-    let scale = (view.scale * placement.scale) as f32;
     let rule = egui::Stroke::new(style.thickness * scale, rgb(style.rule));
     for (a, b) in match style.frame {
         Frame::None => &[][..],
@@ -661,217 +1045,46 @@ pub(super) fn paint(
     } {
         painter.line_segment([corners[*a], corners[*b]], rule);
     }
-    if scale * style.size < 3. || scale * style.size > 768. {
+    if !text_visible {
         return;
     }
-    let key = (file.asset.id(), language.to_owned());
-    let Some(source) = file.asset.listing_source() else {
-        return;
-    };
-    let preview = cache_source(cache, key, &file.asset, source, language);
     let local = |x, y| {
         to_screen([
             if placement.reflected[0] { w - x } else { x },
             if placement.reflected[1] { h - y } else { y },
         ])
     };
-    let draw = |x: f32, y: f32, galley: Arc<egui::Galley>| {
+    let clip = painter.clip_rect();
+    let min = [f64::from(clip.min.x), f64::from(clip.min.y)];
+    let max = [f64::from(clip.max.x), f64::from(clip.max.y)];
+    let visible = [min, [max[0], min[1]], max, [min[0], max[1]]].map(|p| {
+        let local = placement.inverse(view.to_document(p));
+        (if placement.reflected[1] {
+            h - local[1]
+        } else {
+            local[1]
+        }) as f32
+    });
+    let low = visible.into_iter().fold(f32::INFINITY, f32::min);
+    let high = visible.into_iter().fold(f32::NEG_INFINITY, f32::max);
+    let first = layout
+        .glyphs
+        .partition_point(|(_, y, _)| *y + layout.max_glyph_height < low);
+    for (x, y, galley) in &layout.glyphs[first..] {
+        if *y > high {
+            break;
+        }
+        if *y + galley.size().y / scale < low {
+            continue;
+        }
         painter.add(
             egui::epaint::TextShape::new(
-                local(f64::from(x), f64::from(y)),
-                galley,
+                local(f64::from(*x), f64::from(*y)),
+                galley.clone(),
                 rgb(style.foreground),
             )
             .with_angle(placement.rotation as f32),
         );
-    };
-    let first = (scroll.max(0.) as usize).min(preview.line_count.saturating_sub(1));
-    let key = (
-        file.asset.id(),
-        format!("{}\0{language}", file.original_name),
-        style.clone(),
-        [w as f32, h as f32],
-        scale,
-        first,
-    );
-    if layout.key.as_ref() != Some(&key) {
-        layout.key = Some(key);
-        layout.glyphs.clear();
-        populate_layout(
-            layout, painter, file, style, language, preview, source, first, scale,
-        );
-    }
-    for (x, y, galley) in &layout.glyphs {
-        draw(*x, *y, galley.clone());
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn populate_layout(
-    layout: &mut ListingLayout,
-    painter: &egui::Painter,
-    file: &Attachment,
-    style: &Style,
-    language: &str,
-    preview: &SourcePreview,
-    source: &str,
-    first: usize,
-    scale: f32,
-) {
-    let [w, h] = file.dimensions;
-    let left = style.padding + style.left;
-    let right = w as f32 - style.padding - style.right;
-    let bottom = h as f32 - style.padding;
-    let mut y = style.padding;
-    let line_height = style.size * style.spacing;
-    if right <= left || bottom < y + line_height {
-        return;
-    }
-    let label = if style.header {
-        format!("{}  ·  {language}", file.original_name)
-    } else {
-        String::new()
-    };
-    for text in [&label, &style.caption]
-        .into_iter()
-        .filter(|s| !s.is_empty())
-    {
-        if bottom < y + line_height {
-            return;
-        }
-        let mut job = line_job(text, &[], style, (right - left) * scale, 1, scale);
-        job.wrap.max_rows = 1;
-        layout.glyphs.push((left, y, painter.layout_job(job)));
-        y += line_height + 3.;
-    }
-    let gutter = if style.numbers == Numbers::None {
-        0.
-    } else {
-        let digits = style
-            .first
-            .saturating_add(preview.line_count as u32)
-            .max(1)
-            .ilog10()
-            .saturating_add(1);
-        digits as f32 * style.number_size * 0.65 + style.number_sep
-    };
-    let body_x = if style.numbers == Numbers::Left {
-        left + gutter
-    } else {
-        left
-    };
-    let body_width = (right - left - gutter) * scale;
-    if body_width <= 1. {
-        return;
-    }
-    for (offset, (line, tokens)) in preview.visible_from(source, first).take(512).enumerate() {
-        let index = first + offset;
-        let rows = ((bottom - y) / line_height).floor().clamp(0., 512.) as usize;
-        if rows == 0 {
-            break;
-        }
-        let galley = painter.layout_job(line_job(line, tokens, style, body_width, rows, scale));
-        let height = (galley.size().y / scale).max(line_height);
-        if y + height > bottom + 0.5 {
-            break;
-        }
-        let number = style.first.saturating_add(index as u32);
-        if style.numbers != Numbers::None
-            && y + style.number_size <= bottom
-            && (index as u32).is_multiple_of(style.step)
-        {
-            let galley = painter.layout_no_wrap(
-                number.to_string(),
-                font(style, style.number_size * scale),
-                rgb(style.number_color),
-            );
-            let x = if style.numbers == Numbers::Left {
-                body_x - style.number_sep - galley.size().x / scale
-            } else {
-                right - galley.size().x / scale
-            };
-            layout.glyphs.push((x, y, galley));
-        }
-        layout.glyphs.push((body_x, y, galley));
-        y += height;
-    }
-}
-
-pub(crate) fn listing_style_preview(ui: &mut egui::Ui, style: &Style) {
-    const SAMPLE: &str = "def square(x):\n    return x ** 2  # Area\n";
-    let background = egui::Color32::from_rgba_unmultiplied(
-        style.background[0],
-        style.background[1],
-        style.background[2],
-        style.opacity,
-    );
-    let (response, painter) = ui.allocate_painter(
-        egui::vec2(
-            ui.available_width(),
-            (style.size * style.spacing * 3. + style.padding * 2.).clamp(52., 190.),
-        ),
-        egui::Sense::hover(),
-    );
-    let rect = response.rect;
-    painter.rect_filled(rect, 0., background);
-    let rule = egui::Stroke::new(style.thickness, rgb(style.rule));
-    let corners = [
-        rect.left_top(),
-        rect.right_top(),
-        rect.right_bottom(),
-        rect.left_bottom(),
-    ];
-    for (a, b) in match style.frame {
-        Frame::None => &[][..],
-        Frame::Single => &[(0, 1), (1, 2), (2, 3), (3, 0)],
-        Frame::Lines => &[(0, 1), (2, 3)],
-        Frame::Left => &[(3, 0)],
-    } {
-        painter.line_segment([corners[*a], corners[*b]], rule);
-    }
-    static LINES: OnceLock<Vec<SourceLine>> = OnceLock::new();
-    let lines = LINES.get_or_init(|| parse_preview(SAMPLE, "Python"));
-    let inset = style.padding.min(rect.width() * 0.25);
-    let gutter = if style.numbers == Numbers::None {
-        0.
-    } else {
-        style.number_size + style.number_sep
-    };
-    let area = rect.shrink(inset);
-    let painter = painter.with_clip_rect(painter.clip_rect().intersect(area));
-    let mut y = area.top();
-    for (i, line) in lines.iter().enumerate() {
-        let x = area.left()
-            + if style.numbers == Numbers::Left {
-                gutter
-            } else {
-                0.
-            };
-        let galley = painter.layout_job(line_job(
-            &SAMPLE[line.range.clone()],
-            &line.tokens,
-            style,
-            (area.width() - gutter).max(1.),
-            4,
-            1.,
-        ));
-        if style.numbers != Numbers::None && (i as u32).is_multiple_of(style.step) {
-            let x = if style.numbers == Numbers::Left {
-                area.left()
-            } else {
-                area.right() - gutter
-            };
-            painter.text(
-                egui::pos2(x, y),
-                egui::Align2::LEFT_TOP,
-                style.first.saturating_add(i as u32),
-                font(style, style.number_size),
-                rgb(style.number_color),
-            );
-        }
-        let height = galley.size().y.max(style.size * style.spacing);
-        painter.galley(egui::pos2(x, y), galley, rgb(style.foreground));
-        y += height;
     }
 }
 
@@ -934,7 +1147,10 @@ mod tests {
         assert_eq!(file.object_type(), ObjectType::CodeListing);
         let resized = file.resized(4, file.handles()[4].map(|v| v + 20.));
         assert_ne!(resized.dimensions, file.dimensions);
-        assert_eq!(resized.listing, file.listing);
+        assert_eq!(
+            resized.listing.as_ref().unwrap().preferred_width,
+            Some(resized.dimensions[0])
+        );
         assert!(board.drawing.replace_attachment(resized.clone()));
         let replacement = BinaryAsset::new((&b"print('replacement')\r\n"[..]).into()).unwrap();
         board.insert_file_object(
@@ -977,10 +1193,9 @@ mod tests {
         );
 
         let (mut page, page_surface) = setup(DocumentKind::Page);
-        let bundle = ObjectBundle::capture_objects(std::iter::once(
-            board.effective_listing_for_clipboard(&new_file.as_ref().clone().into()),
-        ))
-        .unwrap();
+        let bundle =
+            ObjectBundle::capture_objects(std::iter::once(new_file.as_ref().clone().into()))
+                .unwrap();
         let pasted = ObjectBundle::decode(&bundle.encode().unwrap())
             .unwrap()
             .paste(&mut page.drawing, page_surface, [260., 300.]);
@@ -1006,15 +1221,237 @@ mod tests {
     }
 
     #[test]
-    fn inspector_text_buffer_cannot_accept_insertions_or_deletions() {
-        use egui::TextBuffer;
-        let mut source = "let π = 3;\n";
-        assert!(!source.is_mutable());
-        assert_eq!(
-            source.insert_text("replacement", egui::text::CharIndex(0)),
-            0
+    fn selected_source_lines_keep_original_numbers_and_grow_to_fit() {
+        let ctx = egui::Context::default();
+        crate::text_layout::install(&ctx);
+        let (mut canvas, surface) = setup(DocumentKind::Whiteboard);
+        let source: String = (1..=50).map(|n| format!("code_{n}\n")).collect();
+        let asset = BinaryAsset::new(source.as_bytes().into()).unwrap();
+        let mut file = Attachment::new(
+            canvas.drawing.owner(),
+            surface,
+            [0.; 2],
+            "listing.py".into(),
+            asset,
         );
-        source.delete_char_range(egui::text::CharIndex(0)..egui::text::CharIndex(3));
-        assert_eq!(source, "let π = 3;\n");
+        let mut model = canvas.default_listing();
+        model.line_ranges = "1-20, 25-32, 35, 37".into();
+        file.listing = Some(model);
+        let mut layout = ListingLayout::default();
+        crate::ui::settings::tests::render(&ctx, vec![], |ui| {
+            prepare_layout(
+                &mut canvas.listing_cache,
+                &mut layout,
+                ui.painter(),
+                &file,
+                1.,
+            );
+            let expected = (1..=20).chain(25..=32).chain([35, 37]).collect::<Vec<_>>();
+            let glyphs = &layout.glyphs;
+            assert_eq!(glyphs[0].2.job.text, "listing.py");
+            assert_eq!(glyphs.len(), expected.len() * 2 + 1);
+            for (pair, n) in glyphs[1..].as_chunks::<2>().0.iter().zip(expected) {
+                assert_eq!(pair[0].2.job.text, n.to_string());
+                assert_eq!(pair[1].2.job.text, format!("code_{n}"));
+            }
+            assert!(layout.dimensions[1] > 198.);
+            let with_title = layout.dimensions[1];
+            file.listing.as_mut().unwrap().show_title = false;
+            prepare_layout(
+                &mut canvas.listing_cache,
+                &mut layout,
+                ui.painter(),
+                &file,
+                1.,
+            );
+            assert!(layout.dimensions[1] < with_title);
+            assert_eq!(layout.glyphs[0].2.job.text, "1");
+        });
+    }
+
+    #[test]
+    fn unwrapped_long_line_is_fully_laid_out_and_expands_width() {
+        let ctx = egui::Context::default();
+        crate::text_layout::install(&ctx);
+        let (mut canvas, surface) = setup(DocumentKind::Whiteboard);
+        let source = "x".repeat(10_000);
+        let asset = BinaryAsset::new(source.as_bytes().into()).unwrap();
+        let mut file = Attachment::new(
+            canvas.drawing.owner(),
+            surface,
+            [0.; 2],
+            "listing.txt".into(),
+            asset,
+        );
+        let mut model = canvas.default_listing();
+        model.fallback.wrap = false;
+        model.show_title = false;
+        file.listing = Some(model);
+        let mut layout = ListingLayout::default();
+        crate::ui::settings::tests::render(&ctx, vec![], |ui| {
+            prepare_layout(
+                &mut canvas.listing_cache,
+                &mut layout,
+                ui.painter(),
+                &file,
+                1.,
+            );
+            assert_eq!(layout.glyphs.last().unwrap().2.job.text, source);
+            let expanded = layout.dimensions;
+            assert!(expanded[0] > 342.);
+            file.listing.as_mut().unwrap().fallback.wrap = true;
+            prepare_layout(
+                &mut canvas.listing_cache,
+                &mut layout,
+                ui.painter(),
+                &file,
+                1.,
+            );
+            assert_eq!(layout.glyphs.last().unwrap().2.job.text, source);
+            assert!(layout.dimensions[0] < expanded[0]);
+            assert!(layout.dimensions[1] > expanded[1]);
+        });
+    }
+    #[test]
+    fn dialog_cancel_and_apply_preserve_transaction_and_refreshed_source() {
+        use crate::ui::settings::tests::{pointer, render};
+        let ctx = egui::Context::default();
+        crate::text_layout::install(&ctx);
+        let (mut canvas, surface) = setup(DocumentKind::Whiteboard);
+        let asset = BinaryAsset::new((&b"first\nsecond\n"[..]).into()).unwrap();
+        canvas.insert_file_object(
+            Target {
+                surface,
+                position: [400., 300.],
+                replace: None,
+            },
+            "test.py".into(),
+            asset,
+            Some(false),
+        );
+        let id = canvas.selected_attachment().unwrap().id;
+        let initial = canvas.attachment(id).unwrap();
+        canvas.open_listing(id);
+        canvas.listing_config.as_mut().unwrap().model.custom_title = "Draft".into();
+        let mut frame = |events| {
+            render(&ctx, events, |ui| {
+                canvas.listing_dialog(ui.ctx());
+            })
+        };
+        frame(vec![]);
+        let button = frame(vec![])["Cancel"];
+        frame(pointer(button, true));
+        frame(pointer(button, false));
+        assert!(canvas.listing_config.is_none());
+        assert_eq!(canvas.attachment(id).unwrap(), initial);
+
+        canvas.open_listing(id);
+        let draft = canvas.listing_config.as_mut().unwrap();
+        draft.model.custom_title = "Committed".into();
+        draft.model.line_ranges = "2".into();
+        let mut refreshed = initial.as_ref().clone();
+        refreshed.asset = BinaryAsset::new((&b"updated\nsource\nthird\n"[..]).into()).unwrap();
+        assert!(canvas.drawing.sync_listing(refreshed.clone()));
+        let mut frame = |events| {
+            render(&ctx, events, |ui| {
+                canvas.listing_dialog(ui.ctx());
+            })
+        };
+        frame(vec![]);
+        let button = frame(vec![])["Apply"];
+        frame(pointer(button, true));
+        frame(pointer(button, false));
+        assert!(canvas.listing_config.is_none());
+        let applied = canvas.attachment(id).unwrap();
+        assert_eq!(applied.asset.bytes(), refreshed.asset.bytes());
+        let model = applied.listing.as_ref().unwrap();
+        assert_eq!(model.custom_title, "Committed");
+        assert_eq!(model.line_ranges, "2");
+        canvas.undo();
+        let restored = canvas.attachment(id).unwrap();
+        assert_eq!(restored.asset.bytes(), refreshed.asset.bytes());
+        assert!(restored.listing.as_ref().unwrap().custom_title.is_empty());
+    }
+
+    #[test]
+    fn new_listings_use_persisted_default_without_changing_existing_style() {
+        let (mut canvas, _) = setup(DocumentKind::Whiteboard);
+        let original = canvas.default_listing();
+        let text = r"\lstset{numbers=right,frame=leftline}".to_owned();
+        let style = listing::parse(&text, Style::default(), listing::preset)
+            .unwrap()
+            .1;
+        canvas
+            .latex
+            .listing_styles
+            .insert("Paper".into(), style.clone());
+        canvas
+            .latex
+            .listing_configurations
+            .insert("Paper".into(), text.clone());
+        canvas.latex.listing_default = "Paper".into();
+        canvas.latex =
+            serde_json::from_str(&serde_json::to_string(&canvas.latex).unwrap()).unwrap();
+        assert!(canvas.latex.validate().is_ok());
+        let new = canvas.default_listing();
+        assert_eq!(new.style_name, "Paper");
+        assert_eq!(new.fallback, style);
+        assert_eq!(new.configuration, text);
+        assert_eq!(original.style_name, listing::LIGHT);
+        assert_eq!(original.fallback.numbers, Numbers::Left);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn file_refresh_remeasures_without_advancing_selection_or_history() {
+        use crate::ui::settings::tests::render;
+        let ctx = egui::Context::default();
+        crate::text_layout::install(&ctx);
+        let (mut canvas, surface) = setup(DocumentKind::Whiteboard);
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("source.py");
+        let path_text = path.to_str().unwrap();
+        let original = BinaryAsset::new((&b"original\r\n"[..]).into()).unwrap();
+        let mut file = Attachment::new(
+            canvas.drawing.owner(),
+            surface,
+            [100., 150.],
+            "source.py".into(),
+            original,
+        );
+        let model = listing::Listing {
+            source_path: Some(path_text.into()),
+            ..canvas.default_listing()
+        };
+        file.listing = Some(model);
+        let id = file.id;
+        let placement = file.placement;
+        assert!(canvas.drawing.insert_snapshots(vec![file.into()]));
+        canvas
+            .selection
+            .change([id], crate::selection::Membership::Replace, &canvas.drawing);
+        render(&ctx, vec![], |ui| canvas.measure_listings(ui));
+        let initial = canvas.attachment(id).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        canvas.listing_watch.next = 10.;
+        canvas.listing_watch.pending = Some(rx);
+        let bytes = b"updated\r\nwith\r\nmore lines\r\n";
+        std::fs::write(&path, bytes).unwrap();
+        tx.send(vec![(
+            path_text.into(),
+            crate::attachment_io::poll_link(path_text, None),
+        )])
+        .unwrap();
+        render(&ctx, vec![], |ui| {
+            canvas.poll_listing_sources(ui);
+            canvas.measure_listings(ui);
+        });
+        let refreshed = canvas.attachment(id).unwrap();
+        assert_eq!(refreshed.asset.bytes(), bytes);
+        assert_eq!(refreshed.placement, placement);
+        assert_eq!(refreshed.listing, initial.listing);
+        assert!(refreshed.dimensions[1] > initial.dimensions[1]);
+        assert!(canvas.selection.ids.contains(&id));
+        canvas.undo();
+        assert!(canvas.attachment(id).is_none());
     }
 }

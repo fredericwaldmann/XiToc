@@ -25,6 +25,8 @@ pub struct LatexPreferences {
     pub high_quality: bool,
     pub config: LatexConfig,
     pub listing_styles: crate::code_listing::Styles,
+    pub listing_configurations: BTreeMap<String, String>,
+    pub listing_default: String,
 }
 impl Default for LatexPreferences {
     fn default() -> Self {
@@ -35,6 +37,8 @@ impl Default for LatexPreferences {
             high_quality: true,
             config: LatexConfig::default(),
             listing_styles: Default::default(),
+            listing_configurations: Default::default(),
+            listing_default: crate::code_listing::LIGHT.into(),
         }
     }
 }
@@ -47,6 +51,15 @@ impl LatexPreferences {
             return Err("Invalid rendering preset.".into());
         }
         crate::code_listing::validate_styles(&self.listing_styles)?;
+        if self.listing_configurations.len() > 64
+            || !crate::code_listing::valid_name(&self.listing_default)
+            || self
+                .listing_configurations
+                .iter()
+                .any(|(name, text)| !self.listing_styles.contains_key(name) || text.len() > 8192)
+        {
+            return Err("Invalid listing presets.".into());
+        }
         validate(&self.config, &LatexConfig::default())
     }
 }

@@ -40,7 +40,11 @@ impl Canvas {
             match event {
                 ResultEvent::PickerClosed => self.attachment_io.picker_open = false,
                 ResultEvent::Done(message) => self.notice = Some(message),
-                ResultEvent::Import(target, scope, result, dropped, listing) => {
+                ResultEvent::Import(target, scope, result, dropped, listing, path) => {
+                    if listing.is_some() && target.replace.is_some() {
+                        self.listing_file_selected(scope, result, path);
+                        continue;
+                    }
                     if dropped {
                         self.attachment_io.pending = self.attachment_io.pending.saturating_sub(1);
                     }
@@ -52,7 +56,9 @@ impl Canvas {
                         continue;
                     }
                     match result {
-                        Ok((name, asset)) => self.insert_file_object(target, name, asset, listing),
+                        Ok((name, asset)) => {
+                            self.insert_file_with_path(target, name, asset, listing, path)
+                        }
                         Err(error) => self.notice = Some(error),
                     }
                 }
@@ -70,12 +76,24 @@ impl Canvas {
         self.insert_file_object(target, name, asset, None);
     }
 
+    #[cfg(test)]
     pub(super) fn insert_file_object(
         &mut self,
         target: crate::image_import::Target,
         name: String,
         asset: Arc<crate::asset::BinaryAsset>,
         listing: Option<bool>,
+    ) {
+        self.insert_file_with_path(target, name, asset, listing, None);
+    }
+
+    fn insert_file_with_path(
+        &mut self,
+        target: crate::image_import::Target,
+        name: String,
+        asset: Arc<crate::asset::BinaryAsset>,
+        listing: Option<bool>,
+        path: Option<String>,
     ) {
         if listing.is_some() && !asset.listing_text() {
             self.notice = Some("Code listings require UTF-8 text. Use File Attachment for binary files or other encodings.".into());
@@ -99,7 +117,6 @@ impl Canvas {
                 if next == *old {
                     "Attachment already contains this file."
                 } else if self.drawing.replace_attachment(next) {
-                    self.listing_scroll.remove(&id);
                     if listing.is_some() {
                         "Listing source replaced."
                     } else {
@@ -119,8 +136,10 @@ impl Canvas {
             name,
             asset,
         );
-        if let Some(dark) = listing {
-            attachment.listing = Some(crate::code_listing::Listing::new(dark));
+        if listing.is_some() {
+            let mut model = self.default_listing();
+            model.source_path = path;
+            attachment.listing = Some(model);
             attachment.dimensions = [342., 198.];
         }
         for (axis, position) in attachment.placement.position.iter_mut().enumerate() {
@@ -284,16 +303,14 @@ impl Canvas {
     }
 
     pub(super) fn attachment_menu(&mut self, ui: &mut egui::Ui, attachment: Arc<Attachment>) {
-        let listing = attachment.listing.is_some();
-        if listing && ui.button("Inspect Source").clicked() {
-            self.open_listing(attachment.id);
-            ui.close();
+        if attachment.listing.is_some() {
+            if ui.button("Configure Code Listing…").clicked() {
+                self.open_listing(attachment.id);
+                ui.close();
+            }
+            return;
         }
-        let label = if listing && cfg!(target_arch = "wasm32") {
-            "Download Original File"
-        } else if listing {
-            "Open Original File"
-        } else if cfg!(target_arch = "wasm32") {
+        let label = if cfg!(target_arch = "wasm32") {
             "Download"
         } else {
             "Open"
@@ -303,37 +320,18 @@ impl Canvas {
                 .open(ui.ctx().clone(), attachment.clone());
             ui.close();
         }
-        if !cfg!(target_arch = "wasm32")
-            && ui
-                .button(if listing {
-                    "Save Original File As…"
-                } else {
-                    "Save As…"
-                })
-                .clicked()
-        {
+        if !cfg!(target_arch = "wasm32") && ui.button("Save As…").clicked() {
             self.attachment_io
                 .save(ui.ctx().clone(), attachment.clone());
             ui.close();
         }
         ui.add_enabled_ui(!self.drawing.is_locked(attachment.id), |ui| {
-            if !listing && ui.button("Rename Display Name…").clicked() {
+            if ui.button("Rename Display Name…").clicked() {
                 self.attachment_rename = Some((attachment.id, attachment.display_name.clone()));
                 ui.close();
             }
-            if ui
-                .button(if listing {
-                    "Replace Source File…"
-                } else {
-                    "Replace Attached File…"
-                })
-                .clicked()
-            {
-                if listing {
-                    self.choose_listing(ui.ctx(), Some(attachment.id));
-                } else {
-                    self.choose_attachment(ui.ctx(), Some(attachment.id));
-                }
+            if ui.button("Replace Attached File…").clicked() {
+                self.choose_attachment(ui.ctx(), Some(attachment.id));
                 ui.close();
             }
         });

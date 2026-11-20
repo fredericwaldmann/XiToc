@@ -72,10 +72,10 @@ impl Attachment {
                 .listing
                 .as_ref()
                 .is_none_or(|listing| listing.valid() && self.asset.listing_text())
-            && self
-                .dimensions
-                .iter()
-                .all(|n| n.is_finite() && (16.0..=1e6).contains(n))
+            && self.dimensions.iter().all(|n| {
+                n.is_finite()
+                    && (16.0..=if self.listing.is_some() { 1e12 } else { 1e6 }).contains(n)
+            })
             && self
                 .corners()
                 .iter()
@@ -123,6 +123,11 @@ impl Attachment {
                     1e6,
                 );
                 out.dimensions[axis] = extent;
+                if axis == 0
+                    && let Some(model) = &mut out.listing
+                {
+                    model.preferred_width = Some(extent);
+                }
                 if direction < 0. {
                     min[axis] = fixed[axis] - extent;
                 }

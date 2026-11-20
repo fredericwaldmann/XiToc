@@ -848,3 +848,7 @@ the style palettes. A new parser or per-language native grammar dependency
 would increase maintenance or complicate WASM. The crate is dual MIT/Apache-2.0
 and includes acknowledgments for bundled grammars. Listing directives are
 validated locally and never passed to math rendering or an external compiler.
+
+## Scientific Code Listings
+
+Use one transactional configuration modal and snapshot effective appearance per listing. Native source synchronization reconciles the live object outside history and polls only process-approved paths. Content measurement establishes the oriented frame and page overflow scroll extent. The existing two-face/Syntect dependency remains unchanged.

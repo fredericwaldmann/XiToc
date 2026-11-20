@@ -3,10 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub type Styles = BTreeMap<String, Style>;
-pub const LIGHT: &str = "Scientific Light";
+pub const LIGHT: &str = "Scientific";
 pub const DARK: &str = "Scientific Dark";
-pub const CLASSIC: &str = "Classic LaTeX Listings";
-pub const PRESETS: [&str; 3] = [LIGHT, DARK, CLASSIC];
+pub const CLASSIC: &str = "Classic LaTeX";
+pub const MINIMAL: &str = "Minimal";
+pub const PRESETS: [&str; 4] = [LIGHT, DARK, CLASSIC, MINIMAL];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Frame {
@@ -112,7 +113,16 @@ impl Default for Style {
 pub fn preset(name: &str) -> Option<Style> {
     let mut style = Style::default();
     match name {
-        LIGHT => (),
+        LIGHT | "Scientific Light" => (),
+        MINIMAL => {
+            style.frame = Frame::None;
+            style.numbers = Numbers::None;
+            style.keyword = style.foreground;
+            style.comment = style.foreground;
+            style.string = style.foreground;
+            style.identifier = style.foreground;
+            style.numeric = style.foreground;
+        }
         DARK => {
             style.background = [30, 35, 45];
             style.foreground = [229, 234, 241];
@@ -124,7 +134,7 @@ pub fn preset(name: &str) -> Option<Style> {
             style.rule = [78, 87, 105];
             style.number_color = [165, 175, 191];
         }
-        CLASSIC => {
+        CLASSIC | "Classic LaTeX Listings" => {
             style.background = [255; 3];
             style.keyword = [38, 47, 85];
             style.comment = [84; 3];
@@ -140,8 +150,14 @@ pub fn preset(name: &str) -> Option<Style> {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct Listing {
+    pub source_path: Option<String>,
+    pub configuration: String,
+    pub line_ranges: String,
+    pub show_title: bool,
+    pub custom_title: String,
+    pub preferred_width: Option<f64>,
     pub language: Option<String>,
     pub style_name: String,
     pub fallback: Style,
@@ -156,28 +172,159 @@ pub fn effective(name: &str, document: &Styles, global: &Styles) -> Option<Style
         .or_else(|| preset(name))
 }
 
+impl Default for Listing {
+    fn default() -> Self {
+        Self::new(false)
+    }
+}
+
 impl Listing {
     pub fn new(dark: bool) -> Self {
         let name = if dark { DARK } else { LIGHT };
         Self {
+            source_path: None,
+            configuration: String::new(),
+            line_ranges: String::new(),
+            show_title: true,
+            custom_title: String::new(),
+            preferred_width: None,
             language: None,
             style_name: name.into(),
             fallback: preset(name).unwrap(),
             overrides: None,
         }
     }
-    pub fn style(&self, document: &Styles, global: &Styles) -> Style {
-        self.overrides
-            .clone()
-            .or_else(|| effective(&self.style_name, document, global))
-            .unwrap_or_else(|| self.fallback.clone())
-    }
     pub fn valid(&self) -> bool {
         valid_name(&self.style_name)
             && self.language.as_ref().is_none_or(|s| language_known(s))
+            && self.configuration.len() <= 8192
+            && self
+                .source_path
+                .as_ref()
+                .is_none_or(|p| p.len() <= 16384 && !p.contains('\0'))
+            && self.custom_title.len() <= 512
+            && !self.custom_title.chars().any(char::is_control)
+            && parse_ranges(&self.line_ranges, None).is_ok()
+            && self
+                .preferred_width
+                .is_none_or(|w| (100. ..=1e6).contains(&w))
             && self.fallback.valid()
             && self.overrides.as_ref().is_none_or(Style::valid)
     }
+}
+
+pub fn line_count(source: &str) -> usize {
+    source.split_terminator('\n').count()
+}
+
+pub fn parse_ranges(input: &str, count: Option<usize>) -> Result<Vec<(usize, usize)>, String> {
+    if input.len() > 8192 {
+        return Err("Line selection exceeds 8 KiB.".into());
+    }
+    if input.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut ranges = Vec::new();
+    let number = |value: &str| {
+        let value = value.trim();
+        value
+            .bytes()
+            .all(|c| c.is_ascii_digit())
+            .then(|| value.parse::<usize>().ok())
+            .flatten()
+            .filter(|n| *n != 0)
+            .ok_or_else(|| format!("Expected a positive source line number: {value}."))
+    };
+    for part in input.split(',') {
+        let (first, last) = match part.split_once('-') {
+            Some((a, b)) => (number(a)?, number(b)?),
+            None => {
+                let n = number(part)?;
+                (n, n)
+            }
+        };
+        if first > last {
+            return Err(format!("Reversed line range: {first}-{last}."));
+        }
+        if count.is_some_and(|n| last > n) {
+            return Err(format!(
+                "Line {last} exceeds the available {} source lines.",
+                count.unwrap()
+            ));
+        }
+        ranges.push((first, last));
+    }
+    ranges.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (first, last) in ranges {
+        if let Some(previous) = merged.last_mut().filter(|p| first <= p.1.saturating_add(1)) {
+            previous.1 = previous.1.max(last);
+        } else {
+            merged.push((first, last));
+        }
+    }
+    Ok(merged)
+}
+
+pub fn format_ranges(ranges: &[(usize, usize)]) -> String {
+    ranges
+        .iter()
+        .map(|&(first, last)| {
+            if first == last {
+                first.to_string()
+            } else {
+                format!("{first}-{last}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+pub fn preset_configuration(name: &str) -> String {
+    let Some(style) = preset(name) else {
+        return format!(r"\lstset{{style={name}}}");
+    };
+    let size = |points: f32| match points as u32 {
+        8 => r"\tiny",
+        9 => r"\scriptsize",
+        10 => r"\footnotesize",
+        11 => r"\small",
+        14 => r"\large",
+        _ => r"\normalsize",
+    };
+    let color = |[r, g, b]: [u8; 3]| format!(r"\color{{#{r:02X}{g:02X}{b:02X}}}");
+    let numbers = match style.numbers {
+        Numbers::None => "none",
+        Numbers::Left => "left",
+        Numbers::Right => "right",
+    };
+    let frame = match style.frame {
+        Frame::None => "none",
+        Frame::Single => "single",
+        Frame::Lines => "lines",
+        Frame::Left => "leftline",
+    };
+    let italic = if style.italic_comments {
+        r"\itshape"
+    } else {
+        ""
+    };
+    let options = [
+        format!(r"basicstyle=\ttfamily{}", size(style.size)),
+        format!("keywordstyle={}", color(style.keyword)),
+        format!("commentstyle={}{}", color(style.comment), italic),
+        format!("stringstyle={}", color(style.string)),
+        format!("identifierstyle={}", color(style.identifier)),
+        format!("numbers={numbers}"),
+        format!("numberstyle={}", size(style.number_size)),
+        format!("frame={frame}"),
+        format!("rulecolor={}", color(style.rule)),
+        format!("backgroundcolor={}", color(style.background)),
+        format!("breaklines={}", style.wrap),
+        format!("tabsize={}", style.tabs),
+    ]
+    .join(",\n    ");
+    format!("\\lstset{{\n    {options}\n}}")
 }
 
 pub fn valid_name(name: &str) -> bool {
@@ -362,7 +509,7 @@ pub fn parse(
             "style" => {
                 base = lookup(value).ok_or_else(|| format!("Unknown listing style: {value}"))?
             }
-            "language" if language_known(value) => base.language = Some(value.into()),
+
             "basicstyle" | "numberstyle" => {
                 let value = value.strip_prefix(r"\ttfamily").unwrap_or(value);
                 let size = match value {
@@ -373,6 +520,10 @@ pub fn parse(
                     r"\small" => 11.,
                     r"\normalsize" => 12.,
                     r"\large" => 14.,
+                    r"\Large" => 17.,
+                    r"\LARGE" => 20.,
+                    r"\huge" => 25.,
+                    r"\Huge" => 30.,
                     _ => return Err(invalid()),
                 };
                 if key == "basicstyle" {
@@ -420,7 +571,7 @@ pub fn parse(
             "xleftmargin" => base.left = float()?,
             "xrightmargin" => base.right = float()?,
             "framesep" => base.padding = float()?,
-            "firstnumber" => base.first = value.parse().map_err(|_| invalid())?,
+
             "stepnumber" => base.step = value.parse().map_err(|_| invalid())?,
             "tabsize" => base.tabs = value.parse().map_err(|_| invalid())?,
             "breaklines" => base.wrap = boolean()?,
@@ -489,13 +640,46 @@ mod tests {
         };
         global.insert(LIGHT.into(), outer.clone());
         document.insert(LIGHT.into(), inner.clone());
-        let mut model = Listing::new(false);
-        assert_eq!(model.style(&Styles::new(), &Styles::new()), preset);
-        assert_eq!(model.style(&Styles::new(), &global), outer);
-        assert_eq!(model.style(&document, &global), inner);
-        model.overrides = Some(preset.clone());
-        assert_eq!(model.style(&document, &global), preset);
+        assert_eq!(
+            effective(LIGHT, &Styles::new(), &Styles::new()),
+            Some(preset)
+        );
+        assert_eq!(effective(LIGHT, &Styles::new(), &global), Some(outer));
+        assert_eq!(effective(LIGHT, &document, &global), Some(inner));
         assert_ne!(super::preset(DARK), super::preset(CLASSIC));
+    }
+
+    #[test]
+    fn normalizes_and_validates_line_ranges() {
+        assert_eq!(
+            parse_ranges("5, 1-3, 2-4, 5", Some(5)).unwrap(),
+            vec![(1, 5)]
+        );
+        assert_eq!(
+            parse_ranges("1-20, 25-32, 35, 37", Some(50)).unwrap(),
+            vec![(1, 20), (25, 32), (35, 35), (37, 37)]
+        );
+        assert!(parse_ranges("", Some(0)).unwrap().is_empty());
+        for invalid in ["0", "-2", "4-1", "a", "1,", "1--3", "6"] {
+            assert!(parse_ranges(invalid, Some(5)).is_err(), "{invalid}");
+        }
+        assert_eq!(line_count(""), 0);
+        assert_eq!(line_count("\n"), 1);
+        assert_eq!(line_count("a\nb\n"), 2);
+        assert_eq!(line_count("a\nb"), 2);
+    }
+
+    #[test]
+    fn builtin_preset_text_recreates_each_appearance() {
+        for name in PRESETS {
+            let style = preset(name).unwrap();
+            assert_eq!(
+                parse(&preset_configuration(name), style.clone(), preset)
+                    .unwrap()
+                    .1,
+                style
+            );
+        }
     }
 
     #[test]
@@ -505,7 +689,7 @@ mod tests {
             commentstyle=\color{gray}\itshape, stringstyle=\color{red},
             numbers=left, numberstyle=\tiny, frame=single, breaklines=true,
             tabsize=4, title={Algorithm, step 1}, xleftmargin=3pt,
-            backgroundcolor=\color{#FAFBFC}, language=Python
+            backgroundcolor=\color{#FAFBFC}
         }";
         let (name, style) = parse(input, Style::default(), preset).unwrap();
         assert_eq!(name.as_deref(), Some("Scientific"));
@@ -513,7 +697,6 @@ mod tests {
         assert_eq!(style.number_size, 8.);
         assert_eq!(style.background, [250, 251, 252]);
         assert_eq!(style.caption, "Algorithm, step 1");
-        assert_eq!(style.language.as_deref(), Some("Python"));
         assert!(style.italic_comments && style.wrap);
         let (_, changed) = parse(
             r"\lstset{style=Scientific,numbers=right,tabsize=8,frame=leftline}",
