@@ -850,3 +850,14 @@ chunk. This reduces mesh copies, indices and vertices while retaining raw
 pressure and editable vector ink. The original benchmark used the pre-M1.15
 highlighter ribbon. M1.15 now unions translucent and flat-nib outlines before
 compositing.
+
+
+## 2026-11-19 — Phase 2 thick pen and highlighter rendering (#57)
+
+The first pass reduced sample density before opaque tessellation. A wide pen
+still emitted full round stamps at surviving samples. Translucent ink still
+recomputed a vector union and antialias fringe over the full live path.
+Phase 2 draws opaque tangent strips and exposed pressure arcs, and retains
+per-stroke coverage in viewport tiles for translucent ink. Stroke completion
+keeps the same meshes and releases the union working state. See the
+architecture and test plan for invalidation, compositing and measurements.

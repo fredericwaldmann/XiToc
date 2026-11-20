@@ -275,14 +275,26 @@ changes. Its mesh key covers view, DPI, base width, pressure response, nib and
 coverage mode. Color and alpha updates within the same coverage mode tint the
 existing vertex coverage. Width, pressure or nib changes rebuild only affected
 stroke outlines. Rotation previews reuse the tinted base mesh until its key or
-tint changes. Rounded opaque ink keeps incremental 128-segment chunks, while
-translucent ink and flat-nib highlighters union the outline and antialias fringe
-across the full stroke in `ink_mesh.rs`. Independent strokes composite in
-document order. Highlighter hit envelopes remain conservatively rounded.
-Before tessellation, each opaque chunk approximates the swept disks within 0.2
-physical pixels of combined center and pressure-radius error. Chunk endpoints
-are retained. Selection and erasing use the full derived path. Cached screen
-bounds skip offscreen meshes before egui assembles the visible geometry.
+tint changes. Rounded opaque ink keeps incremental 128-segment chunks.
+Wide round ink uses tangent strips and exposed, antialiased arcs for caps and
+joins, including pressure changes. Thin strokes retain egui's inexpensive
+atlas-backed circle path. The view mesh reduces center/radius samples with
+a combined 0.2 physical-pixel tolerance, while hit testing and erasing use
+the full path. Chunk bounds suppress offscreen submissions.
+
+`ink_tiles.rs` retains translucent ink coverage per stroke in 128-point
+screen tiles aligned to physical pixels. It promotes immutable path batches
+to stable polygon unions and rebuilds the geometry only in tiles touched by
+the old or new smoothing tail. Padded polygons allow the antialias fringe
+to continue at tile edges. Disjoint tile meshes apply the stroke’s alpha once per covered pixel and
+share the canvas scissor for batching. A different stroke has independent coverage
+and composites in document order. Completion drops the working polygons
+and keeps the exact displayed meshes. Color or opacity inside the same
+coverage mode updates retained vertex alpha. View, DPI, viewport or
+geometry-style changes replace the affected tile cache. Undo and deletion
+prune stroke caches. Transformed previews and partial erase previews use
+the whole-stroke union in `ink_mesh.rs`. Highlighter hit envelopes remain
+conservatively rounded.
 
 `Drawing::formatting_strokes` resolves unlocked stroke descendants of selected
 roots in the current group scope. `StrokeStylePatch` edits one appearance field

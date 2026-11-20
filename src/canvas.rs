@@ -83,6 +83,8 @@ struct Cached {
     pressures: Vec<Option<f32>>,
     view: Option<InkMeshKey>,
     tint: Option<Color32>,
+    tiled: Option<(InkMeshKey, ink_mesh::Tiles)>,
+    live: bool,
     coverage: Vec<Vec<u8>>,
     meshes: Vec<Arc<egui::Mesh>>,
     mesh_bounds: Vec<Rect>,
@@ -107,6 +109,8 @@ impl Cached {
             path,
             view: None,
             tint: None,
+            tiled: None,
+            live: false,
             coverage: Vec::new(),
             meshes: Vec::new(),
             mesh_bounds: Vec::new(),
@@ -115,6 +119,9 @@ impl Cached {
         }
     }
     fn truncate_meshes(&mut self, changed: usize, union: bool) {
+        if let Some((_, tiles)) = &mut self.tiled {
+            tiles.invalidate_tail(changed);
+        }
         let keep = if union {
             0
         } else {
@@ -166,18 +173,27 @@ impl Cached {
             } else {
                 let start = index * MESH_SEGMENTS;
                 let end = (start + MESH_SEGMENTS + 1).min(self.path.len());
-                tessellate(
-                    ui,
-                    rounded_shapes(
-                        &self.path[start..end],
-                        &self.pressures[start..end],
+                if stroke.visible_width() * transform.scale * f64::from(dpi) >= 18.0 {
+                    ink_mesh::opaque_round_mesh(
+                        (&self.path[start..end], &self.pressures[start..end]),
                         transform,
                         stroke,
-                        index > 0,
-                        Color32::WHITE,
                         dpi,
-                    ),
-                )
+                    )
+                } else {
+                    tessellate(
+                        ui,
+                        rounded_shapes(
+                            &self.path[start..end],
+                            &self.pressures[start..end],
+                            transform,
+                            stroke,
+                            index > 0,
+                            Color32::WHITE,
+                            dpi,
+                        ),
+                    )
+                }
             };
             let coverage: Vec<_> = mesh.vertices.iter().map(|v| v.color.a()).collect();
             ink_mesh::tint(&mut mesh, color, &coverage);
@@ -192,7 +208,41 @@ impl Cached {
         painter: &egui::Painter,
         transform: Transform,
         stroke: &Stroke,
+        retained: bool,
     ) {
+        let dpi = ui.ctx().pixels_per_point();
+        let clip = painter.clip_rect();
+        if !union_ink(stroke) {
+            self.tiled = None;
+        }
+        if retained
+            && union_ink(stroke)
+            && !self.path.is_empty()
+            && (self.live || self.tiled.is_some() || self.path.len() >= 32)
+            && clip.is_finite()
+        {
+            let key = InkMeshKey {
+                transform,
+                dpi,
+                union: true,
+                width: stroke.visible_width(),
+                pressure: stroke.pressure_style,
+                flat: stroke.pen_type == crate::pen::PenType::Highlighter,
+            };
+            let color = ink_color(stroke);
+            if self
+                .tiled
+                .as_ref()
+                .is_none_or(|(old, tiles)| *old != key || tiles.clip() != clip)
+            {
+                self.tiled = Some((key, ink_mesh::Tiles::new(clip, dpi, color, self.live)));
+            }
+            let (_, tiles) = self.tiled.as_mut().unwrap();
+            tiles.prepare((&self.path, &self.pressures), transform, stroke, color);
+            tiles.paint(painter);
+            self.rotation_preview = None;
+            return;
+        }
         self.prepare_meshes(ui, transform, stroke);
         self.rotation_preview = None;
         let clip = painter.clip_rect();
@@ -1011,6 +1061,8 @@ impl Canvas {
             pressures: Vec::new(),
             view: None,
             tint: None,
+            tiled: None,
+            live: true,
             coverage: Vec::new(),
             meshes: Vec::new(),
             mesh_bounds: Vec::new(),
@@ -1041,6 +1093,10 @@ impl Canvas {
             }
         }
         cached.bounds = (min, max);
+        cached.live = false;
+        if let Some((_, tiles)) = &mut cached.tiled {
+            tiles.finish();
+        }
     }
     fn paint(&mut self, ui: &egui::Ui, bounds: Rect, surface: Surface, transform: Transform) {
         let painter = ui
@@ -1308,9 +1364,9 @@ impl Canvas {
                         delta,
                         self.drawing.owner(),
                     );
-                    cached.paint(ui, &selected_painter, transform, stroke);
+                    cached.paint(ui, &selected_painter, transform, stroke, false);
                 } else {
-                    cached.paint(ui, &painter, transform, stroke);
+                    cached.paint(ui, &painter, transform, stroke, true);
                 }
             }
         }
@@ -1323,6 +1379,8 @@ impl Canvas {
                 pressures: Vec::new(),
                 view: None,
                 tint: None,
+                tiled: None,
+                live: true,
                 coverage: Vec::new(),
                 meshes: Vec::new(),
                 mesh_bounds: Vec::new(),
@@ -1342,7 +1400,7 @@ impl Canvas {
                     .extend_from_slice(&self.preview.pressures[changed..]);
                 cached.truncate_meshes(changed, union_ink(stroke));
             }
-            cached.paint(ui, &painter, transform, stroke);
+            cached.paint(ui, &painter, transform, stroke, true);
         }
         if routing_active {
             for c in routing_hints {
@@ -1642,24 +1700,39 @@ mod tests {
     #[ignore]
     fn ink_frame_benchmark() {
         use std::time::Instant;
+        let filter = std::env::var("XITOC_INK_CASE").ok();
+        let frame_limit = std::env::var("XITOC_INK_FRAMES").ok().map(|n| {
+            n.parse::<usize>()
+                .expect("XITOC_INK_FRAMES must be a frame count")
+                .max(5)
+        });
         for (name, width, alpha, pressure, frames, batch, existing, scale) in [
             ("thin", 2.0, 255, false, 360, 2, 0, 1.0),
             ("medium", 8.0, 255, false, 360, 2, 0, 1.0),
             ("thick", 25.0, 255, false, 360, 2, 0, 1.0),
             ("very thick", 60.0, 255, false, 360, 2, 0, 1.0),
-            ("highlight", 25.0, 89, false, 360, 2, 0, 1.0),
-            ("wide highlight", 60.0, 89, false, 360, 2, 0, 1.0),
+            ("highlight", 25.0, 102, false, 360, 2, 0, 1.0),
+            ("wide highlight", 60.0, 102, false, 360, 2, 0, 1.0),
             ("long", 60.0, 255, false, 1440, 2, 0, 1.0),
             ("rapid", 60.0, 255, false, 360, 8, 0, 1.0),
             ("pressure", 60.0, 255, true, 360, 2, 0, 2.0),
-            ("over ink", 60.0, 89, false, 360, 2, 36, 1.0),
+            ("over ink", 60.0, 102, false, 360, 2, 36, 1.0),
+            ("long highlight", 60.0, 102, false, 1440, 2, 0, 1.0),
+            ("highlight 400%", 25.0, 102, false, 360, 2, 0, 4.0),
+            ("translucent round", 60.0, 102, true, 360, 2, 0, 1.0),
+            ("mixed canvas", 60.0, 102, false, 360, 2, 36, 1.0),
+            ("separate highlights", 24.0, 102, false, 360, 2, 0, 2.5),
         ] {
+            if filter.as_deref().is_some_and(|case| case != name) {
+                continue;
+            }
+            let frames = frame_limit.map_or(frames, |limit| frames.min(limit));
             let ctx = egui::Context::default();
             let data = DocumentData::blank(DocumentKind::Whiteboard);
             let mut canvas = Canvas::new(&data);
             canvas.width = width;
             canvas.color = [28, 60, 140, alpha];
-            canvas.pen_type = if alpha < 255 {
+            canvas.pen_type = if alpha < 255 && !pressure {
                 crate::pen::PenType::Highlighter
             } else if pressure {
                 crate::pen::PenType::Pressure
@@ -1677,6 +1750,69 @@ mod tests {
                 }
                 assert!(canvas.drawing.add(stroke));
             }
+            if name == "mixed canvas" {
+                use crate::{
+                    connector::{Connector, Endpoint, Port},
+                    formula::{FormulaLayout, FormulaObject},
+                    image_object::{ImageObject, test_support},
+                    shape::{Shape, ShapeKind},
+                    text::TextObject,
+                };
+                crate::text_layout::install(&ctx);
+                for row in 0..6 {
+                    let y = 45. + f64::from(row) * 100.;
+                    let surface = Surface::Canvas;
+                    let a = Shape::create(
+                        data.id(),
+                        surface,
+                        ShapeKind::Rectangle,
+                        [150., y],
+                        [220., y + 55.],
+                        false,
+                    )
+                    .unwrap();
+                    let b = Shape::create(
+                        data.id(),
+                        surface,
+                        ShapeKind::Ellipse,
+                        [290., y],
+                        [350., y + 55.],
+                        false,
+                    )
+                    .unwrap();
+                    let wire = Connector::new(
+                        data.id(),
+                        surface,
+                        Endpoint::attached(&a, Port::Right).unwrap(),
+                        Endpoint::attached(&b, Port::Left).unwrap(),
+                        Default::default(),
+                    );
+                    assert!(canvas.drawing.add_shape(a));
+                    assert!(canvas.drawing.add_shape(b));
+                    assert!(canvas.drawing.add_connector(wire));
+                    let image =
+                        ImageObject::new(data.id(), surface, [720., y], test_support::asset());
+                    let mut text = TextObject::new(data.id(), surface, [470., y], 200.);
+                    text.content_mut().text = "XiToc mixed canvas fixture".into();
+                    let mut formula = FormulaObject::new(
+                        data.id(),
+                        surface,
+                        [850., y],
+                        r"\frac{1}{\sqrt{2}}".into(),
+                        [40, 40, 40, 255],
+                    );
+                    formula.layout = FormulaLayout {
+                        width: 80.,
+                        height: 40.,
+                        baseline: 28.,
+                    };
+                    assert!(canvas.drawing.insert_snapshots(vec![
+                        image.into(),
+                        text.into(),
+                        formula.into()
+                    ]));
+                }
+            }
             let point = |i: usize| {
                 let t = i as f32 * 0.012;
                 egui::pos2(585.0 + 460.0 * t.sin(), 360.0 + 250.0 * (t * 1.71).sin())
@@ -1685,13 +1821,10 @@ mod tests {
             let mut stroke_times = Vec::new();
             let mut tess_times = Vec::new();
             let (mut vertices, mut triangles, mut textures) = (0, 0, 0);
+            let (mut batches, mut peak_bytes, mut texture_bytes) = (0, 0, 0);
             for frame in 0..=frames {
-                let events = if frame == 0 {
-                    vec![]
-                } else if frame == 1 {
-                    pen_events(0, point(0), 0.4, egui::Modifiers::NONE)
-                } else {
-                    ((frame - 2) * batch + 1..=(frame - 1) * batch)
+                let move_events = |first, last| {
+                    (first..=last)
                         .flat_map(|i| {
                             pen_events(
                                 1,
@@ -1701,6 +1834,22 @@ mod tests {
                             )
                         })
                         .collect()
+                };
+                let events = if frame == 0 {
+                    vec![]
+                } else if name == "separate highlights" {
+                    let step = (frame - 1) % 15;
+                    let offset = (frame - 1) / 15 % 3;
+                    let i = step * batch + offset;
+                    match step {
+                        0 => pen_events(0, point(i), 0.5, egui::Modifiers::NONE),
+                        14 => pen_events(2, point(i), 0.5, egui::Modifiers::NONE),
+                        _ => move_events(i - 1, i),
+                    }
+                } else if frame == 1 {
+                    pen_events(0, point(0), 0.4, egui::Modifiers::NONE)
+                } else {
+                    move_events((frame - 2) * batch + 1, (frame - 1) * batch)
                 };
                 let start = Instant::now();
                 let mut output = ctx.run_ui(
@@ -1736,6 +1885,15 @@ mod tests {
                 let meshes = ctx.tessellate(output.shapes, output.pixels_per_point);
                 let end = Instant::now();
                 let texture_updates = output.textures_delta.set.len();
+                if frame > 1 {
+                    texture_bytes += output
+                        .textures_delta
+                        .set
+                        .values()
+                        .flat_map(|deltas| deltas.iter())
+                        .map(|delta| delta.image.width() * delta.image.height() * 4)
+                        .sum::<usize>();
+                }
                 output.textures_delta.clear();
                 if frame <= 1 {
                     continue;
@@ -1743,15 +1901,21 @@ mod tests {
                 textures += texture_updates;
                 vertices = 0;
                 triangles = 0;
+                batches = meshes.len();
                 for primitive in meshes {
                     if let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive {
                         vertices += mesh.vertices.len();
                         triangles += mesh.indices.len() / 3;
                     }
                 }
+                let bytes = vertices * std::mem::size_of::<egui::epaint::Vertex>() + triangles * 12;
+                peak_bytes = peak_bytes.max(bytes);
                 frame_times.push((end - start).as_secs_f64() * 1000.0);
                 stroke_times.push((stroke_end - start).as_secs_f64() * 1000.0);
                 tess_times.push((end - stroke_end).as_secs_f64() * 1000.0);
+            }
+            if name == "separate highlights" {
+                assert_eq!(canvas.drawing.strokes().len(), frames / 15);
             }
             let mean = |times: &[f64]| times.iter().sum::<f64>() / times.len() as f64;
             let quarter = frame_times.len() / 4;
@@ -1759,7 +1923,7 @@ mod tests {
             let last = mean(&frame_times[frame_times.len() - quarter..]);
             frame_times.sort_by(f64::total_cmp);
             println!(
-                "{name:15} frame mean/p95/max {:.3}/{:.3}/{:.3} ms, canvas {:.3}, final tess {:.3}, first/last {:.3}/{:.3}, vertices {vertices}, triangles {triangles}, texture deltas {textures}",
+                "{name:15} frame mean/p95/max {:.3}/{:.3}/{:.3} ms, canvas {:.3}, final tess {:.3}, first/last {:.3}/{:.3}, vertices {vertices}, triangles {triangles}, draw batches {batches}, peak mesh bytes {peak_bytes}, texture deltas {textures} ({texture_bytes} B)",
                 mean(&frame_times),
                 frame_times[frame_times.len() * 95 / 100],
                 frame_times[frame_times.len() - 1],
@@ -1857,13 +2021,23 @@ mod tests {
         let id = stroke.id;
         assert!(canvas.drawing.add(stroke));
         frame(&ctx, &mut canvas, Surface::Canvas, vec![]);
-        let meshes = canvas.cache[&id].meshes.clone();
+        let meshes: Vec<_> = canvas.cache[&id]
+            .tiled
+            .as_ref()
+            .unwrap()
+            .1
+            .meshes()
+            .map(|(clip, mesh)| (clip, mesh.clone()))
+            .collect();
         // Independent strict triangle inclusion: one opaque-interior alpha sample
         // per position, even near sample joins and both sides of chunk boundaries.
         for x in [40.31, 147.91, 148.11, 200.37, 275.91, 276.11] {
             let point = egui::pos2(x, 100.17);
             let mut hits = 0;
-            for mesh in &meshes {
+            for (clip, mesh) in &meshes {
+                if !clip.contains(point) {
+                    continue;
+                }
                 for tri in mesh.indices.as_chunks::<3>().0 {
                     let a = mesh.vertices[tri[0] as usize];
                     let b = mesh.vertices[tri[1] as usize];
@@ -1883,12 +2057,65 @@ mod tests {
             assert_eq!(hits, 1, "sample {x} must not darken at joins");
         }
         frame(&ctx, &mut canvas, Surface::Canvas, vec![]);
+        let stable = canvas.cache[&id].tiled.as_ref().unwrap().1.meshes();
         assert!(
             meshes
                 .iter()
-                .zip(&canvas.cache[&id].meshes)
-                .all(|(a, b)| Arc::ptr_eq(a, b))
+                .zip(stable)
+                .all(|((_, a), (_, b))| Arc::ptr_eq(a, b))
         );
+    }
+
+    #[test]
+    fn released_highlighter_keeps_tile_geometry_and_one_history_entry() {
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        let ctx = egui::Context::default();
+        let mut canvas = Canvas::new(&data);
+        canvas.pen_type = crate::pen::PenType::Highlighter;
+        canvas.color = [100, 60, 10, 102];
+        canvas.width = 24.0;
+        let start = egui::pos2(40.0, 160.0);
+        let end = egui::pos2(330.0, 180.0);
+        frame(
+            &ctx,
+            &mut canvas,
+            Surface::Canvas,
+            vec![button(start, true)],
+        );
+        let mut movement: Vec<_> = (1..80)
+            .map(|i| Event::PointerMoved(start.lerp(end, i as f32 / 80.0)))
+            .collect();
+        movement.push(Event::PointerMoved(end));
+        frame(&ctx, &mut canvas, Surface::Canvas, movement);
+        let Some(Gesture::Pen(stroke)) = &canvas.gesture else {
+            panic!("active stroke")
+        };
+        let id = stroke.id;
+        let points = stroke.points.clone();
+        let meshes: Vec<_> = canvas.cache[&id]
+            .tiled
+            .as_ref()
+            .unwrap()
+            .1
+            .meshes()
+            .map(|(_, mesh)| mesh.clone())
+            .collect();
+        assert!(!meshes.is_empty());
+        frame(&ctx, &mut canvas, Surface::Canvas, vec![button(end, false)]);
+        assert_eq!(canvas.drawing.strokes().len(), 1);
+        assert_eq!(canvas.drawing.strokes()[0].points, points);
+        let completed = canvas.cache[&id].tiled.as_ref().unwrap().1.meshes();
+        assert_eq!(completed.count(), meshes.len());
+        let completed = canvas.cache[&id].tiled.as_ref().unwrap().1.meshes();
+        assert!(
+            completed
+                .zip(meshes)
+                .all(|((_, mesh), old)| Arc::ptr_eq(mesh, &old))
+        );
+        canvas.undo();
+        assert!(canvas.drawing.strokes().is_empty() && !canvas.cache.contains_key(&id));
+        canvas.redo();
+        assert_eq!(canvas.drawing.strokes()[0].points, points);
     }
 
     #[test]

@@ -7,6 +7,10 @@ use i_overlay::{
     mesh::float::{outline::offset::OutlineOffset, style::OutlineStyle},
 };
 
+#[path = "ink_tiles.rs"]
+mod tiles;
+pub(super) use tiles::Tiles;
+
 type Contour = Vec<[f64; 2]>;
 type StrokePiece<'a> = (&'a [[f64; 2]], &'a [Option<f32>]);
 
@@ -21,40 +25,68 @@ pub(super) fn mesh(
         if stroke.pen_type == crate::pen::PenType::Highlighter && path.len() > 1 {
             flat_contours(path, pressures, transform, stroke, &mut contours);
         } else {
-            for shape in rounded_shapes(
-                path,
-                pressures,
-                transform,
-                stroke,
-                false,
-                Color32::WHITE,
-                dpi,
-            ) {
-                let contour = match shape {
-                    Shape::Circle(circle) => {
-                        let n = ((circle.radius * dpi * 3.0).sqrt() * 4.0)
-                            .ceil()
-                            .clamp(8.0, 64.0) as usize;
-                        (0..n)
-                            .map(|i| {
-                                let angle = std::f32::consts::TAU * i as f32 / n as f32;
-                                circle.center + Vec2::angled(angle) * circle.radius
-                            })
-                            .collect()
-                    }
-                    Shape::Path(path) => path.points,
-                    _ => unreachable!(),
-                };
-                add_contour(contour, &mut contours);
-            }
+            round_contours(path, pressures, transform, stroke, dpi, &mut contours);
         }
     }
-    let mut mesh = Mesh::default();
+    coverage_mesh(&union(&contours), dpi)
+}
+
+fn round_contours(
+    path: &[[f64; 2]],
+    pressures: &[Option<f32>],
+    transform: Transform,
+    stroke: &Stroke,
+    dpi: f32,
+    contours: &mut Vec<Contour>,
+) {
+    for shape in rounded_shapes(
+        path,
+        pressures,
+        transform,
+        stroke,
+        false,
+        Color32::WHITE,
+        dpi,
+    ) {
+        let contour = match shape {
+            Shape::Circle(circle) => {
+                let n = ((circle.radius * dpi * 3.0).sqrt() * 4.0)
+                    .ceil()
+                    .clamp(8.0, 64.0) as usize;
+                (0..n)
+                    .map(|i| {
+                        let angle = std::f32::consts::TAU * i as f32 / n as f32;
+                        circle.center + Vec2::angled(angle) * circle.radius
+                    })
+                    .collect()
+            }
+            Shape::Path(path) => path.points,
+            Shape::LineSegment {
+                points: [a, b],
+                stroke,
+            } => {
+                let d = (b - a).normalized().rot90() * (stroke.width * 0.5);
+                vec![a - d, b - d, b + d, a + d]
+            }
+            _ => unreachable!(),
+        };
+        add_contour(contour, contours);
+    }
+}
+
+fn union(contours: &[Contour]) -> Vec<Vec<Contour>> {
     if contours.is_empty() {
+        return Vec::new();
+    }
+    FloatOverlay::<[f64; 2], i64>::from_subj(contours)
+        .overlay(OverlayRule::Subject, FillRule::NonZero)
+}
+
+fn coverage_mesh(union: &[Vec<Contour>], dpi: f32) -> Mesh {
+    let mut mesh = Mesh::default();
+    if union.is_empty() {
         return mesh;
     }
-    let union = FloatOverlay::<[f64; 2], i64>::from_subj(&contours)
-        .overlay(OverlayRule::Subject, FillRule::NonZero);
     let pixel = 1.0 / f64::from(dpi);
     let expanded = union.outline_as::<i64>(&OutlineStyle::new(pixel));
     let fringe = expanded.overlay_as::<i64>(&union, OverlayRule::Difference, FillRule::NonZero);
@@ -63,7 +95,7 @@ pub(super) fn mesh(
     let key = |p: [f64; 2]| p.map(|v| (v as f32 + 0.0).to_bits());
     let boundary: std::collections::HashSet<_> =
         union.iter().flatten().flatten().copied().map(key).collect();
-    for polygon in &union {
+    for polygon in union {
         triangulate(&mut mesh, polygon, |_| Color32::WHITE);
     }
     for polygon in &fringe {
@@ -123,47 +155,89 @@ fn flat_contours(
     stroke: &Stroke,
     contours: &mut Vec<Contour>,
 ) {
-    let points: Vec<_> = path
-        .iter()
-        .map(|point| {
-            let [x, y] = transform.to_screen(*point);
-            egui::pos2(x as f32, y as f32)
-        })
-        .collect();
-    let directions: Vec<_> = points
-        .windows(2)
-        .map(|p| (p[1] - p[0]).normalized())
-        .collect();
-    let radius = |i: usize| {
-        (0.5 * stroke.visible_width()
-            * transform.scale
-            * stroke.pressure_style.factor(pressures[i])) as f32
-    };
-    if directions.iter().all(|d| *d == Vec2::ZERO) {
-        let radius = (0..pressures.len()).map(radius).fold(0.0_f32, f32::max);
+    let start = contours.len();
+    flat_range(
+        path,
+        pressures,
+        transform,
+        stroke,
+        0.0,
+        0..path.len() - 1,
+        contours,
+    );
+    if contours.len() == start {
+        let radius = pressures
+            .iter()
+            .map(|force| nib_radius(stroke, transform, *force))
+            .fold(0.0_f32, f32::max);
+        let center = screen_point(transform, path[0]);
         add_contour(
             (0..24)
-                .map(|i| points[0] + radius * Vec2::angled(std::f32::consts::TAU * i as f32 / 24.0))
+                .map(|i| center + radius * Vec2::angled(std::f32::consts::TAU * i as f32 / 24.0))
                 .collect(),
             contours,
         );
-        return;
     }
-    let mut previous = None::<Vec2>;
-    for (i, direction) in directions.into_iter().enumerate() {
+}
+
+fn screen_point(transform: Transform, point: [f64; 2]) -> Pos2 {
+    let [x, y] = transform.to_screen(point);
+    egui::pos2(x as f32, y as f32)
+}
+
+fn nib_radius(stroke: &Stroke, transform: Transform, pressure: Option<f32>) -> f32 {
+    (0.5 * stroke.visible_width() * transform.scale * stroke.pressure_style.factor(pressure)) as f32
+}
+
+fn flat_range(
+    path: &[[f64; 2]],
+    pressures: &[Option<f32>],
+    transform: Transform,
+    stroke: &Stroke,
+    tolerance: f32,
+    segments: std::ops::Range<usize>,
+    contours: &mut Vec<Contour>,
+) {
+    let point = |i: usize| screen_point(transform, path[i]);
+    let radius = |i: usize| nib_radius(stroke, transform, pressures[i]);
+    let mut previous = (0..segments.start).rev().find_map(|i| {
+        let d = (point(i + 1) - point(i)).normalized();
+        (d != Vec2::ZERO).then(|| d.rot90() * radius(i + 1))
+    });
+    let samples: Vec<_> = (segments.start..=segments.end)
+        .map(|i| (point(i), radius(i)))
+        .collect();
+    // Keep the boundary tangents, including the live nib's final segment.
+    // Interior samples use a subpixel bound on center/radius displacement.
+    let kept = if samples.len() < 5 {
+        (0..samples.len()).collect::<Vec<_>>()
+    } else {
+        let mut kept = vec![0];
+        kept.extend(
+            super::simplify_swept_disks(&samples[1..samples.len() - 1], tolerance)
+                .into_iter()
+                .map(|index| index + 1),
+        );
+        kept.push(samples.len() - 1);
+        kept
+    };
+    for segment in kept.windows(2) {
+        let (a, ra) = samples[segment[0]];
+        let (b, rb) = samples[segment[1]];
+        let direction = (b - a).normalized();
         if direction == Vec2::ZERO {
             continue;
         }
         let offset = Vec2::new(-direction.y, direction.x);
-        let (a, b) = (points[i], points[i + 1]);
-        let (start, end) = (offset * radius(i), offset * radius(i + 1));
+        let (start, end) = (offset * ra, offset * rb);
         add_contour(vec![a - start, b - end, b + end, a + start], contours);
         if let Some(previous) = previous {
-            // A bevel closes the outside of the join without folding the nib
-            // back across itself when the centerline makes a sharp turn.
-            for side in [-1.0, 1.0] {
-                add_contour(vec![a, a + previous * side, a + start * side], contours);
-            }
+            // The two cross sections form a bevel. Use their convex hull so
+            // the join overlaps the adjacent strips, including at reversals.
+            add_contour(
+                vec![a - previous, a - start, a + previous, a + start],
+                contours,
+            );
         }
         previous = Some(end);
     }
@@ -175,6 +249,131 @@ fn vertex(mesh: &mut Mesh, pos: Pos2, color: Color32) {
         uv: WHITE_UV,
         color,
     });
+}
+
+/// Tessellate the tangent strip of the pressure disks, plus just the exposed
+/// arcs at joins and caps. The fringe is confined to the exterior boundaries.
+pub(super) fn opaque_round_mesh(
+    (path, pressures): StrokePiece<'_>,
+    transform: Transform,
+    stroke: &Stroke,
+    dpi: f32,
+) -> Mesh {
+    use std::f32::consts::{PI, TAU};
+    let aa = 1.0 / dpi;
+    let samples: Vec<_> = path
+        .iter()
+        .zip(pressures)
+        .map(|(&p, &force)| {
+            (
+                screen_point(transform, p),
+                nib_radius(stroke, transform, force),
+            )
+        })
+        .collect();
+    let kept = super::simplify_swept_disks(&samples, 0.2 * aa);
+    let mut points = kept.into_iter().map(|i| samples[i]);
+    let mut mesh = Mesh::default();
+    let Some((mut a, mut ra)) = points.next() else {
+        return mesh;
+    };
+    let mut last: Option<(Vec2, f32, Vec2)> = None;
+    for (b, rb) in points {
+        let delta = b - a;
+        let length = delta.length();
+        if length == 0.0 && ra == rb {
+            continue;
+        }
+        let slope = (ra - rb) / length;
+        if slope.abs() >= 1.0 {
+            // The steep endpoint contains the entire segment. Both endpoints
+            // may still border exposed parts of their neighboring strips.
+            if let Some((_, tilt, right)) = last.take() {
+                arc(&mut mesh, a, right, PI - 2.0 * tilt, ra, aa);
+            }
+            let (center, radius) = if ra >= rb { (a, ra) } else { (b, rb) };
+            arc(&mut mesh, center, Vec2::X, TAU, radius, aa);
+            (a, ra) = (b, rb);
+            continue;
+        }
+        let dir = delta / length;
+        let normal = dir.rot90() * (1.0 - slope * slope).sqrt();
+        let left = dir * slope + normal;
+        let right = dir * slope - normal;
+        let tilt = slope.asin();
+        if let Some((previous, prior_tilt, prior_right)) = last {
+            let cross = previous.x * dir.y - previous.y * dir.x;
+            let turn = cross.atan2(previous.dot(dir));
+            let right_sweep = turn + tilt - prior_tilt;
+            let left_sweep = turn - tilt + prior_tilt;
+            if right_sweep > 0.0001 {
+                arc(&mut mesh, a, prior_right, right_sweep, ra, aa);
+            }
+            if left_sweep < -0.0001 {
+                arc(&mut mesh, a, left, -left_sweep, ra, aa);
+            }
+        } else {
+            arc(&mut mesh, a, left, PI + 2.0 * tilt, ra, aa);
+        }
+        let base = mesh.vertices.len() as u32;
+        // Share a subpixel area with the radial edges of caps and joins.
+        let overlap = dir * (0.05 * aa);
+        for (point, radius, offset) in [
+            (a - overlap, ra, right),
+            (a - overlap, ra, left),
+            (b + overlap, rb, right),
+            (b + overlap, rb, left),
+        ] {
+            vertex(&mut mesh, point + offset * radius, Color32::WHITE);
+            vertex(
+                &mut mesh,
+                point + offset * (radius + aa),
+                Color32::TRANSPARENT,
+            );
+        }
+        for index in [
+            0, 2, 4, 2, 6, 4, // core
+            0, 4, 1, 1, 4, 5, // right fringe
+            2, 3, 6, 3, 7, 6, // left fringe
+        ] {
+            mesh.indices.push(base + index);
+        }
+        last = Some((dir, tilt, right));
+        (a, ra) = (b, rb);
+    }
+    if let Some((_, tilt, right)) = last {
+        arc(&mut mesh, a, right, PI - 2.0 * tilt, ra, aa);
+    } else if mesh.is_empty() {
+        arc(&mut mesh, a, Vec2::X, TAU, ra, aa);
+    }
+    mesh
+}
+
+fn arc(mesh: &mut Mesh, center: Pos2, start: Vec2, sweep: f32, radius: f32, aa: f32) {
+    // Bound the polygon sagitta to 0.15 physical pixels.
+    let step = (1.0 - 0.15 * aa / (radius + aa)).acos() * 2.0;
+    let steps = (sweep.abs() / step).ceil().clamp(1.0, 128.0) as u32;
+    let base = mesh.vertices.len() as u32;
+    vertex(mesh, center, Color32::WHITE);
+    for i in 0..=steps {
+        let n = if i == 0 {
+            start
+        } else {
+            let rotation = Vec2::angled(sweep * i as f32 / steps as f32);
+            egui::vec2(
+                start.x * rotation.x - start.y * rotation.y,
+                start.y * rotation.x + start.x * rotation.y,
+            )
+        };
+        vertex(mesh, center + n * radius, Color32::WHITE);
+        vertex(mesh, center + n * (radius + aa), Color32::TRANSPARENT);
+        if i > 0 {
+            let a = base + 2 * i - 1;
+            let b = a + 2;
+            mesh.indices
+                .extend([base, a, b, a, a + 1, b, b, a + 1, b + 1]);
+        }
+    }
 }
 
 pub(super) fn tint(mesh: &mut Mesh, color: Color32, coverage: &[u8]) {

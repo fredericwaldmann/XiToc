@@ -1922,3 +1922,46 @@ and draw over previously committed ink. Check caps and joins, perform a lasso
 move and rotation, and undo/redo. For transparency, draw one crossing gesture
 then a second separate crossing stroke. M1.15 should render the same-stroke
 crossing at uniform opacity and the separate-stroke crossing darker.
+
+## Phase 2 thick pen and highlighter rendering (#57)
+
+Run the canvas fixture in release mode:
+
+```sh
+cargo test --release ink_frame_benchmark -- --ignored --nocapture
+XITOC_INK_CASE='long highlight' cargo test --release ink_frame_benchmark -- --ignored --nocapture
+```
+
+`XITOC_INK_FRAMES=40` limits every workload for a paired comparison. The
+fixture uses the actual controller, ordered synthetic input events, smoothing,
+pressure, view caches and egui mesh assembly. It lays out a 1200×720 canvas
+in a 1280×800 screen at 1× device pixel ratio, with separate zoom fixtures
+at 200% and 400%. The default crossing trajectory supplies two samples per
+frame. The rapid case supplies eight. The long cases supply 2,879 input
+points over 1,440 frames, equivalent to 24 seconds at 60 Hz. The mixed scene
+adds 36 ink strokes, 12 shapes, six magnetic connectors and six each of
+images, rich text and LaTeX formulas. The repeated case draws 24 separate
+overlapping highlighters. Transparent cases use 40% opacity.
+
+Timings report mean, p95 and maximum, the controller plus canvas stage,
+final egui tessellation/assembly, and mean time in the first and last
+quarters. The last frame reports mesh vertices, triangles and draw batches.
+Peak bytes represent the visible Glow vertex/index payload per frame,
+excluding driver overhead and retained cache memory. Texture bytes sum
+the RGBA deltas after warmup. Headless results measure CPU throughput.
+Browser tests exercise input handling and WebGL submission separately.
+Physical input-to-photon time, GPU execution time and allocator counts
+require separate instrumentation.
+
+Automated regressions exercise retained tile Arc identity, changing-tail
+updates, coverage across tile boundaries, pressure and self-crossings at
+50–400%, distinct per-stroke coverage, release mesh reuse and undo/redo
+cleanup. The existing formatting, erasing, rotation and selection tests
+continue to exercise editable stroke semantics.
+
+For a GUI check, use a Whiteboard and a 24 pt pen or highlighter at roughly
+250% zoom to reach a 60 pt screen footprint. Draw continuously for at
+least 20 seconds and inspect the pointer endpoint, joins and release.
+Cross a 40% highlighter over itself, then cross it with another stroke.
+The second stroke should darken the overlap. Use a pressure stylus if
+available, then lasso the ink, change its width and test undo and redo.

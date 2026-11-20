@@ -1160,3 +1160,35 @@ samples, smoothing, object order and transforms. Visible PDF graphics must fill
 a unioned variable-width outline once or use an equivalent isolated per-stroke
 transparency group so self-crossings match the editor. Separate PDF strokes must
 composite in document order. Current PDF persistence remains unchanged.
+
+
+### Phase 2 ink rendering (#57)
+
+The stroke controller consumes ordered samples in the canvas pass. Adaptive
+smoothing updates a bounded trailing part of the path and emits the latest
+confirmed position immediately. The displayed path and interpolated pressure
+flow into the same cache when the gesture enters history.
+
+Wide opaque strokes use tangent quads around the pressure-dependent disks.
+Only exposed arcs are tessellated. The arc subdivision depends on radius
+and angle, with a 0.15 physical-pixel sagitta target. The previous sweep
+simplification and chunk culling still apply. Thin strokes keep the atlas
+path. Very steep radius changes use the containing endpoint disk.
+
+Translucent strokes maintain stable and provisional coverage in screen tiles.
+A change updates the tiles touched by the previous and revised tail and
+promotes stable batches to each tile's union. Full interior and antialiased
+fringe are triangulated together with a padded working area. Tile meshes are clipped to disjoint physical-pixel-aligned regions while
+retaining interpolated fringe coverage. This lets tiles share the canvas
+scissor and each pixel receives one contribution from the stroke.
+Separate strokes use source-over in document order. The viewport limits
+retained screen tiles per stroke. Working unions are released on completion.
+Pan, zoom, DPI, viewport or geometry style invalidate the derived view.
+The original whole-stroke union is also used by manipulation and erase
+previews where normal viewport tiles would be clipped in the wrong space.
+
+Both targets still use egui and Glow. egui assembles visible meshes each
+frame and Glow streams the resulting vertex/index data. The change reduces
+opaque mesh payload and translucent rebuild work using the existing renderer.
+It adds no stroke textures, shaders or native/WASM-specific GPU resources.
+The canonical editable path and independent PDF storage rules are unaffected.
