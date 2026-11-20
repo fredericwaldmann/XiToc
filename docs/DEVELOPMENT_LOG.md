@@ -861,3 +861,15 @@ Phase 2 draws opaque tangent strips and exposed pressure arcs, and retains
 per-stroke coverage in viewport tiles for translucent ink. Stroke completion
 keeps the same meshes and releases the union working state. See the
 architecture and test plan for invalidation, compositing and measurements.
+
+## File-based Code Listings (#64)
+
+Added scientific read-only source listings on either canvas, with immutable
+binary resources, offline grammar highlighting, three presets, reusable
+global and document styles, validated listing directives, and the existing
+file and canvas commands. Source replacement and document styles participate
+in history. PDF round-trip support remains M2 work.
+
+## Scientific Code Listings
+
+Revised #64 to replace contextual controls and source inspection with one LaTeX-style dialog. Added persisted presets and default, original-line selection, content-sized frames, and native link refresh with snapshot fallback.

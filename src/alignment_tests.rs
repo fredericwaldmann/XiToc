@@ -376,7 +376,7 @@ fn active_alt_override_and_escape_keep_membership_and_original_geometry() {
         true,
     );
     near(c.selection_preview(s).unwrap().apply([100., 100.])[0], 300.);
-    c.selection_sample(s, [317., 268.], 1., false, true);
+    c.selection_sample(s, [317., 268.], 1., false, true, None);
     near(c.selection_preview(s).unwrap().apply([100., 100.])[0], 297.);
     assert_eq!(c.selection.ids, ids(&[a]));
     assert!(
@@ -387,7 +387,7 @@ fn active_alt_override_and_escape_keep_membership_and_original_geometry() {
             .iter()
             .all(Option::is_none)
     );
-    c.selection_sample(s, [317., 268.], 1., false, false);
+    c.selection_sample(s, [317., 268.], 1., false, false, None);
     near(c.selection_preview(s).unwrap().apply([100., 100.])[0], 300.);
     frame(
         &ctx,
@@ -586,7 +586,7 @@ fn rotated_handle_snaps_world_grip_and_preserves_the_opposite_local_corner() {
         start: handles[2],
         moved: false,
     });
-    c.selection_sample(s, proposed, 1., false, false);
+    c.selection_sample(s, proposed, 1., false, false, None);
     let Some(SelectionGesture::ShapeEdit { preview, .. }) = &c.selection_gesture else {
         panic!()
     };
@@ -712,7 +712,7 @@ fn snapped_resize_crossing_an_anchor_keeps_the_original_normalization_policy() {
         start,
         moved: false,
     });
-    c.selection_sample(s, target, 1., false, false);
+    c.selection_sample(s, target, 1., false, false, None);
     let Some(SelectionGesture::ShapeEdit { preview, .. }) = &c.selection_gesture else {
         panic!()
     };
@@ -737,7 +737,7 @@ fn grouped_resize_snaps_one_uniform_factor_without_normalizing_child_geometry() 
         start[1] + (original.max[1] - original.min[1]) * 0.4,
     ];
     c.start_transform(s, start, Some(2), 1.);
-    c.selection_sample(s, end, 1., false, false);
+    c.selection_sample(s, end, 1., false, false, None);
     let delta = c.selection_preview(s).unwrap();
     near(original.placed(delta).max[0], bounds(&c, reference).min[0]);
     let before = c.drawing.items().to_vec();
@@ -768,7 +768,7 @@ fn page_clamping_and_axis_snaps_remain_independent_for_far_outside_pointer_sampl
     c.selection.change([a], Membership::Replace, &c.drawing);
     frame(&ctx, &mut c, s, t(), vec![], 0., true);
     c.start_transform(s, [120., 120.], None, 1.);
-    c.selection_sample(s, [317., -900.], 1., false, false);
+    c.selection_sample(s, [317., -900.], 1., false, false, None);
     let actual = bounds(&c, a).placed(c.selection_preview(s).unwrap());
     let expected = bounds(&c, reference);
     near(actual.min[0], expected.min[0]);

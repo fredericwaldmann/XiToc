@@ -402,6 +402,12 @@ impl XiTocApp {
                         opened.editor.canvas.latex_dialog.show(ui.ctx(), &mut opened.editor.canvas.drawing, &self.preferences.latex);
                         opened.loaded.document.data.latex = opened.editor.canvas.drawing.latex.clone();
                         opened.editor.show(ui, &opened.loaded.document.data);
+                        let latex = &opened.editor.canvas.latex;
+                        if self.preferences.latex != *latex {
+                            self.preferences.latex = latex.clone();
+                            self.preferences_writable = true;
+                            self.preferences_changed_at = Some(ui.input(|i| i.time));
+                        }
                         if std::mem::take(&mut opened.editor.canvas.open_global_latex) { self.settings_dialog.open_latex(); }
                         if let Some(notice)=opened.editor.canvas.notice.take(){self.status=notice;}
                     }
@@ -442,7 +448,9 @@ impl XiTocApp {
             return;
         }
         if let Some(active) = self.active {
-            self.documents[active].editor.canvas.finish();
+            let canvas = &mut self.documents[active].editor.canvas;
+            canvas.dismiss_listing_configuration();
+            canvas.finish();
         }
         let editor = self.editor(&loaded.document.data);
         self.documents.push(Opened { loaded, editor });
@@ -459,7 +467,9 @@ impl XiTocApp {
 
     fn activate(&mut self, index: usize) {
         if let Some(active) = self.active {
-            self.documents[active].editor.canvas.finish();
+            let canvas = &mut self.documents[active].editor.canvas;
+            canvas.dismiss_listing_configuration();
+            canvas.finish();
         }
         self.active = Some(index);
     }

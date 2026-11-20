@@ -42,6 +42,8 @@ struct ImageBundle {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AttachmentReference {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    listing: Option<crate::code_listing::Listing>,
     id: Uuid,
     document_id: Uuid,
     surface: Surface,
@@ -255,6 +257,7 @@ impl ObjectBundle {
                         .entry(a.asset.id())
                         .or_insert_with(|| a.asset.clone());
                     let data = AttachmentReference {
+                        listing: a.listing.clone(),
                         id: a.id,
                         document_id: a.document_id,
                         surface: a.surface,
@@ -332,6 +335,7 @@ impl ObjectBundle {
                         placement: a.placement,
                         dimensions: a.dimensions,
                         original_name: a.original_name,
+                        listing: a.listing,
                         display_name: a.display_name,
                         locked: a.locked,
                         asset,
@@ -449,6 +453,30 @@ impl ObjectBundle {
         let center = bounds.center();
         let mut scale: f64 = 1.0;
         let mut position = target;
+        if let (Some(page), [ClipboardObject::Attachment(file)]) =
+            (drawing.bounds(surface), self.objects.as_slice())
+            && file.listing.is_some()
+        {
+            // A listing can overflow its paper. Keep the source font and frame
+            // geometry, clamping its anchor when the usual centered fit fails.
+            let overflows = (0..2).any(|i| bounds.max[i] - bounds.min[i] > page[i] - 2.);
+            if overflows {
+                let anchor = file.placement.apply([0.; 2]);
+                let position = std::array::from_fn(|i| {
+                    let offset = anchor[i] - center[i];
+                    (target[i] + offset).clamp(0.5, page[i] - 0.5) - offset
+                });
+                return self.insert_placed(
+                    drawing,
+                    surface,
+                    Placement {
+                        origin: center,
+                        position,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
         if let Some(page) = drawing.bounds(surface) {
             for (i, size) in page.into_iter().enumerate() {
                 scale = scale.min((size - 2.0) / (bounds.max[i] - bounds.min[i]).max(1e-9));

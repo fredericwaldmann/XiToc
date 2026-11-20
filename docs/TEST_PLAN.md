@@ -1965,3 +1965,21 @@ least 20 seconds and inspect the pointer endpoint, joins and release.
 Cross a 40% highlighter over itself, then cross it with another stroke.
 The second stroke should darken the overlap. Use a pressure stylus if
 available, then lasso the ink, change its width and test undo and redo.
+
+## Scientific Code Listings (#64)
+
+- On both layouts import a UTF-8 Python file. Double-click the listing and
+  confirm the unified dialog. Verify the Scientific default, all built-ins
+  and a custom default after app restart. Check invalid directive text stays
+  in the editor and Apply/Cancel have distinct results.
+- Enter `1-20, 25-32, 35, 37` on a 50-line file. Verify exact lines and original
+  numbers. Try overlaps, reversed ranges and out-of-range entries. Toggle the
+  filename title and enter a custom title. Resize, change wrapping and type
+  size, and navigate the whole listing using the canvas. Check page overflow.
+- Use Browse and native direct path entry. Validate invalid UTF-8 and missing
+  paths without changing the object. Atomically replace a link, rename it,
+  then restore it. Check snapshot fallback and resumed sync while settings
+  are open. Verify native polling and browser reselection.
+- Exercise oriented resizing, rotation reset, groups, cross-document paste,
+  locks, alignment and undo/redo. Verify refresh does not add a history step.
+  Try thousands of lines, very long lines, and multiple listings.

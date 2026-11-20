@@ -778,3 +778,18 @@ existing nib styles. Pen settings and presets apply to future strokes.
 Formatting retains the object selection and immediately updates the canvas.
 A slider or picker drag is one undoable action. Text fields retain keyboard
 focus while editing.
+
+## Scientific Code Listings (#64)
+
+Insert a listing through the existing top drawing toolbar. A single click
+selects it. Double-click its body or choose **Configure Code Listing…** in
+the generic object menu. **Code Listing** uses the LaTeX settings modal
+layout, width, scrollable form and explicit Apply/Cancel controls. The form
+contains source path or filename and Browse, presets, configuration text,
+line ranges and title. It owns custom preset and default actions. A
+provisional canvas preview reflects valid edits.
+
+Listings use read-only canvas text, measured dimensions, standard oriented
+handles and normal canvas navigation. An oversized Page Note listing shows
+a page overflow label and expands the editor's scrollable margin. The A4
+paper geometry and page ownership stay fixed. See [Code Listings](CODE_LISTINGS.md).

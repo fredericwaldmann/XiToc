@@ -1192,3 +1192,25 @@ frame and Glow streams the resulting vertex/index data. The change reduces
 opaque mesh payload and translucent rebuild work using the existing renderer.
 It adds no stroke textures, shaders or native/WASM-specific GPU resources.
 The canonical editable path and independent PDF storage rules are unaffected.
+
+## Scientific Code Listings (#64)
+
+Listings share Attachment geometry and the original-byte BinaryAsset.
+Authored state includes source path, preset snapshot, configuration text,
+line-range expression, title policy and preferred width. The app's existing
+LaTeX preferences persist named style snapshots and the import default.
+Listing directives stay separate from mathematical configuration.
+
+Canvas caches decoded text, offline highlighting, measured dimensions and
+text galleys. Layout uses all selected original lines and computes its frame
+from wrapped rows and title. Rendering culls source rows against the canvas
+viewport. Page overflow reserves editor margin without changing paper
+geometry. The same oriented frame and journal carry placement and geometry.
+
+Native polling does metadata checks and reads changed paths on a worker.
+Only paths explicitly chosen in this process are approved. Clipboard links
+are hints unless that path is already approved. Automatic synchronization
+updates the live object and derived bounds outside journal entries. Undo
+restores authored state, then the watcher reconciles the restored active
+link. Invalid or missing files retain the last valid snapshot. Web uses
+snapshots and explicit reselection. See [Code Listings](CODE_LISTINGS.md).

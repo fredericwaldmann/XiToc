@@ -19,6 +19,8 @@ pub struct Attachment {
     pub original_name: String,
     pub display_name: String,
     pub locked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listing: Option<crate::code_listing::Listing>,
     pub asset: Arc<BinaryAsset>,
 }
 
@@ -55,6 +57,7 @@ impl Attachment {
             display_name: name.clone(),
             original_name: name,
             locked: false,
+            listing: None,
             asset,
         }
     }
@@ -66,9 +69,13 @@ impl Attachment {
             && original_name(&self.original_name) == Some(self.original_name.as_str())
             && valid_name(&self.display_name)
             && self
-                .dimensions
-                .iter()
-                .all(|n| n.is_finite() && (16.0..=1e6).contains(n))
+                .listing
+                .as_ref()
+                .is_none_or(|listing| listing.valid() && self.asset.listing_text())
+            && self.dimensions.iter().all(|n| {
+                n.is_finite()
+                    && (16.0..=if self.listing.is_some() { 1e12 } else { 1e6 }).contains(n)
+            })
             && self
                 .corners()
                 .iter()
@@ -105,9 +112,22 @@ impl Attachment {
         for axis in 0..2 {
             let direction = initial[axis] - fixed[axis];
             if direction.abs() > 1e-7 {
-                let extent = ((target[axis] - fixed[axis]) * direction.signum())
-                    .clamp(if axis == 0 { 48. } else { 20. }, 1e6);
+                let extent = ((target[axis] - fixed[axis]) * direction.signum()).clamp(
+                    if self.listing.is_some() {
+                        if axis == 0 { 100. } else { 64. }
+                    } else if axis == 0 {
+                        48.
+                    } else {
+                        20.
+                    },
+                    1e6,
+                );
                 out.dimensions[axis] = extent;
+                if axis == 0
+                    && let Some(model) = &mut out.listing
+                {
+                    model.preferred_width = Some(extent);
+                }
                 if direction < 0. {
                     min[axis] = fixed[axis] - extent;
                 }
@@ -130,7 +150,11 @@ impl CanvasObject for Attachment {
         self.id
     }
     fn object_type(&self) -> ObjectType {
-        ObjectType::Attachment
+        if self.listing.is_some() {
+            ObjectType::CodeListing
+        } else {
+            ObjectType::Attachment
+        }
     }
     fn document_id(&self) -> Uuid {
         self.document_id

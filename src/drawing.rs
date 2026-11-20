@@ -216,8 +216,8 @@ enum Command {
     Latex {
         before_global: crate::latex_config::LatexConfig,
         after_global: crate::latex_config::LatexConfig,
-        before: crate::latex_config::LatexConfig,
-        after: crate::latex_config::LatexConfig,
+        before: Box<crate::latex_config::LatexConfig>,
+        after: Box<crate::latex_config::LatexConfig>,
         objects_before: Vec<(usize, ObjectSnapshot)>,
         objects_after: Vec<(usize, ObjectSnapshot)>,
     },
@@ -286,7 +286,7 @@ impl Command {
                 ..
             } => {
                 *global = after_global.clone();
-                *latex = after.clone();
+                *latex = (**after).clone();
                 remove_at(strokes, objects_before);
                 insert_at(strokes, objects_after);
             }
@@ -312,7 +312,7 @@ impl Command {
                 ..
             } => {
                 *global = before_global.clone();
-                *latex = before.clone();
+                *latex = (**before).clone();
                 remove_at(strokes, objects_after);
                 insert_at(strokes, objects_before);
             }
@@ -389,6 +389,13 @@ impl Drawing {
         global: &crate::latex_config::LatexConfig,
     ) -> Result<LatexReplacements, String> {
         crate::latex_config::validate(global, config)?;
+        if config.preamble == self.latex.preamble
+            && config.postamble == self.latex.postamble
+            && global.preamble == self.latex_global.preamble
+            && global.postamble == self.latex_global.postamble
+        {
+            return Ok((Vec::new(), Vec::new()));
+        }
         let mut before = Vec::new();
         let mut after = Vec::new();
         for (index, object) in self.items.iter().enumerate() {
@@ -432,8 +439,8 @@ impl Drawing {
         self.execute(Command::Latex {
             before_global: self.latex_global.clone(),
             after_global: global.clone(),
-            before: self.latex.clone(),
-            after: config,
+            before: Box::new(self.latex.clone()),
+            after: Box::new(config),
             objects_before: before,
             objects_after: after,
         });
@@ -591,7 +598,10 @@ impl Drawing {
             ObjectSnapshot::Attachment(a) => {
                 a.valid()
                     && a.document_id == self.owner
-                    && a.corners().iter().all(|p| self.contains(a.surface, *p))
+                    && (a.corners().iter().all(|p| self.contains(a.surface, *p))
+                        || (a.listing.is_some()
+                            && self.bounds(a.surface).is_some()
+                            && self.contains(a.surface, a.placement.apply([0.; 2]))))
             }
             ObjectSnapshot::Image(i) => {
                 i.valid()
@@ -688,6 +698,32 @@ impl Drawing {
             .into_iter()
             .map(|(id, a)| (id, Arc::downgrade(&a)))
             .collect();
+        true
+    }
+
+    /// Reconcile derived listing layout and linked bytes without advancing the journal.
+    pub fn sync_listing(&mut self, attachment: crate::attachment::Attachment) -> bool {
+        let id = attachment.id;
+        let Some(&index) = self.object_slots.get(&id) else {
+            return false;
+        };
+        let ObjectSnapshot::Attachment(original) = &self.items[index] else {
+            return false;
+        };
+        if original.listing.is_none()
+            || attachment.listing.is_none()
+            || *original.as_ref() == attachment
+        {
+            return false;
+        }
+        let mut value = ObjectSnapshot::from(attachment);
+        if !self.valid_object(&value) || !self.intern_assets(std::slice::from_mut(&mut value)) {
+            return false;
+        }
+        self.items[index] = value;
+        self.normalize_groups();
+        self.refresh_ink_view();
+        self.revision += 1;
         true
     }
 

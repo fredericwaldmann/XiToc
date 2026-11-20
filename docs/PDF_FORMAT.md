@@ -233,3 +233,15 @@ locations. Keep editable card geometry and resource IDs in XiToc's private
 payload. Visible PDF card content and PDF viewer attachment access should be
 tested independently. The viewer's ability to open a file depends on its own
 security policy and platform. [ISO 32000 clause 7](https://pdf-issues.pdfa.org/32000-2-2020/clause07.html), [PDF Association guide](https://pdfa.org/files-inside-pdf/).
+
+## Code listing preparation (#64)
+
+M2 must embed the last valid source snapshot and original filename with
+ownership, identity, placement, dimensions, preferred width, preset
+reference and resolved style, authored configuration, line selection and
+title state. Render every selected source line in the conventional PDF
+representation, with predictable pagination for page overflow. Preserve
+original source-line identities. A persisted path or portable relative
+reference is an untrusted reconnect hint. Reopening a PDF must never read a
+local link without explicit approval and must display the embedded snapshot
+without requiring the original source. This feature adds no PDF serialization.

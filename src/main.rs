@@ -3,6 +3,7 @@ mod asset;
 mod attachment;
 mod attachment_io;
 mod canvas;
+mod code_listing;
 mod connector;
 mod connector_route;
 mod document;

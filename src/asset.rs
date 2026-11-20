@@ -8,11 +8,19 @@ pub const MAX_ASSET_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_ASSETS: usize = 16;
 pub const MAX_DOCUMENT_ASSET_BYTES: usize = 128 * 1024 * 1024;
 
-#[derive(Debug, PartialEq, Eq, Serialize)]
+#[derive(Debug)]
+struct ListingSource {
+    text: Arc<str>,
+    lines: usize,
+}
+
+#[derive(Debug, Serialize)]
 pub struct BinaryAsset {
     id: AssetId,
     #[serde(with = "encoded_bytes")]
     bytes: Arc<[u8]>,
+    #[serde(skip)]
+    listing_text: std::sync::OnceLock<Option<ListingSource>>,
 }
 
 impl BinaryAsset {
@@ -23,7 +31,31 @@ impl BinaryAsset {
         Ok(Arc::new(Self {
             id: Sha256::digest(&bytes).into(),
             bytes,
+            listing_text: Default::default(),
         }))
+    }
+    pub fn listing_text(&self) -> bool {
+        self.listing_source().is_some()
+    }
+    pub fn listing_source(&self) -> Option<&str> {
+        self.decoded_listing().map(|source| source.text.as_ref())
+    }
+    pub fn listing_line_count(&self) -> usize {
+        self.decoded_listing().map_or(0, |source| source.lines)
+    }
+    fn decoded_listing(&self) -> Option<&ListingSource> {
+        self.listing_text
+            .get_or_init(|| {
+                let original = crate::code_listing::source(&self.bytes).ok()?;
+                let text: Arc<str> = if original.contains('\r') {
+                    original.replace("\r\n", "\n").replace('\r', "\n").into()
+                } else {
+                    original.into()
+                };
+                let lines = crate::code_listing::line_count(&text);
+                Some(ListingSource { text, lines })
+            })
+            .as_ref()
     }
     pub fn id(&self) -> AssetId {
         self.id
@@ -32,6 +64,13 @@ impl BinaryAsset {
         &self.bytes
     }
 }
+
+impl PartialEq for BinaryAsset {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.bytes == other.bytes
+    }
+}
+impl Eq for BinaryAsset {}
 
 impl<'de> Deserialize<'de> for BinaryAsset {
     fn deserialize<D: serde::Deserializer<'de>>(input: D) -> Result<Self, D::Error> {

@@ -26,6 +26,8 @@ mod formula_ui;
 mod images_ui;
 #[path = "ink_mesh.rs"]
 mod ink_mesh;
+#[path = "canvas_listings.rs"]
+mod listings_ui;
 #[path = "canvas_shapes.rs"]
 mod shapes_ui;
 #[path = "canvas_text.rs"]
@@ -396,6 +398,13 @@ const MESH_SEGMENTS: usize = 128;
 pub struct Canvas {
     image_cache_revision: Option<u64>,
     image_imports: crate::image_import::Imports,
+    listing_config: Option<listings_ui::ListingDraft>,
+    listing_preview: Option<crate::attachment::Attachment>,
+    #[cfg(not(target_arch = "wasm32"))]
+    listing_watch: listings_ui::ListingWatch,
+    listing_layouts: HashMap<Uuid, listings_ui::ListingLayout>,
+    listing_measurements: HashMap<Uuid, listings_ui::ListingLayout>,
+    listing_cache: HashMap<(crate::asset::AssetId, String), listings_ui::SourcePreview>,
     attachment_io: crate::attachment_io::AttachmentIo,
     attachment_rename: Option<(Uuid, String)>,
     attachment_click: Option<(Uuid, f64, Pos2)>,
@@ -465,6 +474,13 @@ impl Canvas {
         Self {
             image_cache_revision: None,
             image_imports: Default::default(),
+            listing_config: None,
+            listing_preview: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            listing_watch: Default::default(),
+            listing_layouts: Default::default(),
+            listing_measurements: Default::default(),
+            listing_cache: Default::default(),
             attachment_io: Default::default(),
             attachment_rename: None,
             attachment_click: None,
@@ -545,6 +561,11 @@ impl Canvas {
             || self.drawing.dirty()
             || matches!(&self.gesture, Some(Gesture::Pen(stroke)) if !stroke.points.is_empty())
     }
+    pub fn dismiss_listing_configuration(&mut self) {
+        self.listing_config = None;
+        self.listing_preview = None;
+    }
+
     pub fn finish(&mut self) {
         self.snap_session = None;
         self.font_browser = None;
@@ -623,6 +644,10 @@ impl Canvas {
     }
 
     fn prune_cache(&mut self) {
+        self.listing_layouts
+            .retain(|id, _| self.drawing.snapshot(*id).is_some());
+        self.listing_measurements
+            .retain(|id, _| self.drawing.snapshot(*id).is_some());
         let live: HashMap<_, _> = self
             .drawing
             .strokes()
@@ -682,7 +707,10 @@ impl Canvas {
         }
         self.poll_images(ui.ctx());
         self.poll_attachments();
-        if self.attachment_rename_dialog(ui.ctx()) {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.poll_listing_sources(ui);
+        self.measure_listings(ui);
+        if self.listing_dialog(ui.ctx()) || self.attachment_rename_dialog(ui.ctx()) {
             return;
         }
         self.selection.refresh(&self.drawing);
@@ -739,6 +767,10 @@ impl Canvas {
     }
 
     pub fn surface(&mut self, ui: &egui::Ui, bounds: Rect, surface: Surface, transform: Transform) {
+        if self.listing_config.is_some() {
+            self.paint(ui, bounds, surface, transform);
+            return;
+        }
         if self.image_surface(ui, bounds, surface, transform) {
             self.paint(ui, bounds, surface, transform);
             return;
@@ -1131,8 +1163,54 @@ impl Canvas {
                     let attachment = attachment_preview
                         .as_ref()
                         .filter(|a| a.id == source.id)
+                        .or_else(|| self.listing_preview.as_ref().filter(|a| a.id == source.id))
                         .unwrap_or(source);
-                    Self::paint_attachment(ui, &painter, transform, attachment, delta);
+                    if attachment.listing.is_some() {
+                        let listing_painter = if matches!(surface, Surface::Page(_)) {
+                            ui.painter()
+                        } else {
+                            &painter
+                        };
+                        listings_ui::paint(
+                            &mut self.listing_cache,
+                            self.listing_layouts.entry(attachment.id).or_default(),
+                            listing_painter,
+                            transform,
+                            attachment,
+                            delta,
+                        );
+                        if self.drawing.bounds(surface).is_some()
+                            && attachment
+                                .corners()
+                                .iter()
+                                .any(|&point| !self.drawing.contains(surface, point))
+                        {
+                            let anchor = transform.to_screen(attachment.placement.apply([0.; 2]));
+                            let label = egui::pos2(
+                                (anchor[0] as f32).clamp(
+                                    bounds.left() + 4.,
+                                    (bounds.right() - 112.).max(bounds.left() + 4.),
+                                ),
+                                (anchor[1] as f32).clamp(
+                                    bounds.top() + 4.,
+                                    (bounds.bottom() - 20.).max(bounds.top() + 4.),
+                                ),
+                            );
+                            let galley = painter.layout_no_wrap(
+                                "Listing exceeds page".into(),
+                                egui::FontId::proportional(11.),
+                                egui::Color32::from_rgb(92, 44, 0),
+                            );
+                            painter.rect_filled(
+                                egui::Rect::from_min_size(label, galley.size()).expand(3.),
+                                3.,
+                                egui::Color32::from_rgb(255, 227, 176),
+                            );
+                            painter.galley(label, galley, egui::Color32::from_rgb(92, 44, 0));
+                        }
+                    } else {
+                        Self::paint_attachment(ui, &painter, transform, attachment, delta);
+                    }
                     continue;
                 }
                 ObjectSnapshot::Image(image) => {

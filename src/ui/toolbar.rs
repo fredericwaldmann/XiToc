@@ -65,6 +65,10 @@ pub fn show(
                     editor.canvas.choose_image(ui.ctx(), None);
                     ui.close();
                 }
+                if ui.button("Code Listing…").clicked() {
+                    editor.canvas.choose_listing(ui.ctx(), None);
+                    ui.close();
+                }
                 if ui.button("File Attachment…").clicked() {
                     editor.canvas.choose_attachment(ui.ctx(), None);
                     ui.close();

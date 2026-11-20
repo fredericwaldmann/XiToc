@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 pub struct LatexConfig {
     pub preamble: String,
     pub postamble: String,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub listing_styles: crate::code_listing::Styles,
 }
 impl LatexConfig {
     pub fn is_default(&self) -> bool {
@@ -22,6 +24,9 @@ pub struct LatexPreferences {
     pub color: [u8; 3],
     pub high_quality: bool,
     pub config: LatexConfig,
+    pub listing_styles: crate::code_listing::Styles,
+    pub listing_configurations: BTreeMap<String, String>,
+    pub listing_default: String,
 }
 impl Default for LatexPreferences {
     fn default() -> Self {
@@ -31,6 +36,9 @@ impl Default for LatexPreferences {
             color: [32, 39, 49],
             high_quality: true,
             config: LatexConfig::default(),
+            listing_styles: Default::default(),
+            listing_configurations: Default::default(),
+            listing_default: crate::code_listing::LIGHT.into(),
         }
     }
 }
@@ -41,6 +49,16 @@ impl LatexPreferences {
         }
         if self.preset.len() > 128 {
             return Err("Invalid rendering preset.".into());
+        }
+        crate::code_listing::validate_styles(&self.listing_styles)?;
+        if self.listing_configurations.len() > 64
+            || !crate::code_listing::valid_name(&self.listing_default)
+            || self
+                .listing_configurations
+                .iter()
+                .any(|(name, text)| !self.listing_styles.contains_key(name) || text.len() > 8192)
+        {
+            return Err("Invalid listing presets.".into());
         }
         validate(&self.config, &LatexConfig::default())
     }
@@ -268,6 +286,7 @@ pub fn assemble(global: &LatexConfig, doc: &LatexConfig, source: &str) -> Result
     expand(&format!("{gp}\n{dp}\n{source}\n{ds}\n{gs}"), &macros, 0)
 }
 pub fn validate(global: &LatexConfig, doc: &LatexConfig) -> Result<(), String> {
+    crate::code_listing::validate_styles(&doc.listing_styles)?;
     crate::formula_render::render(&assemble(global, doc, "x")?, [0, 0, 0, 255]).map(|_| ())
 }
 
@@ -376,10 +395,12 @@ mod tests {
         let global = LatexConfig {
             preamble: "\\newcommand{\\vect}[1]{\\mathbf{#1}}\n\\left( % comment\n".into(),
             postamble: r"\right)".into(),
+            ..Default::default()
         };
         let doc = LatexConfig {
             preamble: r"\renewcommand{\vect}[1]{\mathit{#1}}\left[".into(),
             postamble: r"\right]".into(),
+            ..Default::default()
         };
         let original = serde_json::to_string(&doc).unwrap();
         let assembled = assemble(&global, &doc, r"\vect{x}+\alpha").unwrap();
@@ -499,6 +520,7 @@ mod tests {
             let config = LatexConfig {
                 preamble: r"\left(".into(),
                 postamble: r"\right)".into(),
+                ..Default::default()
             };
             a.set_latex(config.clone(), &LatexConfig::default())
                 .unwrap();

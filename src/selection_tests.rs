@@ -1188,10 +1188,10 @@ fn indexed_rectangle_large_selection_performance() {
         moved: false,
         matches: Vec::new(),
     });
-    c.selection_sample(s, [520., 420.], 1., false, false); // warm caches and index
+    c.selection_sample(s, [520., 420.], 1., false, false, None); // warm caches and index
     let started = std::time::Instant::now();
     for i in 0..100 {
-        c.selection_sample(s, [520. + f64::from(i % 2), 420.], 1., false, false);
+        c.selection_sample(s, [520. + f64::from(i % 2), 420.], 1., false, false, None);
     }
     eprintln!(
         "2,000 strokes / 100 rectangle previews: {:?}",
@@ -1224,7 +1224,7 @@ fn rectangle_matches_rotated_geometry_and_vertical_containment() {
         moved: false,
         matches: Vec::new(),
     });
-    c.selection_sample(s, [90., 90.], 1., false, false);
+    c.selection_sample(s, [90., 90.], 1., false, false, None);
     c.commit_selection();
     assert_eq!(c.selection.ids, HashSet::from([id]));
     c.selection_gesture = Some(SelectionGesture::Rectangle {
@@ -1235,7 +1235,7 @@ fn rectangle_matches_rotated_geometry_and_vertical_containment() {
         moved: false,
         matches: Vec::new(),
     });
-    c.selection_sample(s, [60., 90.], 1., false, false);
+    c.selection_sample(s, [60., 90.], 1., false, false, None);
     c.commit_selection();
     assert!(c.selection.ids.is_empty());
     assert_eq!(*c.drawing.strokes()[0], *original);

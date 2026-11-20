@@ -1093,3 +1093,13 @@ M2's single-PDF visible-image/edit-payload round-trip gate.
   no-clobber exports and platform application association dispatch.
 - `object_clipboard.rs` supports v3 mixed asset references plus prior clipboard
   versions. Strong snapshot references retain resources through undo/redo.
+
+## Scientific Code Listings (#64)
+
+- `code_listing.rs` defines presets, source validation, range normalization
+  and the portable listings configuration subset.
+- `canvas_listings.rs` owns the unified dialog, layout and watch scheduling.
+  `attachment_io.rs` reads native links on background workers.
+- `LatexPreferences` stores custom presets and the import default.
+- `object_clipboard.rs` carries authored listing state and embeds shared
+  source bytes once. Path metadata alone does not grant filesystem access.

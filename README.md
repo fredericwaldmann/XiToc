@@ -409,3 +409,8 @@ Drag any image handle to stretch it, or hold Shift to keep its current proportio
 Canvas file drop and screenshot paste are supported; original bytes stay in memory
 with object/history snapshots. Images, like other canvas edits, are **not saved
 to PDF and do not survive restart** until M2. No sidecars or uploads are used.
+
+Use **Insert → Code Listing…** to display an imported source file on either
+canvas. Double-click a listing to configure its source, preset, LaTeX-style
+formatting, displayed lines and title. Native linked files refresh in the
+background. See [Code Listings](docs/CODE_LISTINGS.md).
