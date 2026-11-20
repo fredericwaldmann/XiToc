@@ -7,7 +7,7 @@ use crate::{
     coordinate_geometry::{self as geometry, Color, Geometry},
     object::{Placement, Point},
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Default)]
 pub(super) struct CoordinateCache {
@@ -15,6 +15,11 @@ pub(super) struct CoordinateCache {
     geometry: Geometry,
     marks: Vec<Marks>,
     samples: geometry::SamplingCache,
+    math_labels: HashMap<(String, [u8; 3]), CachedMathLabel>,
+}
+struct CachedMathLabel {
+    rendered: Result<crate::formula_render::RenderedFormula, String>,
+    texture: crate::formula_render::FormulaTexture,
 }
 enum Marks {
     Solid,
@@ -63,30 +68,7 @@ fn color(value: [u8; 3], alpha: u8) -> Color32 {
 }
 
 fn math_label(source: &str) -> String {
-    // Preserve the authored source. Common standalone TeX symbols have a
-    // direct Unicode equivalent in the shared scientific label font.
-    match source.trim().trim_matches('$') {
-        "\\alpha" => "α",
-        "\\beta" => "β",
-        "\\gamma" => "γ",
-        "\\delta" => "δ",
-        "\\epsilon" => "ε",
-        "\\theta" => "θ",
-        "\\lambda" => "λ",
-        "\\mu" => "μ",
-        "\\nu" => "ν",
-        "\\pi" => "π",
-        "\\rho" => "ρ",
-        "\\sigma" => "σ",
-        "\\tau" => "τ",
-        "\\phi" => "φ",
-        "\\psi" => "ψ",
-        "\\omega" => "ω",
-        "\\Delta" => "Δ",
-        "\\Omega" => "Ω",
-        text => text,
-    }
-    .into()
+    source.trim().trim_matches('$').to_owned()
 }
 
 pub(super) fn paint_coordinate(
@@ -117,6 +99,7 @@ pub(super) fn paint_coordinate(
     };
     let key = (object.config.clone(), object.size, quality);
     if cache.key.as_ref() != Some(&key) {
+        cache.math_labels.clear();
         cache.geometry =
             geometry::generate(&object.config, object.size, quality, &mut cache.samples);
         cache.marks = cache.geometry.lines.iter().map(Marks::new).collect();
@@ -190,22 +173,46 @@ pub(super) fn paint_coordinate(
         return;
     }
     for label in &cache.geometry.labels {
-        let font = egui::FontId::proportional((label.size * scale).min(256.));
-        let galley = if label.math {
-            let mut format = egui::TextFormat::simple(font, axis);
-            format.italics = true;
-            painter.layout_job(egui::text::LayoutJob::single_section(
-                math_label(&label.text),
-                format,
-            ))
+        if label.math {
+            let rgba = axis.to_array();
+            let key = (math_label(&label.text), [rgba[0], rgba[1], rgba[2]]);
+            let entry = cache
+                .math_labels
+                .entry(key.clone())
+                .or_insert_with(|| CachedMathLabel {
+                    rendered: crate::formula_render::render(
+                        &key.0,
+                        [key.1[0], key.1[1], key.1[2], 255],
+                    ),
+                    texture: Default::default(),
+                });
+            if let Ok(formula) = &entry.rendered {
+                let size = label.size / crate::formula::FORMULA_FONT_SIZE as f32 * scale;
+                let center = screen(label.at);
+                let rotation = egui::emath::Rot2::from_angle(placement.rotation as f32);
+                let mut map = |p: egui::Pos2| {
+                    center + rotation * (p - egui::pos2(formula.width, formula.height) / 2.) * size
+                };
+                entry.texture.paint(
+                    painter,
+                    formula,
+                    size * painter.ctx().pixels_per_point(),
+                    true,
+                    &mut map,
+                );
+            }
         } else {
-            painter.layout_no_wrap(label.text.clone(), font, axis)
-        };
-        let min = screen(label.at)
-            - (egui::emath::Rot2::from_angle(placement.rotation as f32) * galley.size() / 2.);
-        painter.add(
-            egui::epaint::TextShape::new(min, galley, axis).with_angle(placement.rotation as f32),
-        );
+            // Coordinate labels are all mathematical today; keep the branch
+            // for future non-math annotations without changing their font.
+            let font = egui::FontId::proportional((label.size * scale).min(256.));
+            painter.text(
+                screen(label.at),
+                egui::Align2::CENTER_CENTER,
+                &label.text,
+                font,
+                axis,
+            );
+        }
     }
 }
 
@@ -326,10 +333,12 @@ impl Canvas {
         let mut apply = false;
         let result = egui::Modal::new(egui::Id::unique(("coordinate-system", draft.id))).show(ctx, |ui| {
             let max_size = (ctx.content_rect().size() - egui::vec2(40., 40.)).max(egui::vec2(320., 320.));
-            let min_size = egui::vec2(760., 500.).min(max_size);
+            let min_size = egui::vec2(760., 320.).min(max_size);
             egui::Resize::default()
                 .id_salt(("coordinate-dialog-resize", draft.id))
-                .default_size(egui::vec2(1000., 700.).min(max_size))
+                // A practical compact default: the selected left tab scrolls,
+                // while the preview keeps enough height to remain legible.
+                .default_size(egui::vec2(1000., 360.).min(max_size))
                 .min_size(min_size)
                 .max_size(max_size)
                 .show(ui, |ui| {
@@ -338,10 +347,17 @@ impl Canvas {
                     ui.heading("Coordinate System");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         cancel |= ui.button("×").on_hover_text("Close").clicked();
+                        apply |= ui
+                            .add_enabled(
+                                !locked && draft.tikz_error.is_none(),
+                                egui::Button::new("Apply"),
+                            )
+                            .clicked();
+                        cancel |= ui.button("Cancel").clicked();
                     });
                 });
                 ui.separator();
-                let body_height = (ui.available_height() - 64.).max(280.);
+                let body_height = (ui.available_height() - 130.).max(180.);
                 ui.horizontal_top(|ui| {
                     let left_width = (ui.available_width() * 0.50).max(320.);
                     ui.allocate_ui_with_layout(egui::vec2(left_width, body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
@@ -359,7 +375,7 @@ impl Canvas {
                                     ui.label("Supported TikZ subset · edits update the preview");
                                     let response = ui.add(egui::TextEdit::multiline(&mut draft.tikz_source)
                                         .code_editor().font(egui::TextStyle::Monospace)
-                                        .desired_width(f32::INFINITY).desired_rows(24)
+                                        .desired_width(f32::INFINITY).desired_rows(8)
                                         .lock_focus(true));
                                     if response.changed() {
                                         match crate::coordinate_tikz::parse(&draft.tikz_source, &frame_before) {
@@ -395,13 +411,6 @@ impl Canvas {
                 if locked {
                     ui.weak("Unlock this coordinate system to apply changes.");
                 }
-                ui.separator();
-                ui.horizontal(|ui| {
-                    cancel |= ui.button("Cancel").clicked();
-                    apply = ui
-                        .add_enabled(!locked && draft.tikz_error.is_none(), egui::Button::new("Apply"))
-                        .clicked();
-                });
                 cancel |= ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
                 });
             });
@@ -557,15 +566,16 @@ fn config_fields(ui: &mut egui::Ui, config: &mut Config, size: &mut Point, funct
                     });
                 }
                 ui.horizontal(|ui| {
-                    ui.checkbox(&mut config.origin, "Show origin");
+                    ui.checkbox(&mut config.show_zero, "Show 0 Label");
+                    config.origin = config.show_zero;
                     ui.add_enabled(
-                        config.origin,
+                        config.show_zero,
                         egui::TextEdit::singleline(&mut config.origin_label)
                             .desired_width(64.)
                             .char_limit(32),
                     );
                 });
-                ui.checkbox(&mut config.numbers, "Show numeric labels");
+                ui.checkbox(&mut config.numbers, "Show Numeric Labels");
                 if dimension == 2 {
                     ui.checkbox(&mut config.equal_units, "Equal X and Y units");
                 }
@@ -915,7 +925,10 @@ mod tests {
         assert!(visible.contains_key("Functions"));
         assert!(visible.contains_key("TikZ Editor"));
         assert!(visible.contains_key("Live Preview"));
-        let cancel = frame(vec![])["Cancel"];
+        let labels = frame(vec![]);
+        let cancel = *labels
+            .get("Cancel")
+            .unwrap_or_else(|| panic!("dialog buttons missing: {:?}", labels.keys()));
         frame(pointer(cancel, true));
         frame(pointer(cancel, false));
         assert!(board.coordinate_draft.is_none());

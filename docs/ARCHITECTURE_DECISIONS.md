@@ -859,7 +859,8 @@ A native semantic graph supports direct axes, plot and domain editing, common
 canvas transforms, and independent vector PDF output later. A rendered TikZ
 image would lose editable mathematical structure and complicate WASM. Use a
 small numerical grammar and orthographic wireframes with bounded adaptive
-sampling. Tex-like standalone Greek axis labels map to Unicode and render in
-the app's italic scientific typography. A bounded editable TikZ-inspired source
-subset is stored with the structured model and parsed locally without TeX.
+sampling. All coordinate labels use the bundled Latin Modern Math equation
+renderer, including custom and numeric labels. Origin zero is a tick-positioned
+label, not an independent node. A bounded editable TikZ-inspired source subset
+is stored with the structured model and parsed locally without TeX.
 General-purpose TikZ and PGFPlots compatibility remain out of scope.

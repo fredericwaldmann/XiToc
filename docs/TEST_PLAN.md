@@ -2000,6 +2000,15 @@ available, then lasso the ink, change its width and test undo and redo.
 - Resize, group, lock, align, snap and paste between Whiteboard and Page Note.
   Verify logical placement, fresh clipboard IDs and no extra history entries.
   Exercise the desktop and browser builds.
+- Check all independent label states: numeric off/zero on (default), both off,
+  both on, and numeric on/zero off. Verify zero appears exactly once, remains
+  when ordinary tick marks are hidden, and follows the origin after ranges and
+  frame size change. Compare axis, zero and numeric labels with equation math
+  typography, including a Greek label and a scripted label.
+- Confirm the shorter resizable dialog retains three left tabs and a right
+  preview. In TikZ Editor verify `xtick`/`xticklabels` state follows General,
+  source edits update the checkbox, and no new source contains a standalone
+  origin `\\node`.
 
 Dialog/TikZ enhancement regressions cover the three left tabs with an always-
 visible right preview, source generation and multiline source parsing, all five

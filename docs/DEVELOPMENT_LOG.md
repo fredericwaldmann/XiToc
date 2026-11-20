@@ -891,3 +891,9 @@ synchronizes supported axis, grid, plot, 1D marker and 3D surface edits without
 executing TeX. Invalid/incomplete text remains in the editor, keeps the last
 valid preview and blocks Apply. Documented that this is a TikZ-inspired subset,
 not general TikZ/PGFPlots compilation.
+
+Refined the open #63 implementation with a shorter 1000×390 dialog default,
+equation-renderer typography for every coordinate label, independent numeric
+and origin-zero visibility, and tick-based zero placement. Generated TikZ now
+uses supported `xtick`/`xticklabels` directives rather than emitting an origin
+node; older node-based source remains readable.

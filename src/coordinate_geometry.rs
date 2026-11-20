@@ -157,6 +157,15 @@ pub fn generate(
     let mut result = Geometry::default();
     let map = Mapping::new(config, size);
     let count = config.preset.dimension();
+    // The origin label is attached to one visible axis tick position (X when
+    // available), never emitted as an unrelated floating annotation.
+    let zero_axis = config
+        .axes
+        .iter()
+        .enumerate()
+        .take(count)
+        .find(|(_, axis)| axis.visible && axis.range[0] <= 0. && axis.range[1] >= 0.)
+        .map(|(i, _)| i);
     if config.grid && count >= 2 {
         for i in 0..2 {
             let other = 1 - i;
@@ -290,20 +299,23 @@ pub fn generate(
                         at: offset(at, normal, config.tick_length / 2. + 9.),
                         text: number(value),
                         size: 10.,
-                        math: false,
+                        math: true,
                     });
                 }
             }
         }
-    }
-    if config.origin && !config.origin_label.is_empty() {
-        let at = map.point([0.; 3]);
-        result.labels.push(Label {
-            at: [at[0] - 9., at[1] + 12.],
-            text: config.origin_label.clone(),
-            size: 12.,
-            math: false,
-        });
+        if config.show_zero && zero_axis == Some(i) && !config.origin_label.is_empty() {
+            // This is the native equivalent of an xtick/xticklabels entry.
+            // It follows the selected axis basis and remains independent of
+            // ordinary tick-mark visibility.
+            let at = map.point(axis_point(i, 0.));
+            result.labels.push(Label {
+                at: offset(at, normal, config.tick_length / 2. + 9.),
+                text: config.origin_label.clone(),
+                size: 12.,
+                math: true,
+            });
+        }
     }
     result
 }
@@ -533,6 +545,7 @@ mod tests {
                 1
             );
             assert_eq!(geometry.labels.len(), preset.dimension() + 1);
+            assert!(geometry.labels.iter().all(|label| label.math));
         }
         let mut config = Config::new(Preset::FourQuadrants);
         config.axes[0].range = [-2., 9.];
@@ -541,6 +554,58 @@ mod tests {
         let a = map.point([0.; 3]);
         let b = map.point([1., 1., 0.]);
         assert!(((b[0] - a[0]) + (b[1] - a[1])).abs() < 1e-10);
+    }
+    #[test]
+    fn numeric_ticks_and_zero_label_are_independent_for_every_combination() {
+        for preset in Preset::ALL {
+            for (numbers, show_zero, expected_zero) in [
+                (false, true, 1),
+                (false, false, 0),
+                (true, true, 1),
+                (true, false, 0),
+            ] {
+                let mut config = Config::new(preset);
+                if preset == Preset::FourQuadrants {
+                    config.axes[0].range = [-3., 3.];
+                    config.axes[1].range = [-3., 3.];
+                }
+                config.numbers = numbers;
+                config.show_zero = show_zero;
+                config.ticks = false;
+                let geometry = generate(&config, [330., 300.], 96, &mut SamplingCache::default());
+                let zero_count = geometry
+                    .labels
+                    .iter()
+                    .filter(|label| label.text == "0")
+                    .count();
+                assert_eq!(zero_count, expected_zero, "{preset:?}");
+                let numeric_count = geometry
+                    .labels
+                    .iter()
+                    .filter(|label| label.text.parse::<f64>().is_ok())
+                    .count();
+                assert_eq!(numeric_count > expected_zero, numbers, "{preset:?}");
+                assert!(geometry.labels.iter().all(|label| label.math));
+            }
+        }
+    }
+    #[test]
+    fn zero_label_uses_the_x_axis_tick_anchor_and_stays_off_when_ticks_are_hidden() {
+        let mut config = Config::new(Preset::FourQuadrants);
+        config.ticks = false;
+        let size = [400., 300.];
+        let geometry = generate(&config, size, 96, &mut SamplingCache::default());
+        let zero = geometry
+            .labels
+            .iter()
+            .find(|label| label.text == "0")
+            .unwrap();
+        let origin = Mapping::new(&config, size).point([0.; 3]);
+        assert!((zero.at[0] - origin[0]).abs() < 1e-9);
+        assert!((zero.at[1] - origin[1] - (config.tick_length / 2. + 9.)).abs() < 1e-9);
+        config.show_zero = false;
+        let hidden = generate(&config, size, 96, &mut SamplingCache::default());
+        assert!(!hidden.labels.iter().any(|label| label.text == "0"));
     }
     #[test]
     fn grid_and_tick_sampling_stays_bounded_and_mathematically_aligned() {

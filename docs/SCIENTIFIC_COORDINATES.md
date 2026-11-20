@@ -18,17 +18,22 @@ one undoable edit. Cancel or Escape discards the draft. Preset changes keep
 curves, surfaces and 1D data in their respective lists. Switching between
 signed and positive axes adjusts the lower bound to fit the chosen preset.
 
-The origin is labeled once. Other numbers are opt-in. X/Y units have equal
+The **Show Numeric Labels** and **Show 0 Label** checkboxes are independent.
+Numeric labels default off and the zero label defaults on, so the default is
+one zero at the origin and no other numbers. The zero label follows coordinate
+axis tick placement (the TikZ source records equivalent `xtick={0}` and
+`xticklabels={$0$}` semantics); it is not a floating node and does not require
+ordinary tick marks. In 2D, zero is labeled once on X. X/Y units have equal
 physical scale by default. Turn that off to independently fit both ranges to
-the frame. The shared resize handles scale the diagram proportionally. Use
-the frame width and height in the dialog to change its aspect ratio without
+the frame. The shared resize handles scale the diagram proportionally. Use the
+frame width and height in the dialog to change its aspect ratio without
 scaling typography. Canvas rotation and the 3D viewing angles are independent.
 
-Custom axis labels are italic text. Standalone Greek TeX names such as
-`\omega` and `\theta` render as their Unicode counterparts. Labels retain
-the authored text in the model. Grid and ticks follow the mathematical axes.
-Dense ticks are thinned to bound rendering. The octant uses an optional XY
-reference grid.
+Axis labels, zero and numeric tick labels use the same bundled Latin Modern
+Math rendering path as XiToc equations. Labels retain authored math source,
+including Greek characters, scripts and superscripts. Grid and ticks follow
+the mathematical axes. Dense ticks are thinned to bound rendering. The octant
+uses an optional XY reference grid.
 
 ## Expressions and domains
 
@@ -62,7 +67,10 @@ dependency is required. PDF persistence remains M2 work.
 
 ## Configuration dialog and TikZ source
 
-The resizable **Coordinate System** dialog has a two-column layout. **General**,
+The resizable **Coordinate System** dialog opens at a compact 1000×360 logical
+size with a 760×320 minimum. It remains user-resizable, and egui remembers its
+size for the session. General settings and TikZ source scroll within the left
+pane, while the preview stays visible on the right. **General**,
 **Functions**, and **TikZ Editor** tabs and their vertical scrolling stay on the
 left. The right column remains a live preview rendered through the same vector
 renderer as the canvas. Apply writes configuration and source in one journal
@@ -74,8 +82,12 @@ The parser accepts a single `tikzpicture`, bounded to 32 KiB and 512 commands.
 It supports `\draw` horizontal and vertical axes, axis labels as simple math
 text, known colors or `#RRGGBB`, `line width`, arrow options `->`, `open`, `-`,
 grid commands with `step`/`opacity`, plot commands in the form
-`plot (\x, {expression})` with a `domain`, solid/dashed/dotted style, and
-`\node` (for the origin label). A small `% xitoc key=value` extension records
+`plot (\x, {expression})` with a `domain`, and solid/dashed/dotted style.
+Legacy `\node` origin labels remain readable for older source, but new source
+never creates an origin node: `% xitoc xtick={0}`,
+`% xitoc xticklabels={$0$}` and `% xitoc yticklabels={}` represent the single
+zero label through the native axis-tick model. `% xitoc numbers=true|false`
+controls nonzero labels. A small `% xitoc key=value` extension records
 viewpoint, ranges, tick/grid styling, frame-independent settings, 1D endpoint
 metadata and 3D surface definitions that ordinary 2D TikZ commands cannot
 represent. Surface expressions use the same bounded native math grammar.
@@ -90,4 +102,5 @@ text remains editable, Apply is disabled, and the preview keeps the last valid
 configuration. Correct the source or Cancel. Arbitrary macros, `\input`,
 external resources, scripts, shell escape, PGFPlots and full TikZ compatibility
 are not supported. 3D surfaces use the XiToc extension because the preview uses
-its bounded orthographic wireframe renderer rather than TeX.
+its bounded orthographic wireframe renderer rather than TeX. Tick comments are
+part of XiToc's safe TikZ subset and do not claim PGFPlots compilation support.

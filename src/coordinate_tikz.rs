@@ -28,7 +28,6 @@ pub fn generate_preserving(config: &Config, old: &str) -> String {
         ("elevation", config.elevation.to_string()),
         ("equal-units", config.equal_units.to_string()),
         ("numbers", config.numbers.to_string()),
-        ("origin", config.origin.to_string()),
         ("origin-label", config.origin_label.replace(' ', "_")),
         ("ticks", config.ticks.to_string()),
         ("tick-step", config.tick_step.to_string()),
@@ -43,6 +42,16 @@ pub fn generate_preserving(config: &Config, old: &str) -> String {
         ("arrow", arrow_name(config.arrow).to_string()),
     ] {
         out.push_str(&format!("% xitoc {key}={value}\n"));
+    }
+    // The native renderer implements these PGFPlots-style axis tick semantics
+    // directly. Comments keep the editable TikZ subset TeX-independent.
+    if config.show_zero {
+        out.push_str(&format!(
+            "% xitoc xtick={{0}}\n% xitoc xticklabels={{${}$}}\n% xitoc yticklabels={{}}\n",
+            config.origin_label
+        ));
+    } else {
+        out.push_str("% xitoc xtick={}\n% xitoc xticklabels={}\n% xitoc yticklabels={}\n");
     }
     out.push_str(&format!(
         "% xitoc surface-count={}\n% xitoc marker-count={}\n",
@@ -148,12 +157,6 @@ pub fn generate_preserving(config: &Config, old: &str) -> String {
             config.axes[1].range[1]
         ));
     }
-    if config.origin {
-        out.push_str(&format!(
-            "\\node[below left] at (0,0) {{$ {} $}};\n",
-            config.origin_label
-        ));
-    }
     for (i, plot) in config.curves.iter().enumerate() {
         if plot.visible {
             let domain = plot.domain.unwrap_or(config.axes[0].range);
@@ -209,6 +212,9 @@ pub fn parse(source: &str, base: &Config) -> Result<Config, String> {
     let mut curves: Vec<Plot> = Vec::new();
     let mut grid_seen = false;
     let mut origin_seen = false;
+    let mut xtick_zero = None;
+    let mut xticklabels_visible = None;
+    let mut explicit_show_zero = None;
     let mut commands = Vec::new();
     let mut pending = String::new();
     let mut pending_line = 0;
@@ -216,6 +222,30 @@ pub fn parse(source: &str, base: &Config) -> Result<Config, String> {
         let line = raw.trim();
         if line.starts_with("% xitoc ") {
             apply_directive(line, &mut config, line_no)?;
+            if let Some((key, value)) = line.trim_start_matches("% xitoc ").split_once('=') {
+                match key.trim() {
+                    "xtick" => {
+                        xtick_zero = Some(
+                            value
+                                .replace(['{', '}'], "")
+                                .split(',')
+                                .any(|v| v.trim() == "0"),
+                        );
+                    }
+                    "xticklabels" => {
+                        let label = value
+                            .trim()
+                            .trim_start_matches('{')
+                            .trim_end_matches('}')
+                            .trim();
+                        xticklabels_visible = Some(!label.is_empty());
+                    }
+                    "show-zero" | "origin" => {
+                        explicit_show_zero = Some(parse_bool(value.trim(), line_no)?);
+                    }
+                    _ => {}
+                }
+            }
             continue;
         }
         if line.is_empty()
@@ -379,6 +409,7 @@ pub fn parse(source: &str, base: &Config) -> Result<Config, String> {
             if let Some(label) = between(line, "$", "$") {
                 config.origin_label = label.trim().to_owned();
             }
+            config.show_zero = true;
             continue;
         }
         if line.starts_with("% xitoc ") {
@@ -402,7 +433,16 @@ pub fn parse(source: &str, base: &Config) -> Result<Config, String> {
     if config.preset.dimension() >= 2 {
         config.grid = grid_seen;
     }
-    config.origin = origin_seen;
+    // Old documents used an independently positioned origin node (and an
+    // `origin` directive). Honor that source on import, then normalize the
+    // state to tick-based zero labeling going forward.
+    config.show_zero = match (xtick_zero, xticklabels_visible) {
+        (Some(tick), Some(label)) => tick && label,
+        (Some(tick), None) => tick,
+        (None, Some(label)) => label,
+        (None, None) => explicit_show_zero.unwrap_or(origin_seen || config.show_zero),
+    };
+    config.origin = config.show_zero;
     config
         .validate()
         .map_err(|e| format!("TikZ configuration: {e}"))?;
@@ -431,7 +471,30 @@ fn apply_directive(line: &str, c: &mut Config, n: usize) -> Result<(), String> {
         "elevation" => c.elevation = number()?,
         "equal-units" => c.equal_units = parse_bool(value, n)?,
         "numbers" => c.numbers = parse_bool(value, n)?,
-        "origin" => c.origin = parse_bool(value, n)?,
+        "show-zero" | "origin" => {
+            c.show_zero = parse_bool(value, n)?;
+            c.origin = c.show_zero;
+        }
+        "xtick" => {
+            c.show_zero = value
+                .replace(['{', '}'], "")
+                .split(',')
+                .any(|v| v.trim() == "0");
+            c.origin = c.show_zero;
+        }
+        "xticklabels" => {
+            let label = value
+                .trim()
+                .trim_start_matches('{')
+                .trim_end_matches('}')
+                .trim();
+            c.show_zero = !label.is_empty();
+            c.origin = c.show_zero;
+            if let Some(label) = label.strip_prefix('$').and_then(|s| s.strip_suffix('$')) {
+                c.origin_label = label.to_owned();
+            }
+        }
+        "yticklabels" => { /* zero is intentionally labeled on X only */ }
         "origin-label" => c.origin_label = value.replace('_', " "),
         "ticks" => c.ticks = parse_bool(value, n)?,
         "tick-step" => c.tick_step = number()?,
@@ -781,7 +844,31 @@ mod tests {
             let c = Config::new(p);
             let s = generate(&c);
             assert_eq!(parse(&s, &c).unwrap(), c);
+            assert!(!s.contains("\\node"));
+            assert!(s.contains("% xitoc xtick={0}"));
+            assert!(s.contains("% xitoc xticklabels={$0$}"));
         }
+    }
+    #[test]
+    fn independent_tick_label_flags_roundtrip_and_source_edits_sync() {
+        let mut base = Config::new(Preset::FourQuadrants);
+        for (numbers, show_zero) in [(false, true), (false, false), (true, true), (true, false)] {
+            base.numbers = numbers;
+            base.show_zero = show_zero;
+            base.origin = show_zero;
+            let source = generate(&base);
+            assert_eq!(parse(&source, &base).unwrap(), base);
+        }
+        base.numbers = true;
+        base.show_zero = false;
+        let source = generate(&base)
+            .replace("% xitoc numbers=true", "% xitoc numbers=false")
+            .replace("% xitoc xtick={}", "% xitoc xtick={0}")
+            .replace("% xitoc xticklabels={}", "% xitoc xticklabels={$0$}");
+        let parsed = parse(&source, &base).unwrap();
+        assert!(!parsed.numbers);
+        assert!(parsed.show_zero);
+        assert_eq!(parsed.origin_label, "0");
     }
     #[test]
     fn edited_axis_and_plot_commands_change_model() {

@@ -122,6 +122,10 @@ pub struct Config {
     pub origin: bool,
     pub origin_label: String,
     pub numbers: bool,
+    /// Show the single mathematical zero label at the origin, independently
+    /// of ordinary numeric tick labels.
+    #[serde(default = "default_show_zero")]
+    pub show_zero: bool,
     pub equal_units: bool,
     pub background: Option<[u8; 3]>,
     pub grid: bool,
@@ -143,6 +147,9 @@ pub struct Config {
 }
 pub const MAX_PLOTS: usize = 8;
 pub const MAX_MARKERS: usize = 32;
+fn default_show_zero() -> bool {
+    true
+}
 pub fn valid_range([low, high]: Point) -> bool {
     low.is_finite() && high.is_finite() && low >= -1e6 && high <= 1e6 && high - low >= 1e-6
 }
@@ -167,6 +174,7 @@ impl Config {
             origin: true,
             origin_label: "0".into(),
             numbers: false,
+            show_zero: true,
             equal_units: true,
             background: None,
             grid: false,
@@ -342,5 +350,19 @@ impl CanvasObject for Coordinate {
             .unwrap()
             .expand(tolerance / self.placement.scale)
             .contains(self.placement.inverse(point))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_show_zero_field_defaults_on_for_older_coordinate_objects() {
+        let mut encoded = serde_json::to_value(Config::new(Preset::FourQuadrants)).unwrap();
+        encoded.as_object_mut().unwrap().remove("show_zero");
+        let restored: Config = serde_json::from_value(encoded).unwrap();
+        assert!(restored.show_zero);
+        assert!(!restored.numbers);
     }
 }
