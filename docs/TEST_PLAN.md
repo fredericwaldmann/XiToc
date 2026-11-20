@@ -1965,3 +1965,24 @@ least 20 seconds and inspect the pointer endpoint, joins and release.
 Cross a 40% highlighter over itself, then cross it with another stroke.
 The second stroke should darken the overlap. Use a pressure stylus if
 available, then lasso the ink, change its width and test undo and redo.
+
+## File-based Code Listings (#64)
+
+- Open Scientific Dark source in the light app theme and Scientific Light
+  source in the dark app theme. Check syntax contrast and text selection in
+  the inspector.
+- On native and WASM, use Insert → Code Listing to import UTF-8 Python and Rust
+  on a board and a page. Include CRLF, BOM, tabs, Unicode, an empty file and an
+  unknown extension. Confirm errors and cancellation leave selection/content
+  intact. Reject binary and malformed UTF-8; attach them separately if needed.
+- Inspect a listing, select and copy several lines, then try typing, Delete
+  and paste. Compare the source and exported byte hash after deleting the
+  external original. Replace the source and check undo/redo and language updates.
+- Switch all three presets, change frame, numbering and wrapping, and save a
+  reusable style in global settings. Shadow it in one document and verify that
+  another document still uses the global definition. Check a valid
+  `\lstdefinestyle` and malformed input with retained draft and error.
+- Move, resize, rotate and reset rotation. Exercise nesting, locks, alignment,
+  snapping, stacking and clipboard between layouts. Resize should leave font
+  size unchanged. Scroll thousands of source lines and a long unwrapped line;
+  check no board pan while reading and legibility at multiple zoom levels.

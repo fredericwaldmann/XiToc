@@ -832,3 +832,19 @@ under one canvas scissor. The alternative GPU coverage layer would require
 persistent intermediate targets, blend-state management and resource
 lifecycle work on both OpenGL and WebGL. Revisit that option if measured GPU
 or upload cost dominates after the CPU union reduction.
+
+## File-backed listings use the shared binary snapshot (#64)
+
+A listing uses the file-backed snapshot and its existing bounds, asset lifetime,
+clipboard table and history, with a separate semantic type and rendering branch.
+There were no persisted or merged editable code blocks to migrate. A read-only
+inspector lets the app use egui selection without introducing an editor model.
+
+Use `two-face` with default features disabled and `syntect-fancy` enabled.
+Syntect's default grammar bundle is smaller but lacks TypeScript. The two-face
+bundle supplies the required grammars, using a portable pure-Rust regex engine
+instead of Oniguruma. Only grammar loading and parsing are enabled; XiToc owns
+the style palettes. A new parser or per-language native grammar dependency
+would increase maintenance or complicate WASM. The crate is dual MIT/Apache-2.0
+and includes acknowledgments for bundled grammars. Listing directives are
+validated locally and never passed to math rendering or an external compiler.

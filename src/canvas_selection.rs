@@ -118,6 +118,9 @@ pub(super) fn selection_preview_ids<'a>(
 impl Canvas {
     pub fn selection_action(&mut self, command: SelectionCommand, ctx: &egui::Context) {
         use SelectionCommand::*;
+        if self.listing_inspector.is_some() {
+            return;
+        }
         if self.text_action(command, ctx) {
             return;
         }
@@ -204,7 +207,7 @@ impl Canvas {
             }
             Duplicate => {
                 self.finish();
-                if let Some(bundle) = self.selected_bundle() {
+                if let Some(bundle) = self.selected_bundle(false) {
                     let ids = bundle.duplicate(&mut self.drawing, self.selection.surface);
                     self.selection
                         .change(ids, Membership::Replace, &self.drawing);
@@ -286,7 +289,7 @@ impl Canvas {
         }
     }
     fn copy_selection(&mut self, ctx: &egui::Context) -> bool {
-        let Some(bundle) = self.selected_bundle() else {
+        let Some(bundle) = self.selected_bundle(true) else {
             return false;
         };
         match bundle.encode() {
@@ -367,7 +370,7 @@ impl Canvas {
             self.notice = Some("No XiToc session copy available. Copy a selection first, or use Ctrl/Cmd+V for a system clipboard payload.".into());
         }
     }
-    fn selected_bundle(&mut self) -> Option<ObjectBundle> {
+    fn selected_bundle(&mut self, freeze_listing_style: bool) -> Option<ObjectBundle> {
         if self.selection.ids.is_empty() {
             return None;
         }
@@ -377,7 +380,13 @@ impl Canvas {
                 .items()
                 .iter()
                 .filter(|o| expanded.contains(&o.id()))
-                .cloned(),
+                .map(|object| {
+                    if freeze_listing_style {
+                        self.effective_listing_for_clipboard(object)
+                    } else {
+                        object.clone()
+                    }
+                }),
         ) {
             Ok(bundle) => Some(bundle),
             Err(e) => {
@@ -1728,7 +1737,11 @@ impl Canvas {
                                 id == attachment.id && now - time < delay && last.distance(pos) < 6.
                             }) {
                                 self.selection_gesture = None;
-                                self.attachment_io.open(ui.ctx().clone(), attachment);
+                                if attachment.listing.is_some() {
+                                    self.open_listing(attachment.id);
+                                } else {
+                                    self.attachment_io.open(ui.ctx().clone(), attachment);
+                                }
                             } else {
                                 self.attachment_click = Some((attachment.id, now, pos));
                             }
@@ -1995,7 +2008,15 @@ impl Canvas {
     }
     fn object_format_controls(&mut self, ui: &mut egui::Ui) {
         if let Some(attachment) = self.selected_attachment() {
-            ui.menu_button("Attachment", |ui| self.attachment_menu(ui, attachment));
+            if attachment.listing.is_some() {
+                ui.menu_button("Code Listing", |ui| {
+                    self.listing_controls(ui, &attachment);
+                    ui.separator();
+                    self.attachment_menu(ui, attachment);
+                });
+            } else {
+                ui.menu_button("Attachment", |ui| self.attachment_menu(ui, attachment));
+            }
         }
         if self.selected_image().is_some() {
             ui.menu_button("Image", |ui| self.image_controls(ui));

@@ -20,6 +20,7 @@ pub fn editors(ui: &mut egui::Ui, config: &mut LatexConfig, prefix: &str) {
 }
 #[derive(Default)]
 pub struct GlobalLatexDraft {
+    listings: super::listing_controls::StyleDraft,
     value: Option<LatexPreferences>,
     error: Option<String>,
 }
@@ -68,11 +69,14 @@ impl GlobalLatexDraft {
         if let Some(e) = &self.error {
             ui.colored_label(ui.visuals().error_fg_color, e);
         }
+        self.listings
+            .show(ui, &mut value.listing_styles, &Default::default());
         ui.weak("Defaults affect new formulas. Configuration applies to all documents. Document changes remain memory-only until M2.");
     }
 }
 #[derive(Default)]
 pub struct DocumentLatexDialog {
+    listings: super::listing_controls::StyleDraft,
     pub open: bool,
     draft: Option<LatexConfig>,
     error: Option<String>,
@@ -96,6 +100,7 @@ impl DocumentLatexDialog {
             ui.label("Global configuration: Enabled");
             egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-220.).max(60.)).show(ui, |ui| {
                 editors(ui, draft, "Document");
+                self.listings.show(ui, &mut draft.listing_styles, &global.listing_styles);
                 ui.weak("Order: Global preamble → Document preamble → Formula → Document postamble → Global postamble. Settings affect this document only; memory-only until M2.");
             });
             ui.horizontal(|ui| {

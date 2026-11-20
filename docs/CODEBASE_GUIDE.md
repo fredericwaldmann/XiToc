@@ -1093,3 +1093,18 @@ M2's single-PDF visible-image/edit-payload round-trip gate.
   no-clobber exports and platform application association dispatch.
 - `object_clipboard.rs` supports v3 mixed asset references plus prior clipboard
   versions. Strong snapshot references retain resources through undo/redo.
+
+## File-based code listings (#64)
+
+- `code_listing.rs` defines presets, immutable source validation, extension
+  detection, style resolution and the listings configuration subset.
+- `canvas_listings.rs` owns the inspector, source-span and visible-layout
+  caches, scroll state and contextual appearance. `canvas_attachments.rs`
+  and `attachment_io.rs` share file import, replacement, opening and export.
+- `ui/listing_controls.rs` adds global and document style management to
+  `ui/latex_controls.rs`. `LatexConfig` owns document styles and
+  `LatexPreferences` owns application styles. Existing math processing
+  continues to read preambles and postambles independently.
+- `object_clipboard.rs` preserves listing settings and embeds asset bytes once
+  per resource hash. `drawing.rs` and shared selection code handle transforms,
+  resource limits, group scope and undo/redo.

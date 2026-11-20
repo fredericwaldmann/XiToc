@@ -607,7 +607,7 @@ fn mixed_transforms_flip_clipboard_cut_delete_preserve_geometry_and_identity() {
                 c.redo();
                 assert_eq!(c.drawing.items(), changed);
             }
-            let bundle = c.selected_bundle().unwrap();
+            let bundle = c.selected_bundle(false).unwrap();
             let text = bundle.encode().unwrap();
             let decoded = ObjectBundle::decode(&text).unwrap();
             let copies = decoded.duplicate(&mut c.drawing, s);

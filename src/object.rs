@@ -100,6 +100,7 @@ fn rotate([x, y]: Point, angle: f64) -> Point {
 #[allow(dead_code)] // Semantic dispatch tag; only implemented content variants belong here.
 pub enum ObjectType {
     Attachment,
+    CodeListing,
     Image,
     Group,
     Text,

@@ -9,7 +9,13 @@ use std::sync::{Arc, mpsc};
 type FileData = (String, Arc<BinaryAsset>);
 
 pub enum ResultEvent {
-    Import(Target, Option<uuid::Uuid>, Result<FileData, String>, bool),
+    Import(
+        Target,
+        Option<uuid::Uuid>,
+        Result<FileData, String>,
+        bool,
+        Option<bool>,
+    ),
     PickerClosed,
     Done(String),
 }
@@ -44,7 +50,13 @@ fn send(tx: &mpsc::Sender<ResultEvent>, ctx: &egui::Context, event: ResultEvent)
 }
 
 impl AttachmentIo {
-    pub fn pick(&mut self, ctx: egui::Context, target: Target, scope: Option<uuid::Uuid>) {
+    pub fn pick(
+        &mut self,
+        ctx: egui::Context,
+        target: Target,
+        scope: Option<uuid::Uuid>,
+        listing: Option<bool>,
+    ) {
         if self.picker_open {
             return;
         }
@@ -53,7 +65,7 @@ impl AttachmentIo {
         #[cfg(not(target_arch = "wasm32"))]
         std::thread::spawn(move || {
             let dialog = rfd::FileDialog::new();
-            let paths = if target.replace.is_some() {
+            let paths = if target.replace.is_some() || listing.is_some() {
                 dialog.pick_file().into_iter().collect()
             } else {
                 dialog.pick_files().unwrap_or_default()
@@ -72,6 +84,7 @@ impl AttachmentIo {
                         scope,
                         loaded(name, crate::image_import::read_path(&path)),
                         false,
+                        listing,
                     ),
                 );
             }
@@ -80,7 +93,7 @@ impl AttachmentIo {
         #[cfg(target_arch = "wasm32")]
         wasm_bindgen_futures::spawn_local(async move {
             let dialog = rfd::AsyncFileDialog::new();
-            let files = if target.replace.is_some() {
+            let files = if target.replace.is_some() || listing.is_some() {
                 dialog.pick_file().await.into_iter().collect()
             } else {
                 dialog.pick_files().await.unwrap_or_default()
@@ -94,7 +107,7 @@ impl AttachmentIo {
                 send(
                     &tx,
                     &ctx,
-                    ResultEvent::Import(offset(target, index), scope, result, false),
+                    ResultEvent::Import(offset(target, index), scope, result, false, listing),
                 );
             }
             finish_picker(&tx, &ctx, extra);
@@ -128,7 +141,11 @@ impl AttachmentIo {
                 .and_then(|name| name.to_str())
                 .unwrap_or("");
             let result = loaded(name, crate::image_import::read_path(path));
-            send(&tx, &ctx, ResultEvent::Import(target, scope, result, true));
+            send(
+                &tx,
+                &ctx,
+                ResultEvent::Import(target, scope, result, true, None),
+            );
         });
         #[cfg(target_arch = "wasm32")]
         wasm_bindgen_futures::spawn_local(async move {
@@ -137,7 +154,11 @@ impl AttachmentIo {
             } else {
                 Err("Browser did not supply the dropped file.".into())
             };
-            send(&tx, &ctx, ResultEvent::Import(target, scope, result, true));
+            send(
+                &tx,
+                &ctx,
+                ResultEvent::Import(target, scope, result, true, None),
+            );
         });
     }
 

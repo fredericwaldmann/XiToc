@@ -778,3 +778,26 @@ existing nib styles. Pen settings and presets apply to future strokes.
 Formatting retains the object selection and immediately updates the canvas.
 A slider or picker drag is one undoable action. Text fields retain keyboard
 focus while editing.
+
+## File-based Code Listings (#64)
+
+Choose **Insert → Code Listing…** in the top toolbar. A successful import
+selects the listing and shows **Code Listing** in the contextual controls.
+Double-click the listing for a read-only inspector with selectable source.
+Scroll a selected listing over its frame, or use the inspector for sustained
+reading and horizontal scrolling with wrap off. Source copies omit the
+line-number gutter. Resizing the frame is independent of the font size.
+
+Scientific Light, Scientific Dark and Classic LaTeX Listings are built in.
+Customize typography, wrapping, tab display, colors, frame and numbering
+in the contextual controls. Use **Settings → LaTeX → Code Listing Styles**
+to save reusable global styles, or **Document Settings → LaTeX** for isolated
+document styles. Duplicate a preset or enter a supported listing directive,
+preview the draft and use the settings dialog’s **Apply**. Document styles
+with a matching name take precedence. An individual appearance override
+takes precedence until **Reset Individual Overrides** is used.
+
+The file actions support replacement, byte-exact export and the existing
+guarded native opener or browser download. Listings never expose source
+editing. Listing options and supported directives are documented in
+[Code Listings](CODE_LISTINGS.md).

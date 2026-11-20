@@ -1192,3 +1192,29 @@ frame and Glow streams the resulting vertex/index data. The change reduces
 opaque mesh payload and translucent rebuild work using the existing renderer.
 It adds no stroke textures, shaders or native/WASM-specific GPU resources.
 The canonical editable path and independent PDF storage rules are unaffected.
+
+## File-based code listings (#64)
+
+A listing is a distinct CanvasObject type carried by the file-backed attachment
+snapshot. It shares the original-byte BinaryAsset, page ownership, oriented
+frame, intrinsic resize, placement, clipboard resource table and history.
+The byte asset owns a lazily initialized UTF-8 display view shared by copies.
+Display removes a UTF-8 BOM and normalizes CRLF and CR to LF. File export and
+native snapshot opening use the original bytes. Source inspection uses an
+immutable egui text buffer. No source-edit command or writable buffer exists.
+
+A style reference resolves against document styles, global styles, then
+built-ins. A listing can carry an individual appearance override and holds a
+fallback snapshot. Cross-document clipboard captures the effective appearance
+so a same-named style in the destination cannot change a pasted listing.
+Document styles travel through the LaTeX configuration history. The listing
+directive parser is separate from math source processing. Application styles
+use the existing LaTeX preferences storage.
+
+The render adapter uses two-face/Syntect grammar scopes and a pure-Rust regex
+backend on desktop and WASM. Grammar spans and line offsets are cached by asset
+and language. Only visible canvas rows are laid out. Object movement and
+rotation reuse layout; font, style, zoom, width, height, language, source and
+scroll changes invalidate it. Highlight parsing is bounded to the first 8,192
+lines or 512 KiB, with plain text beyond the budget and on oversized lines.
+Display and original file exports retain the full source.

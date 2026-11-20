@@ -216,8 +216,8 @@ enum Command {
     Latex {
         before_global: crate::latex_config::LatexConfig,
         after_global: crate::latex_config::LatexConfig,
-        before: crate::latex_config::LatexConfig,
-        after: crate::latex_config::LatexConfig,
+        before: Box<crate::latex_config::LatexConfig>,
+        after: Box<crate::latex_config::LatexConfig>,
         objects_before: Vec<(usize, ObjectSnapshot)>,
         objects_after: Vec<(usize, ObjectSnapshot)>,
     },
@@ -286,7 +286,7 @@ impl Command {
                 ..
             } => {
                 *global = after_global.clone();
-                *latex = after.clone();
+                *latex = (**after).clone();
                 remove_at(strokes, objects_before);
                 insert_at(strokes, objects_after);
             }
@@ -312,7 +312,7 @@ impl Command {
                 ..
             } => {
                 *global = before_global.clone();
-                *latex = before.clone();
+                *latex = (**before).clone();
                 remove_at(strokes, objects_after);
                 insert_at(strokes, objects_before);
             }
@@ -389,6 +389,13 @@ impl Drawing {
         global: &crate::latex_config::LatexConfig,
     ) -> Result<LatexReplacements, String> {
         crate::latex_config::validate(global, config)?;
+        if config.preamble == self.latex.preamble
+            && config.postamble == self.latex.postamble
+            && global.preamble == self.latex_global.preamble
+            && global.postamble == self.latex_global.postamble
+        {
+            return Ok((Vec::new(), Vec::new()));
+        }
         let mut before = Vec::new();
         let mut after = Vec::new();
         for (index, object) in self.items.iter().enumerate() {
@@ -432,8 +439,8 @@ impl Drawing {
         self.execute(Command::Latex {
             before_global: self.latex_global.clone(),
             after_global: global.clone(),
-            before: self.latex.clone(),
-            after: config,
+            before: Box::new(self.latex.clone()),
+            after: Box::new(config),
             objects_before: before,
             objects_after: after,
         });

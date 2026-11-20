@@ -357,3 +357,11 @@ Use incremental viewport-local coverage for translucent ink and a compact
 pressure-aware sweep for wide opaque ink. Keep one coverage contribution per
 stroke at self-crossings. Release benchmarks track continuous input and mixed
 documents through the actual canvas controller and egui mesh assembly.
+
+## File-based Code Listings (#64)
+
+Whiteboards and Page Notes can display read-only, restylable code from imported
+files. The shared binary asset and journal retain originals and support source
+replacement, cross-document clipboard and standard transforms. Global and
+document LaTeX settings expose reusable listing styles. Object persistence
+and the visible PDF listing representation remain M2.

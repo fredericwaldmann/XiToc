@@ -233,3 +233,15 @@ locations. Keep editable card geometry and resource IDs in XiToc's private
 payload. Visible PDF card content and PDF viewer attachment access should be
 tested independently. The viewer's ability to open a file depends on its own
 security policy and platform. [ISO 32000 clause 7](https://pdf-issues.pdfa.org/32000-2-2020/clause07.html), [PDF Association guide](https://pdfa.org/files-inside-pdf/).
+
+## Code listing preparation (#64)
+
+Future serialization pairs readable PDF text and frame graphics with structured
+listing metadata in the private payload. Persist identity, ownership, geometry,
+language override, named style, fallback style, local appearance overrides and
+document style definitions. Preserve the original filename and resource hash
+and deduplicate original source bytes into EmbeddedFile streams alongside other
+assets. A resolved style snapshot supports portable reopening when a global style
+is unavailable. Use the existing font and glyph-fallback strategy for visible
+text. Transient scroll position, grammar spans and selections are excluded.
+The blank PDF writer does not serialize listing objects.

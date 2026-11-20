@@ -14,6 +14,7 @@ impl Canvas {
             ctx.clone(),
             self.image_target(replace),
             self.drawing.editing_group,
+            None,
         );
     }
 
@@ -39,7 +40,7 @@ impl Canvas {
             match event {
                 ResultEvent::PickerClosed => self.attachment_io.picker_open = false,
                 ResultEvent::Done(message) => self.notice = Some(message),
-                ResultEvent::Import(target, scope, result, dropped) => {
+                ResultEvent::Import(target, scope, result, dropped, listing) => {
                     if dropped {
                         self.attachment_io.pending = self.attachment_io.pending.saturating_sub(1);
                     }
@@ -51,7 +52,7 @@ impl Canvas {
                         continue;
                     }
                     match result {
-                        Ok((name, asset)) => self.insert_attachment(target, name, asset),
+                        Ok((name, asset)) => self.insert_file_object(target, name, asset, listing),
                         Err(error) => self.notice = Some(error),
                     }
                 }
@@ -59,12 +60,27 @@ impl Canvas {
         }
     }
 
+    #[cfg(test)]
     fn insert_attachment(
         &mut self,
         target: crate::image_import::Target,
         name: String,
         asset: Arc<crate::asset::BinaryAsset>,
     ) {
+        self.insert_file_object(target, name, asset, None);
+    }
+
+    pub(super) fn insert_file_object(
+        &mut self,
+        target: crate::image_import::Target,
+        name: String,
+        asset: Arc<crate::asset::BinaryAsset>,
+        listing: Option<bool>,
+    ) {
+        if listing.is_some() && !asset.listing_text() {
+            self.notice = Some("Code listings require UTF-8 text. Use File Attachment for binary files or other encodings.".into());
+            return;
+        }
         if let Some(id) = target.replace {
             let Some(old) = self.attachment(id) else {
                 self.notice = Some("The attachment to replace is no longer available.".into());
@@ -74,13 +90,21 @@ impl Canvas {
             if next.display_name == next.original_name {
                 next.display_name = name.clone();
             }
+            if old.listing.is_some() != listing.is_some() {
+                return;
+            }
             next.original_name = name;
             next.asset = asset;
             self.notice = Some(
                 if next == *old {
                     "Attachment already contains this file."
                 } else if self.drawing.replace_attachment(next) {
-                    "Embedded attachment replaced."
+                    self.listing_scroll.remove(&id);
+                    if listing.is_some() {
+                        "Listing source replaced."
+                    } else {
+                        "Embedded attachment replaced."
+                    }
                 } else {
                     "Cannot replace the attachment. Check locking and document asset limits."
                 }
@@ -95,6 +119,10 @@ impl Canvas {
             name,
             asset,
         );
+        if let Some(dark) = listing {
+            attachment.listing = Some(crate::code_listing::Listing::new(dark));
+            attachment.dimensions = [342., 198.];
+        }
         for (axis, position) in attachment.placement.position.iter_mut().enumerate() {
             *position -= attachment.dimensions[axis] / 2.;
             if let Some(page) = self.drawing.bounds(target.surface) {
@@ -107,7 +135,14 @@ impl Canvas {
             self.selection.scope(target.surface);
             self.selection
                 .change([id], crate::selection::Membership::Replace, &self.drawing);
-            self.notice = Some("File attached · unsaved until PDF persistence (M2).".into());
+            self.notice = Some(
+                if listing.is_some() {
+                    "Code listing imported · unsaved until PDF persistence (M2)."
+                } else {
+                    "File attached · unsaved until PDF persistence (M2)."
+                }
+                .into(),
+            );
         } else {
             self.notice = Some(
                 "Cannot attach file. Check page bounds and the 16-asset / 128 MiB document limit."
@@ -249,7 +284,16 @@ impl Canvas {
     }
 
     pub(super) fn attachment_menu(&mut self, ui: &mut egui::Ui, attachment: Arc<Attachment>) {
-        let label = if cfg!(target_arch = "wasm32") {
+        let listing = attachment.listing.is_some();
+        if listing && ui.button("Inspect Source").clicked() {
+            self.open_listing(attachment.id);
+            ui.close();
+        }
+        let label = if listing && cfg!(target_arch = "wasm32") {
+            "Download Original File"
+        } else if listing {
+            "Open Original File"
+        } else if cfg!(target_arch = "wasm32") {
             "Download"
         } else {
             "Open"
@@ -259,18 +303,37 @@ impl Canvas {
                 .open(ui.ctx().clone(), attachment.clone());
             ui.close();
         }
-        if !cfg!(target_arch = "wasm32") && ui.button("Save As…").clicked() {
+        if !cfg!(target_arch = "wasm32")
+            && ui
+                .button(if listing {
+                    "Save Original File As…"
+                } else {
+                    "Save As…"
+                })
+                .clicked()
+        {
             self.attachment_io
                 .save(ui.ctx().clone(), attachment.clone());
             ui.close();
         }
         ui.add_enabled_ui(!self.drawing.is_locked(attachment.id), |ui| {
-            if ui.button("Rename Display Name…").clicked() {
+            if !listing && ui.button("Rename Display Name…").clicked() {
                 self.attachment_rename = Some((attachment.id, attachment.display_name.clone()));
                 ui.close();
             }
-            if ui.button("Replace Attached File…").clicked() {
-                self.choose_attachment(ui.ctx(), Some(attachment.id));
+            if ui
+                .button(if listing {
+                    "Replace Source File…"
+                } else {
+                    "Replace Attached File…"
+                })
+                .clicked()
+            {
+                if listing {
+                    self.choose_listing(ui.ctx(), Some(attachment.id));
+                } else {
+                    self.choose_attachment(ui.ctx(), Some(attachment.id));
+                }
                 ui.close();
             }
         });

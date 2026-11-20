@@ -8,11 +8,13 @@ pub const MAX_ASSET_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_ASSETS: usize = 16;
 pub const MAX_DOCUMENT_ASSET_BYTES: usize = 128 * 1024 * 1024;
 
-#[derive(Debug, PartialEq, Eq, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct BinaryAsset {
     id: AssetId,
     #[serde(with = "encoded_bytes")]
     bytes: Arc<[u8]>,
+    #[serde(skip)]
+    listing_text: std::sync::OnceLock<Option<Arc<str>>>,
 }
 
 impl BinaryAsset {
@@ -23,7 +25,23 @@ impl BinaryAsset {
         Ok(Arc::new(Self {
             id: Sha256::digest(&bytes).into(),
             bytes,
+            listing_text: Default::default(),
         }))
+    }
+    pub fn listing_text(&self) -> bool {
+        self.listing_source().is_some()
+    }
+    pub fn listing_source(&self) -> Option<&str> {
+        self.listing_text
+            .get_or_init(|| {
+                let text = crate::code_listing::source(&self.bytes).ok()?;
+                if text.contains('\r') {
+                    Some(text.replace("\r\n", "\n").replace('\r', "\n").into())
+                } else {
+                    Some(text.into())
+                }
+            })
+            .as_deref()
     }
     pub fn id(&self) -> AssetId {
         self.id
@@ -32,6 +50,13 @@ impl BinaryAsset {
         &self.bytes
     }
 }
+
+impl PartialEq for BinaryAsset {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.bytes == other.bytes
+    }
+}
+impl Eq for BinaryAsset {}
 
 impl<'de> Deserialize<'de> for BinaryAsset {
     fn deserialize<D: serde::Deserializer<'de>>(input: D) -> Result<Self, D::Error> {

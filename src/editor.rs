@@ -65,6 +65,7 @@ impl Editor {
         let clip = ui.clip_rect();
         ui.set_clip_rect(clip.intersect(ui.available_rect_before_wrap()));
         self.canvas.begin_frame(ui);
+        self.canvas.scroll_listing(ui);
         match data.layout() {
             Layout::Page { pages } => self.pages(ui, data, pages),
             Layout::Whiteboard { .. } => self.whiteboard(ui),

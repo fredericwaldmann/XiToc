@@ -42,6 +42,8 @@ struct ImageBundle {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AttachmentReference {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    listing: Option<crate::code_listing::Listing>,
     id: Uuid,
     document_id: Uuid,
     surface: Surface,
@@ -255,6 +257,7 @@ impl ObjectBundle {
                         .entry(a.asset.id())
                         .or_insert_with(|| a.asset.clone());
                     let data = AttachmentReference {
+                        listing: a.listing.clone(),
                         id: a.id,
                         document_id: a.document_id,
                         surface: a.surface,
@@ -332,6 +335,7 @@ impl ObjectBundle {
                         placement: a.placement,
                         dimensions: a.dimensions,
                         original_name: a.original_name,
+                        listing: a.listing,
                         display_name: a.display_name,
                         locked: a.locked,
                         asset,
