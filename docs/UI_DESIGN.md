@@ -793,3 +793,18 @@ Listings use read-only canvas text, measured dimensions, standard oriented
 handles and normal canvas navigation. An oversized Page Note listing shows
 a page overflow label and expands the editor's scrollable margin. The A4
 paper geometry and page ownership stay fixed. See [Code Listings](CODE_LISTINGS.md).
+
+## Scientific coordinate systems (#63)
+
+Use **Insert → Coordinate System** in the top drawing toolbar. Choose one of
+the five presets and click to place it. A click selects it. Double-click the body
+or use **Configure Coordinate System…** in its object menu to open the same
+equation-style modal. It shows a shared-renderer preview and a scrollable form
+with axes, grids and ticks, applicable plots or intervals, viewpoint and frame
+controls. Color fields use the shared swatch and inline picker. Apply commits
+one edit. Cancel and Escape discard the draft.
+
+Axes use theme ink on Whiteboards and dark ink on paper by default. Background,
+grid and numeric tick labels are optional. The origin has a single zero label.
+Standard oriented handles resize and rotate the entire diagram. Double-click
+the rotation handle to reset canvas rotation independently of the 3D viewpoint.

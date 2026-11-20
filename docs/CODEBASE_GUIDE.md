@@ -1103,3 +1103,15 @@ M2's single-PDF visible-image/edit-payload round-trip gate.
 - `LatexPreferences` stores custom presets and the import default.
 - `object_clipboard.rs` carries authored listing state and embeds shared
   source bytes once. Path metadata alone does not grant filesystem access.
+
+## Scientific coordinate systems (#63)
+
+- `coordinate.rs` defines the five presets, authored configuration, validation,
+  and CanvasObject implementation.
+- `coordinate_expression.rs` parses and evaluates the bounded numeric grammar.
+  `coordinate_geometry.rs` samples, clips, caches, and projects logical curves
+  and surface wires. It also generates axes, grids, ticks and markers.
+- `canvas_coordinates.rs` handles placement, the transactional modal, and the
+  vector renderer shared with preview.
+- `object.rs`, `drawing.rs`, `canvas_selection.rs` and `object_clipboard.rs`
+  integrate coordinate systems with the common document and interaction paths.

@@ -1983,3 +1983,20 @@ available, then lasso the ink, change its width and test undo and redo.
 - Exercise oriented resizing, rotation reset, groups, cross-document paste,
   locks, alignment and undo/redo. Verify refresh does not add a history step.
   Try thousands of lines, very long lines, and multiple listings.
+
+## Scientific coordinate systems (#63)
+
+- Insert the two number lines, first and four quadrants, and positive octant.
+  Check the arrow directions and one origin zero. Add closed/open points and
+  mixed-endpoint intervals. Turn grid, ticks and numeric labels on and off.
+- Plot `x^2`, `sin(x)`, `1/x`, and `sqrt(x)` with independent styles and
+  domains. Confirm functions remain clipped to the axes and poles remain split.
+  Change ranges or zoom and confirm mathematical correspondence.
+- In the octant plot `z=x^2+y^2` and `z=sin(x)*cos(y)`. Change azimuth and
+  elevation. Rotate on the canvas, then reset rotation. Check the viewpoint
+  remains fixed internally.
+- Double-click the body and test live preview, invalid-expression feedback,
+  Apply, Cancel, and undo/redo. Switch dimensions and recover inactive entries.
+- Resize, group, lock, align, snap and paste between Whiteboard and Page Note.
+  Verify logical placement, fresh clipboard IDs and no extra history entries.
+  Exercise the desktop and browser builds.

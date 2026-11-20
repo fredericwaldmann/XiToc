@@ -852,3 +852,12 @@ validated locally and never passed to math rendering or an external compiler.
 ## Scientific Code Listings
 
 Use one transactional configuration modal and snapshot effective appearance per listing. Native source synchronization reconciles the live object outside history and polls only process-approved paths. Content measurement establishes the oriented frame and page overflow scroll extent. The existing two-face/Syntect dependency remains unchanged.
+
+## Native coordinate data and vector plots (#63)
+
+A native semantic graph supports direct axes, plot and domain editing, common
+canvas transforms, and independent vector PDF output later. A rendered TikZ
+image would lose editable mathematical structure and complicate WASM. Use a
+small numerical grammar and orthographic wireframes with bounded adaptive
+sampling. Tex-like standalone Greek axis labels map to Unicode and render in
+the app's italic scientific typography. TikZ/PGFPlots export is future work.

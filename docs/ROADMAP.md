@@ -365,3 +365,9 @@ configuration dialog manages the source path, presets, formatting, exact line
 ranges and title. Native links update in the background with snapshot
 fallback. Canvas layout grows with visible content and reports page overflow.
 M2 owns the visible PDF output and round trip.
+
+## Scientific coordinate systems (#63)
+
+Place five native vector presets on either canvas. One configuration dialog
+edits axes, labels, grids, ticks, 1D annotations, 2D functions and orthographic
+3D surfaces. Plot data is structured for the M2 single-PDF round trip.

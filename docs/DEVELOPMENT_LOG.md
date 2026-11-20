@@ -873,3 +873,10 @@ in history. PDF round-trip support remains M2 work.
 ## Scientific Code Listings
 
 Revised #64 to replace contextual controls and source inspection with one LaTeX-style dialog. Added persisted presets and default, original-line selection, content-sized frames, and native link refresh with snapshot fallback.
+
+## Scientific coordinate systems (#63)
+
+Added five coordinate presets, 1D points and intervals, 2D functions, and
+orthographic 3D surface wireframes. One equation-style dialog previews and
+commits configuration using the shared editor journal. Coordinate geometry
+and sampled mathematical data are cached independently.

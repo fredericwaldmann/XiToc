@@ -105,6 +105,7 @@ pub enum ObjectType {
     Group,
     Text,
     Formula,
+    Coordinate,
     Stroke,
     Shape,
     Connector,
@@ -120,6 +121,7 @@ pub enum ObjectSnapshot {
     Group(std::sync::Arc<crate::group::Group>),
     Text(std::sync::Arc<crate::text::TextObject>),
     Formula(std::sync::Arc<crate::formula::FormulaObject>),
+    Coordinate(std::sync::Arc<crate::coordinate::Coordinate>),
     Stroke(std::sync::Arc<Stroke>),
     Shape(std::sync::Arc<crate::shape::Shape>),
     Connector(std::sync::Arc<crate::connector::Connector>),
@@ -694,6 +696,11 @@ impl From<crate::formula::FormulaObject> for ObjectSnapshot {
         Self::Formula(std::sync::Arc::new(value))
     }
 }
+impl From<crate::coordinate::Coordinate> for ObjectSnapshot {
+    fn from(value: crate::coordinate::Coordinate) -> Self {
+        Self::Coordinate(std::sync::Arc::new(value))
+    }
+}
 impl ObjectSnapshot {
     pub fn locked(&self) -> bool {
         match self {
@@ -704,6 +711,7 @@ impl ObjectSnapshot {
             Self::Shape(o) => o.locked,
             Self::Text(o) => o.locked,
             Self::Formula(o) => o.locked,
+            Self::Coordinate(o) => o.locked,
             Self::Connector(o) => o.locked,
         }
     }
@@ -716,6 +724,7 @@ impl ObjectSnapshot {
             Self::Shape(o) => std::sync::Arc::make_mut(o).locked = value,
             Self::Text(o) => std::sync::Arc::make_mut(o).locked = value,
             Self::Formula(o) => std::sync::Arc::make_mut(o).locked = value,
+            Self::Coordinate(o) => std::sync::Arc::make_mut(o).locked = value,
             Self::Connector(o) => std::sync::Arc::make_mut(o).locked = value,
         }
     }
@@ -727,6 +736,7 @@ impl ObjectSnapshot {
             Self::Group(g) => g.as_ref(),
             Self::Text(t) => t.as_ref(),
             Self::Formula(f) => f.as_ref(),
+            Self::Coordinate(c) => c.as_ref(),
             Self::Stroke(s) => s.as_ref(),
             Self::Shape(s) => s.as_ref(),
             Self::Connector(c) => c.as_ref(),
@@ -739,6 +749,7 @@ impl ObjectSnapshot {
             Self::Group(g) => g.id,
             Self::Text(t) => t.id,
             Self::Formula(f) => f.id,
+            Self::Coordinate(c) => c.id,
             Self::Stroke(s) => s.id,
             Self::Shape(s) => s.id,
             Self::Connector(c) => c.id,
@@ -767,6 +778,11 @@ impl ObjectSnapshot {
             }
             Self::Text(t) => t.transformed(delta).into(),
             Self::Formula(f) => f.transformed(delta).into(),
+            Self::Coordinate(c) => {
+                let mut value = (**c).clone();
+                value.placement = c.placement.then(delta, [0.; 2]);
+                value.into()
+            }
             Self::Connector(c) => c.transformed(delta, &Default::default()).into(),
             Self::Stroke(s) => {
                 let mut t = (**s).clone();
@@ -816,6 +832,13 @@ impl ObjectSnapshot {
                 f.document_id = owner;
                 f.surface = surface;
                 f.into()
+            }
+            Self::Coordinate(c) => {
+                let mut value = (**c).clone();
+                value.id = Uuid::new_v4();
+                value.document_id = owner;
+                value.surface = surface;
+                value.into()
             }
             Self::Connector(c) => {
                 let mut c = (**c).clone();

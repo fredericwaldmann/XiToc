@@ -414,3 +414,7 @@ Use **Insert → Code Listing…** to display an imported source file on either
 canvas. Double-click a listing to configure its source, preset, LaTeX-style
 formatting, displayed lines and title. Native linked files refresh in the
 background. See [Code Listings](docs/CODE_LISTINGS.md).
+
+Use **Insert → Coordinate System** for number lines, Cartesian plots and
+positive-octant wireframes. Double-click to edit axes, functions and style.
+See [Scientific Coordinate Systems](docs/SCIENTIFIC_COORDINATES.md).

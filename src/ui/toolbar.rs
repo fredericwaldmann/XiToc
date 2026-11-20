@@ -61,6 +61,14 @@ pub fn show(
             if icons::button(ui,Icon::Text,"Text · click to type, drag to set width",editor.canvas.tool==Tool::Text).clicked(){editor.canvas.select(Tool::Text);}
             if icons::button(ui, Icon::Formula, "Formula · click the canvas to enter LaTeX", editor.canvas.tool == Tool::Formula).clicked() { editor.canvas.select(Tool::Formula); }
             ui.menu_button("Insert", |ui| {
+                ui.menu_button("Coordinate System", |ui| {
+                    for preset in crate::coordinate::Preset::ALL {
+                        if ui.button(preset.label()).clicked() {
+                            editor.canvas.begin_coordinate_placement(preset);
+                            ui.close();
+                        }
+                    }
+                });
                 if ui.button("Image…").clicked() {
                     editor.canvas.choose_image(ui.ctx(), None);
                     ui.close();
