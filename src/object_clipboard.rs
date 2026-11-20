@@ -148,6 +148,12 @@ impl ObjectBundle {
                     }
                     continue;
                 }
+                ClipboardObject::Coordinate(value) => {
+                    if !value.valid() {
+                        return Err("Invalid scientific coordinate system.".into());
+                    }
+                    continue;
+                }
                 ClipboardObject::Formula(formula) => {
                     if !formula.valid() {
                         return Err("Invalid formula clipboard object.".into());

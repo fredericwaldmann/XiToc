@@ -793,3 +793,25 @@ Listings use read-only canvas text, measured dimensions, standard oriented
 handles and normal canvas navigation. An oversized Page Note listing shows
 a page overflow label and expands the editor's scrollable margin. The A4
 paper geometry and page ownership stay fixed. See [Code Listings](CODE_LISTINGS.md).
+
+## Scientific coordinate systems (#63)
+
+Use **Insert → Coordinate System** in the top drawing toolbar. Choose one of
+the five presets and click to place it. A click selects it. Double-click the body
+or use **Configure Coordinate System…** in its object menu to open the same
+equation-style modal. The resizable dialog uses a two-column layout: General,
+Functions and TikZ Editor tabs remain on the left while the shared-renderer
+preview stays visible on the right. The modal opens at a compact 1000×360
+logical size (minimum 760×320), is resizable, and retains the resized egui
+state for the session. Only the selected settings tab scrolls.
+Color fields use the shared swatch and inline picker. Apply commits one edit.
+Cancel and Escape discard the draft. Invalid source preserves the last valid
+preview and disables Apply until corrected.
+
+Axes use theme ink on Whiteboards and dark ink on paper by default. Background
+and grid are optional. Numeric tick labels default off; the independently
+controlled zero label defaults on. Every coordinate label uses the bundled
+Latin Modern Math renderer used by equations. Zero follows X-axis tick
+placement, with no second Y-axis zero label.
+Standard oriented handles resize and rotate the entire diagram. Double-click
+the rotation handle to reset canvas rotation independently of the 3D viewpoint.

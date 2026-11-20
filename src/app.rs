@@ -449,7 +449,7 @@ impl XiTocApp {
         }
         if let Some(active) = self.active {
             let canvas = &mut self.documents[active].editor.canvas;
-            canvas.dismiss_listing_configuration();
+            canvas.dismiss_object_configuration();
             canvas.finish();
         }
         let editor = self.editor(&loaded.document.data);
@@ -468,7 +468,7 @@ impl XiTocApp {
     fn activate(&mut self, index: usize) {
         if let Some(active) = self.active {
             let canvas = &mut self.documents[active].editor.canvas;
-            canvas.dismiss_listing_configuration();
+            canvas.dismiss_object_configuration();
             canvas.finish();
         }
         self.active = Some(index);

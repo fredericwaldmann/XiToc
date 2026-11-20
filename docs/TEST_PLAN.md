@@ -1983,3 +1983,39 @@ available, then lasso the ink, change its width and test undo and redo.
 - Exercise oriented resizing, rotation reset, groups, cross-document paste,
   locks, alignment and undo/redo. Verify refresh does not add a history step.
   Try thousands of lines, very long lines, and multiple listings.
+
+## Scientific coordinate systems (#63)
+
+- Insert the two number lines, first and four quadrants, and positive octant.
+  Check the arrow directions and one origin zero. Add closed/open points and
+  mixed-endpoint intervals. Turn grid, ticks and numeric labels on and off.
+- Plot `x^2`, `sin(x)`, `1/x`, and `sqrt(x)` with independent styles and
+  domains. Confirm functions remain clipped to the axes and poles remain split.
+  Change ranges or zoom and confirm mathematical correspondence.
+- In the octant plot `z=x^2+y^2` and `z=sin(x)*cos(y)`. Change azimuth and
+  elevation. Rotate on the canvas, then reset rotation. Check the viewpoint
+  remains fixed internally.
+- Double-click the body and test live preview, invalid-expression feedback,
+  Apply, Cancel, and undo/redo. Switch dimensions and recover inactive entries.
+- Resize, group, lock, align, snap and paste between Whiteboard and Page Note.
+  Verify logical placement, fresh clipboard IDs and no extra history entries.
+  Exercise the desktop and browser builds.
+- Check all independent label states: numeric off/zero on (default), both off,
+  both on, and numeric on/zero off. Verify zero appears exactly once, remains
+  when ordinary tick marks are hidden, and follows the origin after ranges and
+  frame size change. Compare axis, zero and numeric labels with equation math
+  typography, including a Greek label and a scripted label.
+- Confirm the shorter resizable dialog retains three left tabs and a right
+  preview. In TikZ Editor verify `xtick`/`xticklabels` state follows General,
+  source edits update the checkbox, and no new source contains a standalone
+  origin `\\node`.
+
+Dialog/TikZ enhancement regressions cover the three left tabs with an always-
+visible right preview, source generation and multiline source parsing, all five
+preset representations, 1D marker and 3D surface extensions, axis range/color/
+label and 2D expression/style edits, comments across graphical edits, invalid
+and unsupported commands, last-valid preview retention, Apply/Cancel and one-
+step undo. For manual GUI verification, edit an axis endpoint and a curve
+expression/color in TikZ Editor, then confirm General/Functions and the preview
+reflect them. Type an incomplete command, confirm the preview is unchanged and
+Apply is disabled, correct it, Apply, and undo/redo. Repeat on native and WASM.

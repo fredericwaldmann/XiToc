@@ -245,3 +245,16 @@ original source-line identities. A persisted path or portable relative
 reference is an untrusted reconnect hint. Reopening a PDF must never read a
 local link without explicit approval and must display the embedded snapshot
 without requiring the original source. This feature adds no PDF serialization.
+
+## Scientific coordinate-system preparation (#63)
+
+M2 must serialize the authored coordinate variant with ownership, ID, frame,
+placement, preset, labels and visibility, axes/ranges, grid and ticks, 1D
+markers and interval endpoints, expressions/domains/styles, and 3D orientation.
+Preserve the authored TikZ-subset source with the structured diagram model so
+it can be edited after reopening; parsed state remains validated against the
+structured representation.
+Preserve dimension-specific definitions through preset changes. Conventional
+pages should paint projected axes, markers, wires and clipped curves as vector
+graphics with matching text. Parsing caches, sampled points, dialog previews
+and selection geometry are transient. This milestone adds no PDF serialization.
