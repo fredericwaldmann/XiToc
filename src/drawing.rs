@@ -616,6 +616,15 @@ impl Drawing {
                     && t.document_id == self.owner
                     && t.corners().iter().all(|p| self.contains(t.surface, *p))
             }
+            ObjectSnapshot::Coordinate(c) => {
+                let trusted = matches!(self.snapshot(c.id), Some(ObjectSnapshot::Coordinate(old)) if Arc::ptr_eq(&old.config, &c.config));
+                c.geometry_valid()
+                    && (trusted || c.config.validate().is_ok())
+                    && c.document_id == self.owner
+                    && c.corners()
+                        .into_iter()
+                        .all(|point| self.contains(c.surface, point))
+            }
             ObjectSnapshot::Formula(f) => {
                 f.valid()
                     && f.document_id == self.owner
@@ -1621,6 +1630,31 @@ impl Drawing {
             text.height = limit.max(1.);
         }
     }
+    pub fn replace_coordinate(&mut self, value: crate::coordinate::Coordinate) -> bool {
+        let id = value.id;
+        let Some(&index) = self.object_slots.get(&id) else {
+            return false;
+        };
+        let ObjectSnapshot::Coordinate(old) = &self.items[index] else {
+            return false;
+        };
+        if self.is_locked(id) || old.surface != value.surface || **old == value {
+            return false;
+        }
+        let target = ObjectSnapshot::from(value);
+        if !self.valid_object(&target) {
+            return false;
+        }
+        self.execute_selected(
+            Command::Replace {
+                before: vec![(index, self.items[index].clone())],
+                after: vec![(index, target)],
+            },
+            Some(vec![id]),
+        );
+        true
+    }
+
     pub fn replace_shape(&mut self, shape: crate::shape::Shape) -> bool {
         if self.is_locked(shape.id) {
             return false;

@@ -1214,3 +1214,36 @@ updates the live object and derived bounds outside journal entries. Undo
 restores authored state, then the watcher reconciles the restored active
 link. Invalid or missing files retain the last valid snapshot. Web uses
 snapshots and explicit reselection. See [Code Listings](CODE_LISTINGS.md).
+
+## Scientific coordinate systems (#63)
+
+`Coordinate` is a canonical CanvasObject snapshot with a stable ID, explicit
+surface ownership, placement, frame size, lock state and shared immutable
+configuration. Separate 1D markers, 2D curves and 3D surfaces preserve their
+authored data across preset changes. The unified dialog owns a draft. Apply
+replaces one snapshot through the ordinary journal and Cancel releases it.
+Selection, clipboard and group transforms use the existing object pipeline.
+
+The platform-neutral expression grammar evaluates bounded arithmetic without
+I/O or TeX. Plot samples are stored in mathematical coordinates in a transient
+cache keyed by expression, ranges, domains and sampling quality. Projection,
+axes, grids, labels and line patterns are a second cache in local frame
+coordinates. Color and viewpoint edits reuse unchanged samples. Canvas
+translation and rotation compose with that frame and reuse the geometry.
+Preview and canvas share the same vector renderer.
+
+The authored coordinate snapshot also retains its last valid TikZ-subset source.
+The modal keeps a private draft containing structured settings and editor text.
+Parsing is bounded and allowlisted, with no TeX process or external resources.
+Supported edits update the same `Config`; malformed source leaves the last valid
+configuration available for preview and cannot be applied. Tab switches do not
+regenerate source. A graphical edit regenerates managed statements while
+retaining authored comments. The source parser and generator live in
+`coordinate_tikz.rs`; the dialog and shared preview layout live in
+`canvas_coordinates.rs`.
+
+The 2D mapping centers ranges in the frame and uses equal distances per unit
+unless explicitly disabled. The 3D orthographic basis projects the positive
+octant and a bounded wireframe. Surface domain and axis clipping are in
+mathematical coordinates before projection. See
+[Scientific Coordinate Systems](SCIENTIFIC_COORDINATES.md).

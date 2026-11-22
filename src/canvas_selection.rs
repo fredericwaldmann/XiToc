@@ -118,7 +118,7 @@ pub(super) fn selection_preview_ids<'a>(
 impl Canvas {
     pub fn selection_action(&mut self, command: SelectionCommand, ctx: &egui::Context) {
         use SelectionCommand::*;
-        if self.listing_config.is_some() {
+        if self.listing_config.is_some() || self.coordinate_draft.is_some() {
             return;
         }
         if self.text_action(command, ctx) {
@@ -613,6 +613,7 @@ impl Canvas {
                     ObjectSnapshot::Attachment(a) => a.hit_test(point, tolerance),
                     ObjectSnapshot::Image(i) => i.hit_test(point, tolerance),
                     ObjectSnapshot::Formula(f) => f.hit_test(point, tolerance),
+                    ObjectSnapshot::Coordinate(c) => c.hit_test(point, tolerance),
                     ObjectSnapshot::Stroke(stroke) => {
                         let cache = self
                             .cache
@@ -1122,6 +1123,11 @@ impl Canvas {
                                 ObjectSnapshot::Image(i) => {
                                     i.rectangle_matches(bounds, point[0] < start[0])
                                 }
+                                ObjectSnapshot::Coordinate(c) => selection::box_rectangle_matches(
+                                    c.corners(),
+                                    bounds,
+                                    point[0] < start[0],
+                                ),
                                 ObjectSnapshot::Formula(f) => {
                                     f.rectangle_matches(bounds, point[0] < start[0])
                                 }
@@ -1447,6 +1453,9 @@ impl Canvas {
                             }
                             ObjectSnapshot::Image(i) => i.lasso_matches(&region),
                             ObjectSnapshot::Formula(f) => f.lasso_matches(&region),
+                            ObjectSnapshot::Coordinate(c) => {
+                                selection::box_lasso_matches(c.corners(), &region)
+                            }
                             ObjectSnapshot::Shape(shape) => shape.lasso_matches(&region),
                             ObjectSnapshot::Connector(c) => c.as_shape().lasso_matches(&region),
                         };
@@ -1731,7 +1740,7 @@ impl Canvas {
                                 }
                             }
                         }
-                        let previous = self.attachment_click.take();
+                        let previous = self.object_click.take();
                         if matches!(
                             self.selection_gesture,
                             Some(SelectionGesture::Transform {
@@ -1741,24 +1750,37 @@ impl Canvas {
                             })
                         ) && modifiers.is_none()
                             && ui.input(|i| i.pointer.button_clicked(PointerButton::Primary))
-                            && let Some(attachment) = self.selected_attachment()
-                            && attachment
-                                .hit_test(transform.to_document([pos.x as f64, pos.y as f64]), 0.)
                         {
-                            let now = ui.input(|i| i.time);
-                            let delay =
-                                ui.ctx().options(|o| o.input_options.max_double_click_delay);
-                            if previous.is_some_and(|(id, time, last)| {
-                                id == attachment.id && now - time < delay && last.distance(pos) < 6.
-                            }) {
-                                self.selection_gesture = None;
-                                if attachment.listing.is_some() {
-                                    self.open_listing(attachment.id);
+                            let point = transform.to_document([pos.x as f64, pos.y as f64]);
+                            let candidate = self
+                                .selected_coordinate()
+                                .filter(|o| o.hit_test(point, 0.))
+                                .map(|o| o.id)
+                                .or_else(|| {
+                                    self.selected_attachment()
+                                        .filter(|o| o.hit_test(point, 0.))
+                                        .map(|o| o.id)
+                                });
+                            if let Some(id) = candidate {
+                                let now = ui.input(|i| i.time);
+                                let delay =
+                                    ui.ctx().options(|o| o.input_options.max_double_click_delay);
+                                if previous.is_some_and(|(old, time, last)| {
+                                    old == id && now - time < delay && last.distance(pos) < 6.
+                                }) {
+                                    self.selection_gesture = None;
+                                    if let Some(attachment) = self.attachment(id) {
+                                        if attachment.listing.is_some() {
+                                            self.open_listing(id);
+                                        } else {
+                                            self.attachment_io.open(ui.ctx().clone(), attachment);
+                                        }
+                                    } else {
+                                        self.open_coordinate(id);
+                                    }
                                 } else {
-                                    self.attachment_io.open(ui.ctx().clone(), attachment);
+                                    self.object_click = Some((id, now, pos));
                                 }
-                            } else {
-                                self.attachment_click = Some((attachment.id, now, pos));
                             }
                         }
                         self.commit_selection();
@@ -2220,6 +2242,13 @@ impl Canvas {
                 return;
             }
 
+            if let Some(id) = self.selected_coordinate().map(|object| object.id) {
+                if ui.button("Configure Coordinate System…").clicked() {
+                    self.open_coordinate(id);
+                    ui.close();
+                }
+                ui.separator();
+            }
             if let Some(attachment) = self.selected_attachment() {
                 self.attachment_menu(ui, attachment);
                 if ui.button("Reset Rotation").clicked() {

@@ -20,6 +20,8 @@ use crate::object::{CanvasObject, ObjectSnapshot};
 use selection_ui::SelectionGesture;
 #[path = "canvas_connectors.rs"]
 mod connectors_ui;
+#[path = "canvas_coordinates.rs"]
+mod coordinates_ui;
 #[path = "canvas_formula.rs"]
 mod formula_ui;
 #[path = "canvas_images.rs"]
@@ -44,6 +46,7 @@ pub enum Tool {
     Text,
     StickyNote,
     Formula,
+    Coordinate,
 }
 
 struct Erasing {
@@ -407,7 +410,10 @@ pub struct Canvas {
     listing_cache: HashMap<(crate::asset::AssetId, String), listings_ui::SourcePreview>,
     attachment_io: crate::attachment_io::AttachmentIo,
     attachment_rename: Option<(Uuid, String)>,
-    attachment_click: Option<(Uuid, f64, Pos2)>,
+    object_click: Option<(Uuid, f64, Pos2)>,
+    coordinate_preset: crate::coordinate::Preset,
+    coordinate_cache: HashMap<Uuid, coordinates_ui::CoordinateCache>,
+    coordinate_draft: Option<coordinates_ui::CoordinateDraft>,
     image_cache: HashMap<crate::image_object::AssetId, images_ui::ImageTexture>,
     pub latex: crate::latex_config::LatexPreferences,
     pub open_global_latex: bool,
@@ -483,7 +489,10 @@ impl Canvas {
             listing_cache: Default::default(),
             attachment_io: Default::default(),
             attachment_rename: None,
-            attachment_click: None,
+            object_click: None,
+            coordinate_preset: crate::coordinate::Preset::FourQuadrants,
+            coordinate_cache: Default::default(),
+            coordinate_draft: None,
             image_cache: Default::default(),
             latex: Default::default(),
             open_global_latex: false,
@@ -561,7 +570,8 @@ impl Canvas {
             || self.drawing.dirty()
             || matches!(&self.gesture, Some(Gesture::Pen(stroke)) if !stroke.points.is_empty())
     }
-    pub fn dismiss_listing_configuration(&mut self) {
+    pub fn dismiss_object_configuration(&mut self) {
+        self.coordinate_draft = None;
         self.listing_config = None;
         self.listing_preview = None;
     }
@@ -644,6 +654,8 @@ impl Canvas {
     }
 
     fn prune_cache(&mut self) {
+        self.coordinate_cache
+            .retain(|id, _| self.drawing.snapshot(*id).is_some());
         self.listing_layouts
             .retain(|id, _| self.drawing.snapshot(*id).is_some());
         self.listing_measurements
@@ -710,7 +722,15 @@ impl Canvas {
         #[cfg(not(target_arch = "wasm32"))]
         self.poll_listing_sources(ui);
         self.measure_listings(ui);
-        if self.listing_dialog(ui.ctx()) || self.attachment_rename_dialog(ui.ctx()) {
+        if self.tool == Tool::Coordinate
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.select(self.selection_mode);
+        }
+        if self.coordinate_dialog(ui.ctx())
+            || self.listing_dialog(ui.ctx())
+            || self.attachment_rename_dialog(ui.ctx())
+        {
             return;
         }
         self.selection.refresh(&self.drawing);
@@ -767,8 +787,13 @@ impl Canvas {
     }
 
     pub fn surface(&mut self, ui: &egui::Ui, bounds: Rect, surface: Surface, transform: Transform) {
-        if self.listing_config.is_some() {
+        if self.listing_config.is_some() || self.coordinate_draft.is_some() {
             self.paint(ui, bounds, surface, transform);
+            return;
+        }
+        if self.coordinate_surface(ui, bounds, surface, transform) {
+            self.paint(ui, bounds, surface, transform);
+            self.paint_selection(ui, bounds, surface, transform);
             return;
         }
         if self.image_surface(ui, bounds, surface, transform) {
@@ -1221,6 +1246,26 @@ impl Canvas {
                     continue;
                 }
                 ObjectSnapshot::Group(_) => continue,
+                ObjectSnapshot::Coordinate(object) => {
+                    let delta = selection_preview
+                        .filter(|_| preview_ids.contains(&object.id))
+                        .unwrap_or_default();
+                    let palette = crate::ui::style::palette(ui);
+                    let ink = if matches!(surface, Surface::Page(_)) {
+                        egui::Color32::from_rgb(32, 39, 49)
+                    } else {
+                        palette.text
+                    };
+                    coordinates_ui::paint_coordinate(
+                        self.coordinate_cache.entry(object.id).or_default(),
+                        &painter,
+                        object,
+                        transform,
+                        delta,
+                        ink,
+                    );
+                    continue;
+                }
                 ObjectSnapshot::Formula(formula) => {
                     if self
                         .formula_session
