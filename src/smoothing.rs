@@ -112,9 +112,14 @@ fn emit(
     let start_p = mix_p(pressure, filtered_p(i - 1), trim as f32);
     let end_p = mix_p(pressure, filtered_p(i + 1), trim as f32);
     pressures.push(start_p);
-    let steps = ((distance(start, b) + distance(b, end)) / 1.0)
-        .ceil()
-        .clamp(2.0, 32.0) as usize;
+    let pressure_steps = match (start_p, pressure, end_p) {
+        (Some(start), Some(control), Some(end)) => {
+            let error = (control - (start + end) * 0.5).abs() * 0.5;
+            (error / 0.001).sqrt().ceil() as usize
+        }
+        _ => 1,
+    };
+    let steps = curve_steps(start, b, end).max(pressure_steps);
     // de Casteljau form avoids weighted sums of large absolute coordinates.
     for step in 1..=steps {
         let t = step as f64 / steps as f64;
@@ -127,9 +132,35 @@ fn emit(
     }
 }
 
+/// For a quadratic, midpoint chord error is half the distance of the
+/// control point from the chord midpoint. Equal intervals reduce it by n².
+/// A fixed document tolerance lets live, committed and eraser paths agree
+/// and is about a quarter physical pixel at 800% and 2× device scale.
+fn curve_steps(start: [f64; 2], control: [f64; 2], end: [f64; 2]) -> usize {
+    const ERROR: f64 = 0.016;
+    let deviation: [f64; 2] =
+        std::array::from_fn(|i| ((start[i] - control[i]) + (end[i] - control[i])) * 0.5);
+    let error = deviation[0].hypot(deviation[1]) * 0.5;
+    (error / ERROR).sqrt().ceil().clamp(2., 96.) as usize
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn quadratic_chords_stay_within_a_quarter_pixel_at_high_zoom() {
+        let (start, control, end) = ([0., 0.], [12., 8.], [24., 0.]);
+        let point = |t| mix(mix(start, control, t), mix(control, end, t), t);
+        let steps = curve_steps(start, control, end);
+        for i in 0..steps {
+            let a = i as f64 / steps as f64;
+            let b = (i + 1) as f64 / steps as f64;
+            let error = distance(point((a + b) * 0.5), mix(point(a), point(b), 0.5));
+            assert!(error * 8. * 2. <= 0.256);
+        }
+        assert_eq!(curve_steps(start, [12., 0.], end), 2);
+    }
+
     fn samples(positions: &[[f64; 2]]) -> Vec<InkPoint> {
         positions.iter().copied().map(InkPoint::mouse).collect()
     }

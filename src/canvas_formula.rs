@@ -448,6 +448,26 @@ impl Canvas {
         global: &crate::latex_config::LatexPreferences,
         doc: &crate::latex_config::LatexConfig,
     ) {
+        let transformed;
+        let formula = if delta.is_identity() {
+            source
+        } else {
+            transformed = source.transformed(delta);
+            &transformed
+        };
+        let Some(bounds) = formula.world_bounds() else {
+            return;
+        };
+        let screen = |p| {
+            let [x, y] = view.to_screen(p);
+            Pos2::new(x as f32, y as f32)
+        };
+        if !painter
+            .clip_rect()
+            .intersects(Rect::from_two_pos(screen(bounds.min), screen(bounds.max)))
+        {
+            return;
+        }
         let cached = cache.get(&source.id);
         if cached.is_none_or(|cache| {
             cache.source != source.latex_source
@@ -467,21 +487,13 @@ impl Canvas {
                 },
             );
         }
-        let mut formula = source.clone();
-        if !delta.is_identity() {
-            formula = formula.transformed(delta);
-        }
         if let Some(FormulaCache {
             rendered: Ok(rendered),
             texture,
             ..
         }) = cache.get_mut(&source.id)
         {
-            let mut map = |p: Pos2| {
-                let world = formula.placement.apply([p.x as f64, p.y as f64]);
-                let screen = view.to_screen(world);
-                Pos2::new(screen[0] as f32, screen[1] as f32)
-            };
+            let mut map = |p: Pos2| screen(formula.placement.apply([p.x as f64, p.y as f64]));
             texture.paint(
                 painter,
                 rendered,
@@ -489,10 +501,9 @@ impl Canvas {
                 global.high_quality,
                 &mut map,
             );
-        } else if let Some(bounds) = formula.world_bounds() {
-            let p = view.to_screen(bounds.min);
+        } else {
             painter.text(
-                Pos2::new(p[0] as f32, p[1] as f32),
+                screen(bounds.min),
                 egui::Align2::LEFT_TOP,
                 "!",
                 egui::FontId::proportional(13.0),

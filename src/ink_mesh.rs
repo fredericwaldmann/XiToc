@@ -52,7 +52,7 @@ fn round_contours(
             Shape::Circle(circle) => {
                 let n = ((circle.radius * dpi * 3.0).sqrt() * 4.0)
                     .ceil()
-                    .clamp(8.0, 64.0) as usize;
+                    .clamp(8.0, 128.0) as usize;
                 (0..n)
                     .map(|i| {
                         let angle = std::f32::consts::TAU * i as f32 / n as f32;
@@ -271,7 +271,7 @@ pub(super) fn opaque_round_mesh(
             )
         })
         .collect();
-    let kept = super::simplify_swept_disks(&samples, 0.2 * aa);
+    let kept = super::simplify_swept_disks(&samples, 0.12 * aa);
     let mut points = kept.into_iter().map(|i| samples[i]);
     let mut mesh = Mesh::default();
     let Some((mut a, mut ra)) = points.next() else {
@@ -418,7 +418,7 @@ mod tests {
         let path = [[10., 10.], [100., 100.], [100., 10.], [10., 100.]];
         let force = [Some(0.25), Some(0.5), Some(1.0), Some(0.75)];
         let other = [[5., 55.], [105., 55.]];
-        for scale in [0.5, 1., 2., 4.] {
+        for scale in [0.5, 1., 2., 4., 8.] {
             let transform = Transform {
                 origin: [10., 10.],
                 center: [0., 0.],

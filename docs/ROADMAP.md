@@ -375,9 +375,8 @@ on the left with the shared live preview on the right. The safe editable TikZ
 subset synchronizes into the same structured model. Plot data and valid source
 are structured for the M2 single-PDF round trip.
 
-## Integrated desktop header and configuration windows (#68)
+## Scientific rendering quality (#70)
 
-Linux integrates document tabs and window controls into the main header.
-Desktop configuration editors use secondary eframe viewports. Web uses the
-same editor content in embedded modals. See the native interaction checks in
-[TEST_PLAN.md](TEST_PLAN.md).
+Use bounded geometric approximation for ink and plots and physical-density
+coverage for math outlines while keeping the underlying objects editable.
+Track visual comparisons and repeated frame timings in [TEST_PLAN.md](TEST_PLAN.md).

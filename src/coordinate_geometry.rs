@@ -330,6 +330,7 @@ struct Sampler {
     output: Point,
     steps: usize,
     depth: u8,
+    relative_error: f64,
 }
 
 fn sample(
@@ -394,8 +395,9 @@ fn adaptive(
         emit(None);
         return;
     }
-    let curved =
-        !finite || (z - v * 0.5 - w * 0.5).abs() > span * 0.002 || (v - w).abs() > span * 0.35;
+    let curved = !finite
+        || (z - v * 0.5 - w * 0.5).abs() > span * settings.relative_error
+        || (v - w).abs() > span * 0.35;
     if curved && depth > 0 {
         adaptive(settings, axis, evaluate, a, (middle, m), depth - 1, emit);
         adaptive(settings, axis, evaluate, (middle, m), b, depth - 1, emit);
@@ -464,7 +466,7 @@ impl SamplingCache {
             ranges,
             x_domain: plot.domain,
             y_domain: if surface { plot.y_domain } else { None },
-            quality: if surface { 24 } else { quality },
+            quality,
         };
         let slots = if surface {
             &mut self.surfaces
@@ -498,8 +500,9 @@ fn sample_plot(key: &SampleKey, surface: bool) -> Vec<Vec<[f64; 3]>> {
         return sample(
             Sampler {
                 output: key.ranges[1],
-                steps: key.quality,
+                steps: ((key.quality as f64).sqrt() * 4.).min(192.) as usize,
                 depth: 5,
+                relative_error: 0.25 / key.quality.max(1) as f64,
             },
             x,
             |t| [t, expr.evaluate(t, 0.), 0.],
@@ -511,8 +514,9 @@ fn sample_plot(key: &SampleKey, surface: bool) -> Vec<Vec<[f64; 3]>> {
     };
     let settings = Sampler {
         output: key.ranges[2],
-        steps: key.quality,
-        depth: 2,
+        steps: 24,
+        depth: 4,
+        relative_error: 0.25 / key.quality.max(1) as f64,
     };
     let mut runs = Vec::new();
     for i in 0..=12 {
@@ -529,6 +533,29 @@ fn sample_plot(key: &SampleKey, surface: bool) -> Vec<Vec<[f64; 3]>> {
 mod tests {
     use super::*;
     use crate::coordinate::{Plot, Preset};
+    #[test]
+    fn physical_plot_extent_controls_approximation_error() {
+        for expression in ["x^2", "sin(x)"] {
+            let evaluate = coordinate_expression::parse(expression, false).unwrap();
+            let key = |quality| SampleKey {
+                expression: expression.into(),
+                ranges: [[-3., 3.], [-1., 10.], [0.; 2]],
+                x_domain: None,
+                y_domain: None,
+                quality,
+            };
+            let small = sample_plot(&key(256), false);
+            let large = sample_plot(&key(4096), false);
+            assert!(large.iter().map(Vec::len).sum::<usize>() > small.iter().map(Vec::len).sum());
+            for pair in large.iter().flat_map(|run| run.windows(2)) {
+                let (a, b) = (pair[0], pair[1]);
+                let midpoint = (a[0] + b[0]) * 0.5;
+                let error = (evaluate.evaluate(midpoint, 0.) - (a[1] + b[1]) * 0.5).abs();
+                assert!(error * 4096. / 11. <= 0.25);
+            }
+        }
+    }
+
     #[test]
     fn five_presets_project_axes_and_label_zero_once() {
         for (preset, arrows) in Preset::ALL.into_iter().zip([1, 2, 2, 4, 3]) {
@@ -641,6 +668,7 @@ mod tests {
                     output: [-5., 5.],
                     steps: 79,
                     depth: 5,
+                    relative_error: 0.002,
                 },
                 [-3., 3.],
                 |x| [x, expr.evaluate(x, 0.), 0.],
@@ -660,6 +688,7 @@ mod tests {
                 output: [0., 2.],
                 steps: 80,
                 depth: 5,
+                relative_error: 0.002,
             },
             [-3., 3.],
             |x| [x, x.sqrt(), 0.],

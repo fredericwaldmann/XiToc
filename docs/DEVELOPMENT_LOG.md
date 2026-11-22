@@ -898,18 +898,10 @@ and origin-zero visibility, and tick-based zero placement. Generated TikZ now
 uses supported `xtick`/`xticklabels` directives rather than emitting an origin
 node; older node-based source remains readable.
 
-## Native Ubuntu window chrome
+## Scientific rendering quality (#70)
 
-Configured native XiToc with an explicit window title, app id, normal decoration
-and resize flags, and an original bundled application icon. eframe's defaults
-are disabled, so its winit dependency lacked `wayland-csd-adwaita`; enabled that
-single feature through a Linux-only direct winit dependency while retaining the
-existing Wayland and X11 backends. Browser startup and the internal egui layout
-are unchanged.
-
-## Integrated Linux header and native configuration windows (#68)
-
-Moved tabs into the application header and pinned Explorer, history and the
-application menu around the toolbar's scrolling tools. Added Linux window
-commands and hosted the existing settings and configuration editors in eframe
-secondary viewports with a shared embedded fallback.
+Separated handwriting chord approximation, formula coverage reduction, and
+plot sampling by physical footprint. Added tests for high zoom ink continuity
+and translucent coverage, 1× through 2× formula raster density, and sine and
+quadratic plot approximation. Formula semantics and editable drawing samples
+remain in the existing models.

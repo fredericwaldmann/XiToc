@@ -70,6 +70,8 @@ fn dim(d: &Dim) -> f64 {
 pub struct FormulaTexture {
     texture: Option<egui::TextureHandle>,
     density: f32,
+    tree: Option<resvg::usvg::Tree>,
+    high_quality: bool,
 }
 impl FormulaTexture {
     pub fn paint(
@@ -80,53 +82,24 @@ impl FormulaTexture {
         high_quality: bool,
         map: &mut dyn FnMut(egui::Pos2) -> egui::Pos2,
     ) {
-        // Power-of-two buckets avoid rerasterization on every resize/zoom sample.
-        // Supersampling supplies antialiased outlines even under rotation.
-        let requested = (density.max(0.125) * if high_quality { 2.0 } else { 1.0 })
-            .log2()
-            .ceil()
-            .exp2();
-        let max_side = painter.ctx().input(|i| i.max_texture_side).min(4096) as f32;
-        let limit = (max_side / formula.width.max(formula.height))
-            .min((4_194_304.0 / (formula.width * formula.height)).sqrt());
-        let target = requested.min(limit).max(0.001);
-        if self.texture.is_none() || self.density != target {
-            let options = resvg::usvg::Options::default();
-            if let Ok(tree) = resvg::usvg::Tree::from_str(&formula.svg, &options) {
-                let width = (formula.width * target).ceil().clamp(1.0, max_side) as u32;
-                let height = (formula.height * target).ceil().clamp(1.0, max_side) as u32;
-                if let Some(mut pixmap) = resvg::tiny_skia::Pixmap::new(width, height) {
-                    resvg::render(
-                        &tree,
-                        resvg::tiny_skia::Transform::from_scale(
-                            width as f32 / tree.size().width(),
-                            height as f32 / tree.size().height(),
-                        ),
-                        &mut pixmap.as_mut(),
-                    );
-                    let image = egui::ColorImage {
-                        size: [width as usize, height as usize],
-                        source_size: egui::vec2(width as f32, height as f32),
-                        pixels: pixmap
-                            .pixels()
-                            .iter()
-                            .map(|p| {
-                                egui::Color32::from_rgba_premultiplied(
-                                    p.red(),
-                                    p.green(),
-                                    p.blue(),
-                                    p.alpha(),
-                                )
-                            })
-                            .collect(),
-                    };
-                    self.texture = Some(painter.ctx().load_texture(
-                        "formula-outline",
-                        image,
-                        egui::TextureOptions::LINEAR,
-                    ));
-                    self.density = target;
-                }
+        let max_side = painter.ctx().input(|i| i.max_texture_side).clamp(1, 4096) as u32;
+        let target = texture_density(formula, density, max_side);
+        if self.texture.is_none() || self.density != target || self.high_quality != high_quality {
+            if self.tree.is_none() {
+                self.tree =
+                    resvg::usvg::Tree::from_str(&formula.svg, &resvg::usvg::Options::default())
+                        .ok();
+            }
+            if let Some(tree) = &self.tree
+                && let Some(image) = rasterize(tree, formula, target, max_side, high_quality)
+            {
+                self.texture = Some(painter.ctx().load_texture(
+                    "formula-outline",
+                    image,
+                    egui::TextureOptions::LINEAR,
+                ));
+                self.density = target;
+                self.high_quality = high_quality;
             }
         }
         if let Some(texture) = &self.texture {
@@ -151,9 +124,99 @@ impl FormulaTexture {
         }
     }
 }
+const MAX_SAMPLES: u32 = 4_194_304;
+
+fn texture_density(formula: &RenderedFormula, density: f32, max_side: u32) -> f32 {
+    let bucket = ((density.max(0.125).log2() * 2.).ceil() * 0.5).exp2();
+    bucket
+        .min(max_side as f32 / formula.width.max(formula.height))
+        .min((MAX_SAMPLES as f32 / (formula.width * formula.height)).sqrt())
+}
+
+fn rasterize(
+    tree: &resvg::usvg::Tree,
+    formula: &RenderedFormula,
+    density: f32,
+    max_side: u32,
+    high_quality: bool,
+) -> Option<egui::ColorImage> {
+    let width = (formula.width * density).ceil().clamp(1., max_side as f32) as u32;
+    let height = (formula.height * density).ceil().clamp(1., max_side as f32) as u32;
+    let height = height.min(MAX_SAMPLES / width);
+    // Resolve coverage with an area filter before upload. Bilinear texture
+    // filtering alone only samples four texels, even under strong minification.
+    let factor =
+        if high_quality && width * height <= MAX_SAMPLES / 4 && width.max(height) <= max_side / 2 {
+            2
+        } else {
+            1
+        };
+    let stride = width * factor;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(stride, height * factor)?;
+    resvg::render(
+        tree,
+        resvg::tiny_skia::Transform::from_scale(
+            stride as f32 / tree.size().width(),
+            (height * factor) as f32 / tree.size().height(),
+        ),
+        &mut pixmap.as_mut(),
+    );
+    let rgba = pixmap.data();
+    let pixels = if factor == 1 {
+        rgba.as_chunks::<4>()
+            .0
+            .iter()
+            .map(|&[r, g, b, a]| egui::Color32::from_rgba_premultiplied(r, g, b, a))
+            .collect()
+    } else {
+        let mut pixels = Vec::with_capacity((width * height) as usize);
+        let rows = rgba.chunks_exact((4 * stride) as usize);
+        let mut rows = rows;
+        while let (Some(top), Some(bottom)) = (rows.next(), rows.next()) {
+            for (a, b) in top.as_chunks::<8>().0.iter().zip(bottom.as_chunks::<8>().0) {
+                let [r, g, b, a] = std::array::from_fn(|c| {
+                    ((u16::from(a[c])
+                        + u16::from(a[c + 4])
+                        + u16::from(b[c])
+                        + u16::from(b[c + 4])
+                        + 2)
+                        / 4) as u8
+                });
+                pixels.push(egui::Color32::from_rgba_premultiplied(r, g, b, a));
+            }
+        }
+        pixels
+    };
+    Some(egui::ColorImage::new(
+        [width as usize, height as usize],
+        pixels,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn formula_coverage_is_resolved_at_bounded_physical_density() {
+        let formula = render(r"\frac{\alpha_1}{\sqrt{x^2+1}}", [32, 40, 48, 255]).unwrap();
+        let tree = resvg::usvg::Tree::from_str(&formula.svg, &Default::default()).unwrap();
+        for zoom in [0.5, 1., 2., 4., 8.] {
+            for dpi in [1., 1.25, 2.] {
+                let density = texture_density(&formula, zoom * dpi, 4096);
+                assert!(density >= zoom * dpi * 0.999);
+                let image = rasterize(&tree, &formula, density, 4096, true).unwrap();
+                assert!(image.pixels.len() <= MAX_SAMPLES as usize);
+                assert!(image.pixels.iter().any(|p| (1..255).contains(&p.a())));
+                assert!(
+                    image
+                        .pixels
+                        .iter()
+                        .all(|p| p.r() <= p.a() && p.g() <= p.a() && p.b() <= p.a())
+                );
+            }
+        }
+    }
+
     #[test]
     fn bundled_latin_modern_math_contains_math_metrics_and_required_glyphs() {
         let count = u16::from_be_bytes([MATH_FONT[4], MATH_FONT[5]]) as usize;
@@ -230,6 +293,79 @@ mod tests {
 mod quality_tests {
     use super::*;
     #[test]
+    #[ignore = "writes a local CPU formula coverage comparison"]
+    fn formula_zoom_comparison() {
+        let formula = render(r"\frac{\alpha_1+\sqrt{x^2+1}}{2}", [24, 32, 40, 255]).unwrap();
+        let tree = resvg::usvg::Tree::from_str(&formula.svg, &Default::default()).unwrap();
+        let zooms = [0.5_f32, 1., 2., 4., 8.];
+        let pad = 12;
+        let width = (formula.width * 8.).ceil() as u32 + 2 * pad;
+        let height = zooms
+            .iter()
+            .map(|z| (formula.height * z).ceil() as u32 + 2 * pad)
+            .sum();
+        let mut sheet = image::RgbImage::from_pixel(width * 2, height, image::Rgb([255; 3]));
+        let mut top = 0;
+        for zoom in zooms {
+            let old = rasterize(
+                &tree,
+                &formula,
+                (zoom * 2.).log2().ceil().exp2(),
+                4096,
+                false,
+            )
+            .unwrap();
+            let new = rasterize(
+                &tree,
+                &formula,
+                texture_density(&formula, zoom, 4096),
+                4096,
+                true,
+            )
+            .unwrap();
+            let bounds = [formula.width * zoom, formula.height * zoom];
+            for (column, image) in [old, new].iter().enumerate() {
+                let pixel = |x: f32, y: f32| {
+                    let x = (x as isize).clamp(0, image.size[0] as isize - 1) as usize;
+                    let y = (y as isize).clamp(0, image.size[1] as isize - 1) as usize;
+                    image.pixels[y * image.size[0] + x].to_array()
+                };
+                for row in 0..bounds[1].ceil() as u32 {
+                    for col in 0..bounds[0].ceil() as u32 {
+                        let x = (col as f32 + 0.5) * image.size[0] as f32 / bounds[0] - 0.5;
+                        let y = (row as f32 + 0.5) * image.size[1] as f32 / bounds[1] - 0.5;
+                        let ix = x.floor();
+                        let iy = y.floor();
+                        let mix = |a: f32, b: f32, t: f32| a + (b - a) * t;
+                        let rgba: [f32; 4] = std::array::from_fn(|i| {
+                            let a = mix(
+                                pixel(ix, iy)[i] as f32,
+                                pixel(ix + 1., iy)[i] as f32,
+                                x - ix,
+                            );
+                            let b = mix(
+                                pixel(ix, iy + 1.)[i] as f32,
+                                pixel(ix + 1., iy + 1.)[i] as f32,
+                                x - ix,
+                            );
+                            mix(a, b, y - iy)
+                        });
+                        let rgb = std::array::from_fn(|i| (rgba[i] + 255. - rgba[3]).round() as u8);
+                        sheet.put_pixel(
+                            column as u32 * width + pad + col,
+                            top + pad + row,
+                            image::Rgb(rgb),
+                        );
+                    }
+                }
+            }
+            top += bounds[1].ceil() as u32 + 2 * pad;
+        }
+        sheet
+            .save("/tmp/xitoc-formula-zoom-comparison.png")
+            .unwrap();
+    }
+    #[test]
     fn physical_pixel_resolution_and_cache_cover_zoom_dpi_and_resize() {
         let ctx = egui::Context::default();
         let formula = render(
@@ -243,17 +379,20 @@ mod quality_tests {
                 let mut output = ctx.run_ui(Default::default(), |ui| {
                     texture.paint(ui.painter(), &formula, dpi * zoom, true, &mut |p| p * zoom)
                 });
-                let requested = (dpi * zoom * 2.0).log2().ceil().exp2();
-                let max_side = ctx.input(|i| i.max_texture_side).min(4096) as f32;
-                let limit = (max_side / formula.width.max(formula.height))
-                    .min((4_194_304.0 / (formula.width * formula.height)).sqrt());
-                assert_eq!(texture.density, requested.min(limit));
-                for delta in output.textures_delta.set.values() {
-                    for delta in delta {
-                        assert!(delta.image.size().iter().all(|n| *n <= max_side as usize));
-                    }
-                }
+                let max_side = ctx.input(|i| i.max_texture_side).clamp(1, 4096) as u32;
+                let dimensions: Vec<_> = output
+                    .textures_delta
+                    .set
+                    .values()
+                    .flatten()
+                    .map(|delta| delta.image.size())
+                    .collect();
                 output.textures_delta.clear();
+                assert_eq!(
+                    texture.density,
+                    texture_density(&formula, dpi * zoom, max_side)
+                );
+                assert!(dimensions.iter().flatten().all(|n| *n <= max_side as usize));
                 let mut same = ctx.run_ui(Default::default(), |ui| {
                     texture.paint(ui.painter(), &formula, dpi * zoom, true, &mut |p| p * zoom)
                 });
