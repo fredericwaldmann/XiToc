@@ -9,6 +9,7 @@ pub enum Theme {
     #[default]
     Light,
     Dark,
+    System,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

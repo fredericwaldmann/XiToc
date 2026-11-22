@@ -29,20 +29,38 @@ impl SettingsDialog {
             return;
         }
         let mut close = false;
-        egui::Modal::new(egui::Id::unique("application-settings")).show(ctx, |ui| {
-            ui.set_width((ctx.content_rect().width() - 48.0).clamp(180.0, style::SETTINGS_WIDTH));
-            ui.heading("Settings");
-            ui.weak(if self.section == Section::Latex { "Application preferences · LaTeX changes require Apply" } else { "Application preferences · changes apply automatically" });
-            ui.add_space(style::GAP);
-            ui.horizontal_wrapped(|ui| {
-                for (section, label) in [(Section::General, "General"), (Section::Appearance, "Appearance"),
-                    (Section::Drawing, "Drawing"), (Section::Snapping, "Snapping"), (Section::Text, "Text"), (Section::Latex, "LaTeX"), (Section::Input, "Input Devices")] {
-                    ui.selectable_value(&mut self.section, section, label);
-                }
-            });
-            ui.separator();
-            egui::ScrollArea::vertical()
-                .max_height((ctx.content_rect().height() - 240.0).max(60.0))
+        let window_closed = crate::ui::dialog::configuration(
+            ctx,
+            egui::Id::unique("application-settings"),
+            "Settings",
+            [660., 560.],
+            |ui| {
+                ui.set_width(
+                    (ui.ctx().content_rect().width() - 48.0).clamp(180.0, style::SETTINGS_WIDTH),
+                );
+                ui.heading("Settings");
+                ui.weak(if self.section == Section::Latex {
+                    "Application preferences · LaTeX changes require Apply"
+                } else {
+                    "Application preferences · changes apply automatically"
+                });
+                ui.add_space(style::GAP);
+                ui.horizontal_wrapped(|ui| {
+                    for (section, label) in [
+                        (Section::General, "General"),
+                        (Section::Appearance, "Appearance"),
+                        (Section::Drawing, "Drawing"),
+                        (Section::Snapping, "Snapping"),
+                        (Section::Text, "Text"),
+                        (Section::Latex, "LaTeX"),
+                        (Section::Input, "Input Devices"),
+                    ] {
+                        ui.selectable_value(&mut self.section, section, label);
+                    }
+                });
+                ui.separator();
+                egui::ScrollArea::vertical()
+                .max_height((ui.ctx().content_rect().height() - 240.0).max(60.0))
                 .show(ui, |ui| {
                     ui.add_space(style::GAP);
                     match self.section {
@@ -55,7 +73,8 @@ impl SettingsDialog {
                         Section::Appearance => {
                             ui.strong("Theme");
                             ui.horizontal(|ui| {
-                                ui.selectable_value(&mut prefs.theme, Theme::Light, "Light");
+                                ui.selectable_value(&mut prefs.theme, Theme::System, "System");
+            ui.selectable_value(&mut prefs.theme, Theme::Light, "Light");
                                 ui.selectable_value(&mut prefs.theme, Theme::Dark, "Dark");
                             });
                         }
@@ -124,14 +143,15 @@ impl SettingsDialog {
                     }
                     ui.add_space(style::GAP);
                 });
-            ui.separator();
-            if let Some(warning) = warning {
-                ui.colored_label(ui.visuals().error_fg_color, warning);
-            }
-            close = ui.button("Done").clicked();
-            close |= ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-        });
-        if close {
+                ui.separator();
+                if let Some(warning) = warning {
+                    ui.colored_label(ui.visuals().error_fg_color, warning);
+                }
+                close = ui.button("Done").clicked();
+                close |= ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+            },
+        );
+        if close || window_closed {
             self.open = false;
         }
     }

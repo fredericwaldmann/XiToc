@@ -2030,3 +2030,13 @@ decorations. Repeat under X11/XWayland (`WINIT_UNIX_BACKEND=x11`) and verify the
 window manager supplies normal decorations and controls. Do not force X11 in
 production. WASM has no native window decorations or desktop icon; check that it
 still compiles and browser startup remains unchanged.
+
+## Integrated header and native dialogs (#68)
+
+On Wayland and XWayland, verify separate Settings, Document Settings, Equation,
+Code Listing and Coordinate System windows using the available window tools.
+Check Escape, OS close, Apply, focus return and the unsaved-root close guard.
+Check header drag from the empty region, tab click/drag, double-click maximize,
+edge and corner resize, minimize, restore, and compositor shortcuts. Repeat in
+System, Light and Dark with many tabs and a narrow window. Repeat dialog edits
+in the web build and check that the embedded dialog blocks background editing.

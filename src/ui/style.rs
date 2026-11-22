@@ -50,7 +50,7 @@ pub struct Palette {
 impl Theme {
     pub fn palette(self) -> Palette {
         match self {
-            Self::Light => Palette {
+            Self::Light | Self::System => Palette {
                 shell: rgb(246, 247, 249),
                 sidebar: rgb(240, 242, 245),
                 surface: Color32::WHITE,
@@ -86,13 +86,22 @@ impl Theme {
     }
 
     pub fn apply(self, ctx: &egui::Context) {
+        let resolved = match self {
+            Self::System
+                if ctx.input(|input| input.raw.system_theme) == Some(egui::Theme::Dark) =>
+            {
+                Self::Dark
+            }
+            Self::System => Self::Light,
+            theme => theme,
+        };
         let id = egui::Id::unique("xitoc-theme");
-        if ctx.data(|data| data.get_temp::<Theme>(id)) == Some(self) {
+        if ctx.data(|data| data.get_temp::<Theme>(id)) == Some(resolved) {
             return;
         }
-        let p = self.palette();
-        let mut visuals = match self {
-            Self::Light => egui::Visuals::light(),
+        let p = resolved.palette();
+        let mut visuals = match resolved {
+            Self::Light | Self::System => egui::Visuals::light(),
             Self::Dark => egui::Visuals::dark(),
         };
         visuals.override_text_color = Some(p.text);
@@ -123,8 +132,8 @@ impl Theme {
         visuals.widgets.active.weak_bg_fill = p.selection;
         visuals.widgets.active.bg_stroke = Stroke::new(1.0, p.accent);
         visuals.widgets.active.fg_stroke = Stroke::new(1.0, p.accent);
-        ctx.set_theme(match self {
-            Self::Light => egui::Theme::Light,
+        ctx.set_theme(match resolved {
+            Self::Light | Self::System => egui::Theme::Light,
             Self::Dark => egui::Theme::Dark,
         });
         ctx.set_visuals(visuals);
@@ -149,7 +158,7 @@ impl Theme {
                 FontId::new(18.0, FontFamily::Proportional),
             );
         });
-        ctx.data_mut(|data| data.insert_temp(id, self));
+        ctx.data_mut(|data| data.insert_temp(id, resolved));
     }
 }
 

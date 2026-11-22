@@ -1120,3 +1120,12 @@ M2's single-PDF visible-image/edit-payload round-trip gate.
   vector renderer shared with preview.
 - `object.rs`, `drawing.rs`, `canvas_selection.rs` and `object_clipboard.rs`
   integrate coordinate systems with the common document and interaction paths.
+
+## Integrated desktop header and dialog host
+
+`app.rs` places the shared tabs and toolbar above the Explorer and canvas.
+`ui/chrome.rs` provides the Linux window controls and the application menu.
+`ui/dialog.rs` presents configuration content in an immediate native viewport
+or an embedded modal. Dialog drafts, validation and document transactions
+remain with their original settings or canvas components. Settings offers System
+alongside explicit Light and Dark. Native file pickers continue to use rfd.

@@ -17,13 +17,14 @@ impl Creation {
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome {
         let mut create = false;
         let mut cancel = false;
-        egui::Window::new(format!("New {}", self.kind.label()))
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .default_width((ctx.content_rect().width() - 40.0).clamp(160.0, 320.0))
-            .max_width((ctx.content_rect().width() - 40.0).max(160.0))
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
+        let title = format!("New {}", self.kind.label());
+        let window_closed = configuration(
+            ctx,
+            egui::Id::unique("create-document"),
+            &title,
+            [360., 270.],
+            |ui| {
+                ui.set_width((ui.available_width()).clamp(160., 320.));
                 #[cfg(not(target_arch = "wasm32"))]
                 ui.label(format!(
                     "Folder: {}",
@@ -72,13 +73,114 @@ impl Creation {
                         .clicked();
                     cancel |= ui.button("Cancel").clicked();
                 });
-            });
-        if cancel {
+            },
+        );
+        if cancel || window_closed {
             Outcome::Cancel
         } else if create {
             Outcome::Create
         } else {
             Outcome::Pending
+        }
+    }
+}
+
+/// Render a dialog against its existing draft. Immediate viewports let the
+/// callback borrow that draft and return before the caller commits changes.
+pub fn configuration(
+    ctx: &egui::Context,
+    id: egui::Id,
+    title: &str,
+    size: [f32; 2],
+    mut content: impl FnMut(&mut egui::Ui),
+) -> bool {
+    if !ctx.embed_viewports() {
+        return ctx.show_viewport_immediate(
+            egui::ViewportId(id),
+            egui::ViewportBuilder::default()
+                .with_title(title)
+                .with_app_id("XiToc")
+                .with_taskbar(false)
+                .with_inner_size(size)
+                .with_clamp_size_to_monitor_size(true)
+                .with_min_inner_size(if size[0] >= 1000. {
+                    [690., 320.]
+                } else {
+                    [size[0].min(480.), 260.]
+                })
+                .with_decorations(true)
+                .with_resizable(true),
+            |ui, class| {
+                if class == egui::ViewportClass::EmbeddedWindow {
+                    content(ui);
+                    return false;
+                }
+                if ui.input(|input| input.viewport().close_requested()) {
+                    return true;
+                }
+                egui::CentralPanel::default().show(ui, |ui| content(ui));
+                false
+            },
+        );
+    }
+    embedded(ctx, id, &mut content)
+}
+
+fn embedded(ctx: &egui::Context, id: egui::Id, content: &mut impl FnMut(&mut egui::Ui)) -> bool {
+    egui::Modal::new(id)
+        .show(ctx, content)
+        .backdrop_response
+        .clicked()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{cell::Cell, rc::Rc};
+
+    #[test]
+    fn native_close_is_delivered_to_the_dialog_without_rendering_its_draft() {
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(false);
+        let close = Rc::new(Cell::new(false));
+        let close_event = close.clone();
+        let id = egui::Id::unique("configuration-host-test");
+        egui::Context::set_immediate_viewport_renderer(move |ctx, mut viewport| {
+            assert_eq!(viewport.ids.parent, egui::ViewportId::ROOT);
+            assert_eq!(viewport.ids.this, egui::ViewportId(id));
+            assert_eq!(
+                viewport.builder.title.as_deref(),
+                Some("Test configuration")
+            );
+            assert_eq!(viewport.builder.decorations, Some(true));
+            let mut input = egui::RawInput {
+                viewport_id: viewport.ids.this,
+                ..Default::default()
+            };
+            let info = input.viewports.entry(viewport.ids.this).or_default();
+            if close_event.get() {
+                info.events.push(egui::ViewportEvent::Close);
+            }
+            ctx.run_ui(input, |ui| (viewport.viewport_ui_cb)(ui))
+                .textures_delta
+                .clear();
+        });
+
+        for closing in [false, true] {
+            close.set(closing);
+            let mut rendered = false;
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                assert_eq!(
+                    configuration(ui.ctx(), id, "Test configuration", [500., 380.], |ui| {
+                        assert_eq!(ui.ctx().viewport_id(), egui::ViewportId(id));
+                        rendered = true;
+                    }),
+                    closing
+                );
+            })
+            .textures_delta
+            .clear();
+            assert_eq!(rendered, !closing);
         }
     }
 }
