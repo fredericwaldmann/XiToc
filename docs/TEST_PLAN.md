@@ -2019,3 +2019,14 @@ step undo. For manual GUI verification, edit an axis endpoint and a curve
 expression/color in TikZ Editor, then confirm General/Functions and the preview
 reflect them. Type an incomplete command, confirm the preview is unchanged and
 Apply is disabled, correct it, Apply, and undo/redo. Repeat on native and WASM.
+
+## Native Ubuntu window chrome
+
+In an Ubuntu Wayland session, launch the native release and verify the XiToc
+title/icon, normal title bar and borders, move by dragging the title bar,
+minimize, maximize/restore, close, resize, and fullscreen/restore. Confirm that
+GNOME/Adwaita controls appear when the compositor negotiates client-side
+decorations. Repeat under X11/XWayland (`WINIT_UNIX_BACKEND=x11`) and verify the
+window manager supplies normal decorations and controls. Do not force X11 in
+production. WASM has no native window decorations or desktop icon; check that it
+still compiles and browser startup remains unchanged.

@@ -351,3 +351,13 @@ WASM. Building the largest script took 1.15 seconds (Linux libc) and
   behavior on a real Windows or macOS desktop remains outside this smoke test.
 - A repeat generation produced an identical CSV, with 377 data rows including
   the workspace root and exact agreement with Cargo.lock.
+
+## Native Ubuntu window-decoration follow-up
+
+The follow-up adds Linux-targeted direct winit 0.30.13 with defaults disabled and
+only `wayland-csd-adwaita` enabled. This restores GNOME-style client-side
+decoration support omitted when eframe defaults are disabled; it does not add
+winit to the WASM target or enable unrelated features. Inventory regeneration
+also corrected its direct-dependency catalog, which had omitted the existing
+`two-face` listing dependency. The counts above describe the original audit
+baseline.
