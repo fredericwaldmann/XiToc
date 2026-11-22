@@ -82,8 +82,11 @@ text-agent input shortcuts or incoming external dragover/drop events.
 
 ## Bootstrap, state and frame lifecycle
 
-Native `main` calls `eframe::run_native` with a 1100×760 initial viewport and
-480×360 minimum, constructing `XiTocApp::new(cc.storage)`. WASM `main` starts a local
+Native `main` calls `eframe::run_native` with a XiToc title/app id, 1100×760
+initial viewport and 480×360 minimum. It explicitly enables normal decorations
+and resizing and supplies the bundled SVG-derived application icon. Linux adds
+only winit's Adwaita client-side decoration feature; eframe's X11 and Wayland
+backends remain enabled. WASM `main` starts a local
 async task, finds `#xitoc-canvas` in [index.html](../index.html), starts `WebRunner`,
 and installs the pen bridge. Startup removes the loading status on success or
 shows a WebGL-related failure message. [Trunk.toml](../Trunk.toml) builds locked
