@@ -906,3 +906,10 @@ are disabled, so its winit dependency lacked `wayland-csd-adwaita`; enabled that
 single feature through a Linux-only direct winit dependency while retaining the
 existing Wayland and X11 backends. Browser startup and the internal egui layout
 are unchanged.
+
+## Integrated Linux header and native configuration windows (#68)
+
+Moved tabs into the application header and pinned Explorer, history and the
+application menu around the toolbar's scrolling tools. Added Linux window
+commands and hosted the existing settings and configuration editors in eframe
+secondary viewports with a shared embedded fallback.

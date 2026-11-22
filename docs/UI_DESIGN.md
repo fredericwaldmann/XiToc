@@ -7,12 +7,13 @@ Rust/egui component tree on desktop and WASM. Original vector icons live in
 
 ## Reference and hierarchy
 
-The native operating-system window is configured separately from this egui
-interface. XiToc requests normal resizable decorations and provides its own
-window icon where the platform supports it. On Linux Wayland, winit's Adwaita
-client-side decorations provide GNOME-style window controls when the compositor
-uses client-side decorations; server-side decoration appearance remains under
-compositor/theme control. This does not replace or restyle the internal XiToc UI.
+The Linux main window has a client-drawn header using XiToc's palette and
+application identity. Existing document tabs share this row with the New
+Document button and the three window controls. The reserved space beside the
+window buttons supports dragging and double-click maximize/restore. The
+restored window reserves five logical points for edge and corner resizing.
+Other desktop targets retain system window chrome. The browser uses the same
+application header without OS controls.
 
 Primary UX reference: [Apple Freeform for Mac: drawing and sketching](https://support.apple.com/guide/freeform/draw-and-sketch-frfm6e3d132d2/mac),
 consulted November 2026. Adopt compact drawing tools, nearby contextual options,
@@ -21,8 +22,8 @@ Apple's indexed guide text confirms bottom-of-window drawing tools, contextual
 nib/color options, and object/partial erasing. Its full page/images returned
 HTTP 429; detailed current macOS visual parity has not been verified.
 
-Preserve XiToc's application menu bar, resizable real-folder Explorer, horizontal
-scrolling document tabs, New Document (+) beside tabs, Settings and status bar.
+Keep the resizable real-folder Explorer, horizontally scrolling document tabs,
+New Document (+), Settings and status bar.
 Order inside the editor: tabs → top drawing toolbar → canvas. Drawing tools
 MUST stay directly below the tabs. No bottom floating toolbar.
 Document type is chosen at creation and derived from metadata, never a toggle.
@@ -54,8 +55,8 @@ messages, never color alone. Avoid gradients, animation and heavy outlines.
 
 Body/buttons 13, secondary text 11, headings 18, wordmark 16 bold, empty heading
 20. Spacing scale: 2, 4, 6, 8, 10, 16, 24. Ordinary controls/tree rows 26;
-ordinary icon buttons 26×26 with 14–16 glyphs. App bar 38, tab strip 36 with 32
-high tabs, document header 40, status 28. Ordinary corners 4, dialogs 6.
+ordinary icon buttons 26×26 with 14–16 glyphs. Integrated header 36 with 32
+high tabs, drawing toolbar 40, status 28. Ordinary corners 4, dialogs 6.
 Explorer starts at 248, resizes from 132 to min(360, 45% window).
 
 ## Top drawing toolbar and presets
@@ -65,8 +66,9 @@ Fixed 40-point top panel directly below the document tabs, with 8×6 padding and
 and 1.25-point strokes. Preset buttons are 40×26. No floating palette or shadow.
 Never overlay Explorer, tabs or canvas with the drawing toolbar.
 
-Order: Selection with mode dropdown, Hand, Shapes, horizontal pen presets,
-New preset (+), Pen settings, Eraser, Undo/Redo, zoom. No unfinished pen types.
+Order: Explorer, Undo, Redo, drawing and insertion controls, then Main menu.
+The tools retain their internal order and scroll horizontally when needed.
+The menu stays at the right edge, outside the scrolling region.
 One click selects a preset and Pen; its preview combines a nib icon with its actual
 color/opacity and a thickness stripe clamped to 1–8 screen points. Hover and
 accessible names expose name, type, document-point thickness and opacity.
@@ -84,10 +86,10 @@ explicitly replaces custom and edited presets with the five defaults.
 
 The preset strip scrolls horizontally with trackpad/Shift-wheel; Tab navigation
 reveals focused buttons. Selecting, reordering or resizing reveals the selected
-preset. At editor widths below 800, zoom moves into View; below 500, history also
-moves there. The toolbar remains one row. At the native minimum 480×360 window,
-Explorer remains usable and at least one preset is accessible in the strip;
-hiding Explorer exposes more tools. No wrapped tool rows or bottom fallback.
+preset. At tool-region widths below 800, zoom moves into View. History
+stays at the left of the toolbar. At the native minimum 480×360 window,
+scroll the tool region to access controls beyond the visible strip. The toolbar
+stays on one row.
 Whiteboard-only grid stays in zoom/View. Browser export is in View on compact
 windows and inline only with at least 1000 editor points. Dirty ink export stays
 disabled. The immutable document type remains in the tab/tooltip and status.

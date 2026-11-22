@@ -466,15 +466,25 @@ impl Canvas {
         let mut names: std::collections::BTreeSet<_> = listing::PRESETS.into_iter().collect();
         names.extend(self.latex.listing_styles.keys().map(String::as_str));
         names.extend(self.drawing.latex.listing_styles.keys().map(String::as_str));
-        let response = egui::Modal::new(egui::Id::unique(("code-listing", file.id))).show(ctx, |ui| {
-            ui.set_width((ctx.content_rect().width() - 48.).clamp(180., crate::ui::style::SETTINGS_WIDTH));
-            ui.horizontal(|ui| {
-                ui.heading("Code Listing");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    cancel |= ui.button("×").on_hover_text("Close").clicked();
+        let response = crate::ui::dialog::configuration(
+            ctx,
+            egui::Id::unique(("code-listing", file.id)),
+            "Code Listing",
+            [660., 650.],
+            |ui| {
+                ui.set_width(
+                    (ui.ctx().content_rect().width() - 48.)
+                        .clamp(180., crate::ui::style::SETTINGS_WIDTH),
+                );
+                ui.horizontal(|ui| {
+                    ui.heading("Code Listing");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.ctx().viewport_id() == egui::ViewportId::ROOT {
+                            cancel |= ui.button("×").on_hover_text("Close").clicked();
+                        }
+                    });
                 });
-            });
-            egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - 160.).max(60.)).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height((ui.ctx().content_rect().height() - 160.).max(60.)).show(ui, |ui| {
                 ui.label("Source File");
                 ui.horizontal(|ui| {
                     #[cfg(not(target_arch = "wasm32"))]
@@ -531,13 +541,19 @@ impl Canvas {
                 }
                 if locked { ui.weak("Unlock this listing to apply changes."); }
             });
-            ui.horizontal(|ui| {
-                cancel |= ui.button("Cancel").clicked();
-                apply |= ui.add_enabled(!locked && !self.attachment_io.picker_open, egui::Button::new("Apply")).clicked();
-            });
-            cancel |= ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-        });
-        if cancel || response.backdrop_response.clicked() {
+                ui.horizontal(|ui| {
+                    cancel |= ui.button("Cancel").clicked();
+                    apply |= ui
+                        .add_enabled(
+                            !locked && !self.attachment_io.picker_open,
+                            egui::Button::new("Apply"),
+                        )
+                        .clicked();
+                });
+                cancel |= ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+            },
+        );
+        if cancel || response {
             return true;
         }
         if let Some(name) = preset_change {

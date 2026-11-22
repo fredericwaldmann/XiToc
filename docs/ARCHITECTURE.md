@@ -1247,3 +1247,17 @@ unless explicitly disabled. The 3D orthographic basis projects the positive
 octant and a bounded wireframe. Surface domain and axis clipping are in
 mathematical coordinates before projection. See
 [Scientific Coordinate Systems](SCIENTIFIC_COORDINATES.md).
+
+## Desktop shell and configuration windows
+
+The application shell owns the integrated header, toolbar, Explorer and document
+routing. Linux sends move, resize, maximize, minimize and close requests through
+egui viewport commands. The eframe backend and compositor handle those requests.
+
+The shared configuration host uses stable egui immediate viewports so each
+dialog can borrow its existing draft during rendering. Settings, document
+creation, document LaTeX, equation, listing and coordinate configuration use this
+host. The browser renders the same dialog bodies in an embedded modal. Window
+close discards transactional drafts. Settings retains its existing preference
+semantics. Root controls and canvas editing are gated by the current dialog
+state. File selection continues through the existing platform storage adapters.

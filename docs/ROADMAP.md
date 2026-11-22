@@ -374,3 +374,10 @@ edits axes, labels, grids, ticks, 1D annotations, 2D functions and orthographic
 on the left with the shared live preview on the right. The safe editable TikZ
 subset synchronizes into the same structured model. Plot data and valid source
 are structured for the M2 single-PDF round trip.
+
+## Integrated desktop header and configuration windows (#68)
+
+Linux integrates document tabs and window controls into the main header.
+Desktop configuration editors use secondary eframe viewports. Web uses the
+same editor content in embedded modals. See the native interaction checks in
+[TEST_PLAN.md](TEST_PLAN.md).
