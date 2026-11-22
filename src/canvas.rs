@@ -570,6 +570,13 @@ impl Canvas {
             || self.drawing.dirty()
             || matches!(&self.gesture, Some(Gesture::Pen(stroke)) if !stroke.points.is_empty())
     }
+    pub fn configuration_open(&self) -> bool {
+        self.coordinate_draft.is_some()
+            || self.listing_config.is_some()
+            || self.formula_session.is_some()
+            || self.latex_dialog.open
+    }
+
     pub fn dismiss_object_configuration(&mut self) {
         self.coordinate_draft = None;
         self.listing_config = None;
@@ -701,16 +708,16 @@ impl Canvas {
         }
 
         if !ui.input(|i| i.focused) || !ui.is_enabled() {
-            let formula = if self.formula_settings_suspended {
+            let formula = if self.formula_settings_suspended || !ui.ctx().embed_viewports() {
                 self.formula_session.take()
             } else {
                 None
             };
             self.finish();
-            if self.formula_settings_suspended {
+            if formula.is_some() {
                 self.formula_session = formula;
                 if let Some(session) = &mut self.formula_session {
-                    session.focus = true;
+                    session.focus |= ui.ctx().embed_viewports();
                 }
             }
         }
@@ -736,6 +743,7 @@ impl Canvas {
         self.selection.refresh(&self.drawing);
         if self.font_browser.is_none()
             && self.text_session.is_none()
+            && !self.latex_dialog.open
             && self.formula_session.is_none()
             && self.text_creation.is_none()
             && self.text_resize.is_none()
@@ -787,7 +795,15 @@ impl Canvas {
     }
 
     pub fn surface(&mut self, ui: &egui::Ui, bounds: Rect, surface: Surface, transform: Transform) {
-        if self.listing_config.is_some() || self.coordinate_draft.is_some() {
+        if self.latex_dialog.open
+            || self.listing_config.is_some()
+            || self.coordinate_draft.is_some()
+        {
+            self.paint(ui, bounds, surface, transform);
+            return;
+        }
+        if self.formula_session.is_some() {
+            self.formula_surface(ui, bounds, surface, transform);
             self.paint(ui, bounds, surface, transform);
             return;
         }

@@ -162,10 +162,9 @@ pub fn show(
                     super::drawing_controls::eraser_radius(ui, &mut editor.canvas.eraser_radius);
                 });
             if width >= 650.0 { menu(ui, "Snap", |ui| super::snapping_controls::menu(ui, &mut editor.canvas.snapping)); }
-            if width >= 500.0 { history(ui, &mut editor.canvas); }
             if width >= 800.0 { view(ui, doc, editor); }
             else { menu(ui, "View", |ui| { if width<650.0 {menu(ui, "Snap", |ui| super::snapping_controls::menu(ui, &mut editor.canvas.snapping));}
-                if width<400.0 && icons::button(ui,Icon::Hand,"Hand · Space-drag to pan",editor.canvas.tool==Tool::Pan).clicked(){editor.canvas.select(Tool::Pan);} history(ui, &mut editor.canvas); view(ui, doc, editor); export(ui, action, editor.canvas.dirty()); }); }
+                if width<400.0 && icons::button(ui,Icon::Hand,"Hand · Space-drag to pan",editor.canvas.tool==Tool::Pan).clicked(){editor.canvas.select(Tool::Pan);} view(ui, doc, editor); export(ui, action, editor.canvas.dirty()); }); }
             #[cfg(target_arch = "wasm32")]
             if width >= 1000.0 { export(ui, action, editor.canvas.dirty()); }
         });
@@ -174,7 +173,7 @@ pub fn show(
     editor.canvas.apply_pen(&prefs.presets.active().style);
 }
 
-fn history(ui: &mut egui::Ui, canvas: &mut Canvas) {
+pub fn history(ui: &mut egui::Ui, canvas: &mut Canvas) {
     for (redo, icon, label, enabled) in [
         (
             false,

@@ -1,7 +1,5 @@
 use super::{
-    Action,
-    icons::{self, Icon},
-    new_choices,
+    Action, new_choices,
     style::{self, Theme},
 };
 use egui::{Align, Layout, RichText};
@@ -12,68 +10,6 @@ pub struct Chrome {
 }
 
 impl Chrome {
-    pub fn top(
-        &mut self,
-        ui: &mut egui::Ui,
-        prefs: &mut crate::settings::Preferences,
-        action: &mut Option<Action>,
-        selection: super::selection_controls::MenuState,
-    ) {
-        let p = style::palette(ui);
-        egui::Panel::top("application-bar")
-            .resizable(false)
-            .exact_size(38.0)
-            .frame(style::frame(p.shell, 10, 6))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if icons::button(
-                        ui,
-                        Icon::Sidebar,
-                        "Show or hide Explorer",
-                        prefs.explorer_visible,
-                    )
-                    .clicked()
-                    {
-                        prefs.explorer_visible = !prefs.explorer_visible;
-                    }
-                    ui.label(RichText::new("XiToc").size(16.0).strong());
-                    ui.menu_button("Edit", |ui| {
-                        if let Some(command) = super::selection_controls::menu(ui, selection) {
-                            *action = Some(Action::Selection(command));
-                            ui.close();
-                        }
-                        ui.separator();
-                        if ui.button("Settings…").clicked() {
-                            *action = Some(Action::Settings);
-                            ui.close();
-                        }
-                    });
-                    if ui.available_width() > 360.0 {
-                        ui.add_space(8.0);
-                        ui.label(
-                            RichText::new(if cfg!(target_arch = "wasm32") {
-                                "Browser session"
-                            } else {
-                                "Local workspace"
-                            })
-                            .small()
-                            .color(p.muted),
-                        );
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.menu_button("Appearance", |ui| {
-                            let light =
-                                ui.selectable_value(&mut prefs.theme, Theme::Light, "Light");
-                            let dark = ui.selectable_value(&mut prefs.theme, Theme::Dark, "Dark");
-                            if light.changed() || dark.changed() {
-                                ui.ctx().request_repaint();
-                            }
-                        });
-                    });
-                });
-            });
-    }
-
     pub fn bottom(&mut self, ui: &mut egui::Ui, status: &str, context: &str) {
         let p = style::palette(ui);
         egui::Panel::bottom("status-bar")
@@ -161,4 +97,251 @@ pub fn empty(ui: &mut egui::Ui, can_create: bool, folder: &str, action: &mut Opt
             );
         });
     });
+}
+
+pub fn identity(ui: &mut egui::Ui) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let id = egui::Id::unique("window-identity-icon");
+        let icon = ui
+            .ctx()
+            .data(|data| data.get_temp::<egui::TextureHandle>(id));
+        let icon = icon.unwrap_or_else(|| {
+            let icon = crate::native_icon();
+            let image = egui::ColorImage::from_rgba_unmultiplied(
+                [icon.width as usize, icon.height as usize],
+                &icon.rgba,
+            );
+            let icon = ui
+                .ctx()
+                .load_texture("XiToc identity", image, egui::TextureOptions::LINEAR);
+            ui.ctx().data_mut(|data| data.insert_temp(id, icon.clone()));
+            icon
+        });
+        ui.image((icon.id(), egui::Vec2::splat(18.)));
+    }
+    ui.label(RichText::new("XiToc").size(16.).strong());
+}
+
+pub fn menu(
+    ui: &mut egui::Ui,
+    prefs: &mut crate::settings::Preferences,
+    action: &mut Option<Action>,
+    selection: super::selection_controls::MenuState,
+    can_create: bool,
+    folder: &str,
+) {
+    let (_, rect) = ui.allocate_space(egui::Vec2::splat(style::CONTROL));
+    let button = ui.interact(
+        rect,
+        egui::Id::unique("main-application-menu"),
+        egui::Sense::click(),
+    );
+    button.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Main menu")
+    });
+    let visuals = ui.style().interact(&button);
+    if button.hovered() || button.has_focus() {
+        ui.painter().rect(
+            rect,
+            4.,
+            visuals.bg_fill,
+            visuals.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
+    let center = rect.center();
+    for y in [-4., 0., 4.] {
+        ui.painter().line_segment(
+            [center + egui::vec2(-6., y), center + egui::vec2(6., y)],
+            visuals.fg_stroke,
+        );
+    }
+    let button = button.on_hover_text("Main menu");
+    egui::Popup::menu(&button).show(|ui| {
+        ui.add_enabled_ui(can_create, |ui| {
+            ui.menu_button("New Document", |ui| new_choices(ui, folder, action));
+        });
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if ui.button("Open Workspace…").clicked() {
+                *action = Some(Action::Workspace);
+                ui.close();
+            }
+            if ui.button("Refresh Explorer").clicked() {
+                *action = Some(Action::Refresh);
+                ui.close();
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        if ui.button("Import PDF…").clicked() {
+            *action = Some(Action::Import);
+            ui.close();
+        }
+        ui.menu_button("Appearance", |ui| {
+            ui.selectable_value(&mut prefs.theme, Theme::System, "System");
+            ui.selectable_value(&mut prefs.theme, Theme::Light, "Light");
+            ui.selectable_value(&mut prefs.theme, Theme::Dark, "Dark");
+        });
+        if ui.button("Settings…").clicked() {
+            *action = Some(Action::Settings);
+            ui.close();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let fullscreen = ui.input(|input| input.viewport().fullscreen.unwrap_or(false));
+            if ui
+                .button(if fullscreen {
+                    "Exit Full Screen"
+                } else {
+                    "Full Screen"
+                })
+                .clicked()
+            {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+                ui.close();
+            }
+        }
+        ui.separator();
+        ui.menu_button("Edit", |ui| {
+            egui::ScrollArea::vertical()
+                .max_height((ui.ctx().content_rect().height() - 120.).max(96.))
+                .show(ui, |ui| {
+                    if let Some(command) = super::selection_controls::menu(ui, selection) {
+                        *action = Some(Action::Selection(command));
+                        ui.close();
+                    }
+                });
+        });
+    });
+}
+
+pub fn window_buttons(_ui: &mut egui::Ui) {
+    #[cfg(target_os = "linux")]
+    {
+        use egui::ViewportCommand as Command;
+        let ui = _ui;
+        let maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
+        for (label, command) in [
+            ("Close window", Command::Close),
+            (
+                if maximized {
+                    "Restore window"
+                } else {
+                    "Maximize window"
+                },
+                Command::Maximized(!maximized),
+            ),
+            ("Minimize window", Command::Minimized(true)),
+        ] {
+            let response = ui.add(
+                egui::Button::new("")
+                    .min_size(egui::Vec2::splat(28.))
+                    .frame_when_inactive(false),
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label)
+            });
+            let center = response.rect.center();
+            let color = ui.style().interact(&response).fg_stroke.color;
+            let painter = ui.painter();
+            match command {
+                Command::Close => {
+                    super::icons::paint(painter, center, super::icons::Icon::Close, color)
+                }
+                Command::Minimized(_) => {
+                    super::icons::paint(painter, center, super::icons::Icon::Minus, color)
+                }
+                _ => {
+                    let stroke = egui::Stroke::new(1.25, color);
+                    let square = egui::Rect::from_center_size(center, egui::Vec2::splat(10.));
+                    if maximized {
+                        painter.rect_stroke(
+                            square.translate(egui::vec2(2., -2.)),
+                            1.,
+                            stroke,
+                            egui::StrokeKind::Inside,
+                        );
+                        painter.rect_filled(
+                            square,
+                            1.,
+                            ui.style().interact(&response).weak_bg_fill,
+                        );
+                    }
+                    painter.rect_stroke(square, 1., stroke, egui::StrokeKind::Inside);
+                }
+            }
+            if response.on_hover_text(label).clicked() {
+                ui.ctx().send_viewport_cmd(command);
+            }
+        }
+    }
+}
+
+pub fn drag_space(_ui: &mut egui::Ui, _width: f32) {
+    #[cfg(target_os = "linux")]
+    {
+        let ui = _ui;
+        let (_, drag) =
+            ui.allocate_exact_size(egui::vec2(_width, 28.), egui::Sense::click_and_drag());
+        if drag.double_clicked() {
+            let maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+        } else if drag.drag_started() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn resize_edges(_ui: &egui::Ui) {
+    #[cfg(target_os = "linux")]
+    {
+        use egui::{CursorIcon as Cursor, ResizeDirection as Edge};
+        let ui = _ui;
+        let area = ui.ctx().content_rect();
+        let direction = ui.input(|input| {
+            let viewport = input.viewport();
+            if viewport.maximized.unwrap_or(false) || viewport.fullscreen.unwrap_or(false) {
+                return None;
+            }
+            let p = input.pointer.hover_pos()?;
+            let edge = 5.;
+            let x = if p.x - area.left() < edge {
+                -1
+            } else if area.right() - p.x < edge {
+                1
+            } else {
+                0
+            };
+            let y = if p.y - area.top() < edge {
+                -1
+            } else if area.bottom() - p.y < edge {
+                1
+            } else {
+                0
+            };
+            let (edge, cursor) = match (x, y) {
+                (-1, -1) => (Edge::NorthWest, Cursor::ResizeNwSe),
+                (1, 1) => (Edge::SouthEast, Cursor::ResizeNwSe),
+                (1, -1) => (Edge::NorthEast, Cursor::ResizeNeSw),
+                (-1, 1) => (Edge::SouthWest, Cursor::ResizeNeSw),
+                (-1, _) => (Edge::West, Cursor::ResizeHorizontal),
+                (1, _) => (Edge::East, Cursor::ResizeHorizontal),
+                (_, -1) => (Edge::North, Cursor::ResizeVertical),
+                (_, 1) => (Edge::South, Cursor::ResizeVertical),
+                _ => return None,
+            };
+            Some((edge, cursor, input.pointer.primary_pressed()))
+        });
+        if let Some((edge, cursor, pressed)) = direction {
+            ui.ctx().set_cursor_icon(cursor);
+            if pressed {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::BeginResize(edge));
+            }
+        }
+    }
 }

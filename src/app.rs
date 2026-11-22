@@ -85,6 +85,23 @@ impl eframe::App for XiTocApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        #[cfg(target_os = "linux")]
+        {
+            ui::chrome::resize_edges(ui);
+            let inset = ui.input(|i| {
+                !i.viewport().maximized.unwrap_or(false)
+                    && !i.viewport().fullscreen.unwrap_or(false)
+            });
+            if inset {
+                egui::Frame::new()
+                    .inner_margin(5)
+                    .fill(style::palette(ui).border)
+                    .show(ui, |ui| self.show(ui));
+            } else {
+                self.show(ui);
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
         self.show(ui);
         self.persist_preferences(ui.ctx(), frame.storage_mut());
     }
@@ -168,10 +185,14 @@ impl XiTocApp {
         }
         let before = self.preferences.clone();
         let settings_open = self.settings_dialog.open;
-        if self.pending.is_some() || settings_open {
+        if self.pending.is_some() || settings_open || self.creation.is_some() {
             ui.disable();
         }
-        if !ui.ctx().text_edit_focused()
+        if ui.is_enabled()
+            && !self
+                .active
+                .is_some_and(|i| self.documents[i].editor.canvas.configuration_open())
+            && !ui.ctx().text_edit_focused()
             && ui.input_mut(|i| {
                 i.consume_shortcut(&egui::KeyboardShortcut::new(
                     egui::Modifiers::COMMAND,
@@ -185,15 +206,12 @@ impl XiTocApp {
         self.preferences.theme.apply(ui.ctx());
         ui.set_style(ui.ctx().global_style());
         let mut action = None;
-        let selection = self
+        let configuration_open = self
             .active
-            .filter(|i| !self.documents[*i].loaded.document.external)
-            .map(|i| {
-                ui::selection_controls::MenuState::for_canvas(&self.documents[i].editor.canvas)
-            })
-            .unwrap_or_default();
-        self.chrome
-            .top(ui, &mut self.preferences, &mut action, selection);
+            .is_some_and(|index| self.documents[index].editor.canvas.configuration_open());
+        let blocked = configuration_open || self.creation.is_some();
+        self.show_header(ui, &mut action, blocked);
+        self.show_toolbar(ui, &mut action, blocked);
         let context = self
             .active
             .map(|index| self.documents[index].loaded.document.data.kind().label())
@@ -207,7 +225,7 @@ impl XiTocApp {
             self.status.clone()
         };
         self.chrome.bottom(ui, &status, context);
-        self.show_explorer(ui, &mut action);
+        self.show_explorer(ui, &mut action, blocked);
         self.show_document_area(ui, &mut action);
         if let Some(action) = action {
             self.act(action, ui.ctx());
@@ -224,6 +242,18 @@ impl XiTocApp {
             {
                 self.status = warning.clone();
             }
+        }
+        if !ui.ctx().embed_viewports()
+            && (configuration_open || settings_open || blocked)
+            && self.pending.is_none()
+            && !self.settings_dialog.open
+            && self.creation.is_none()
+            && !self
+                .active
+                .is_some_and(|i| self.documents[i].editor.canvas.configuration_open())
+        {
+            ui.ctx().request_repaint();
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
         }
         self.discard_dialog(ui.ctx());
         if self.preferences.latex.config != before.latex.config {
@@ -317,7 +347,7 @@ impl XiTocApp {
         }
     }
 
-    fn show_explorer(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>) {
+    fn show_explorer(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>, blocked: bool) {
         if !self.preferences.explorer_visible {
             return;
         }
@@ -332,61 +362,169 @@ impl XiTocApp {
             .size_range(132.0..=max_width)
             .frame(style::frame(style::palette(ui).sidebar, 10, 10))
             .show(ui, |ui| {
-                ui::explorer::Explorer {
-                    tree: &self.tree,
-                    selected_folder: &mut self.selected_folder,
-                    active_path,
-                    can_create,
-                    status: &mut self.status,
-                }
-                .show(ui, action);
+                ui.add_enabled_ui(!blocked, |ui| {
+                    ui::explorer::Explorer {
+                        tree: &self.tree,
+                        selected_folder: &mut self.selected_folder,
+                        active_path,
+                        can_create,
+                        status: &mut self.status,
+                    }
+                    .show(ui, action)
+                });
+            });
+    }
+
+    fn show_header(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>, blocked: bool) {
+        let p = style::palette(ui);
+        let can_create = self.can_create();
+        let mut tab_action = None;
+        egui::Panel::top("document-tabs")
+            .resizable(false)
+            .exact_size(style::TAB)
+            .frame(style::frame(p.shell, 4, 2))
+            .show(ui, |ui| {
+                let documents = self.documents.iter().map(|opened| ui::tabs::Tab {
+                    path: opened.loaded.document.location.name(),
+                    kind: opened.loaded.document.data.kind(),
+                    read_only: opened.loaded.document.external,
+                    dirty: opened.editor.canvas.dirty(),
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    crate::ui::chrome::window_buttons(ui);
+                    crate::ui::chrome::drag_space(ui, 38.);
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        crate::ui::chrome::identity(ui);
+                        ui.add_enabled_ui(can_create && !blocked, |ui| {
+                            let response = ui
+                                .menu_button("+", |ui| {
+                                    ui::new_choices(ui, &self.selected_folder, action)
+                                })
+                                .response;
+                            response.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::Role::Button,
+                                    ui.is_enabled(),
+                                    "New Document",
+                                )
+                            });
+                            response.on_hover_text("New Document");
+                        });
+                        let available = ui.available_width();
+                        let tab_width = if cfg!(target_os = "linux") {
+                            documents
+                                .clone()
+                                .map(|tab| tab.width() + 2.)
+                                .sum::<f32>()
+                                .min(available)
+                        } else {
+                            available
+                        };
+                        if tab_width > 0. {
+                            ui.allocate_ui(egui::vec2(tab_width, 32.), |ui| {
+                                ui.add_enabled_ui(!blocked, |ui| {
+                                    tab_action = self.tabs.show(ui, documents, self.active);
+                                });
+                            });
+                        }
+                        let drag_width = ui.available_width();
+                        if drag_width > 1. {
+                            crate::ui::chrome::drag_space(ui, drag_width);
+                        }
+                    });
+                });
+            });
+        if let Some(tab_action) = tab_action {
+            match tab_action {
+                ui::tabs::TabAction::Activate(index) => self.activate(index),
+                ui::tabs::TabAction::Close(index) => self.close(index),
+            }
+        }
+    }
+
+    fn show_toolbar(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>, blocked: bool) {
+        let p = style::palette(ui);
+        let selection = self
+            .active
+            .filter(|&i| !self.documents[i].loaded.document.external)
+            .map(|i| {
+                ui::selection_controls::MenuState::for_canvas(&self.documents[i].editor.canvas)
+            })
+            .unwrap_or_default();
+        let can_create = self.can_create();
+        egui::Panel::top("document-toolbar")
+            .resizable(false)
+            .exact_size(40.)
+            .frame(style::frame(p.surface, 8, 6))
+            .show(ui, |ui| {
+                ui.add_enabled_ui(!blocked, |ui| {
+                    ui.horizontal(|ui| {
+                        if ui::icons::button(
+                            ui,
+                            ui::icons::Icon::Sidebar,
+                            "Show or hide Explorer",
+                            self.preferences.explorer_visible,
+                        )
+                        .clicked()
+                        {
+                            self.preferences.explorer_visible = !self.preferences.explorer_visible;
+                        }
+                        let document = self.active.map(|index| {
+                            let opened = &mut self.documents[index];
+                            (&opened.loaded.document, &mut opened.editor)
+                        });
+                        let mut document = document;
+                        if let Some((doc, editor)) =
+                            document.as_mut().filter(|(doc, _)| !doc.external)
+                        {
+                            let _ = doc;
+                            ui::toolbar::history(ui, &mut editor.canvas);
+                        } else {
+                            ui.add_enabled_ui(false, |ui| {
+                                ui::icons::button(ui, ui::icons::Icon::Undo, "Undo", false);
+                                ui::icons::button(ui, ui::icons::Icon::Redo, "Redo", false);
+                            });
+                        }
+                        ui.separator();
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui::chrome::menu(
+                                ui,
+                                &mut self.preferences,
+                                action,
+                                selection,
+                                can_create,
+                                &self.selected_folder,
+                            );
+                            ui.with_layout(
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    egui::ScrollArea::horizontal()
+                                        .id_salt("desktop-tools")
+                                        .scroll_source(egui::scroll_area::ScrollSource {
+                                            drag: egui::scroll_area::DragScroll::Never,
+                                            ..Default::default()
+                                        })
+                                        .show(ui, |ui| {
+                                            ui::toolbar::show(
+                                                ui,
+                                                document,
+                                                action,
+                                                &mut self.preferences.drawing,
+                                            )
+                                        });
+                                },
+                            );
+                        });
+                    });
+                });
             });
     }
 
     fn show_document_area(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>) {
         let p = style::palette(ui);
-        let can_create = self.can_create();
         egui::CentralPanel::default()
             .frame(style::frame(p.workspace, 0, 0))
             .show(ui, |ui| {
-                let mut tab_action = None;
-                egui::Panel::top("document-tabs")
-                    .resizable(false)
-                    .exact_size(style::TAB)
-                    .frame(style::frame(p.shell, 4, 2))
-                    .show(ui, |ui| {
-                        let documents = self.documents.iter().map(|opened| ui::tabs::Tab {
-                            path: opened.loaded.document.location.name(),
-                            kind: opened.loaded.document.data.kind(),
-                            read_only: opened.loaded.document.external,
-                            dirty: opened.editor.canvas.dirty(),
-                        });
-                        ui.horizontal(|ui| {
-                            ui.add_enabled_ui(can_create, |ui| {
-                                let response = ui.menu_button("+", |ui| ui::new_choices(ui, &self.selected_folder, action)).response;
-                                response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "New Document"));
-                                response.on_hover_text("New Document");
-                            });
-                            tab_action = self.tabs.show(ui, documents, self.active);
-                        });
-                    });
-                if let Some(tab_action) = tab_action {
-                    match tab_action {
-                        ui::tabs::TabAction::Activate(index) => self.activate(index),
-                        ui::tabs::TabAction::Close(index) => self.close(index),
-                    }
-                }
-                egui::Panel::top("document-toolbar")
-                    .resizable(false)
-                    .exact_size(40.0)
-                    .frame(style::frame(p.surface, 8, 6))
-                    .show(ui, |ui| {
-                        let document = self.active.map(|index| {
-                            let opened = &mut self.documents[index];
-                            (&opened.loaded.document, &mut opened.editor)
-                        });
-                        ui::toolbar::show(ui, document, action, &mut self.preferences.drawing);
-                    });
                 if let Some(index) = self.active {
                     let opened = &mut self.documents[index];
                     if opened.loaded.document.external {
@@ -395,7 +533,7 @@ impl XiTocApp {
                             ui.label("PDF preview is not available yet. The original file is preserved and will not be rewritten.");
                         });
                     } else {
-                        opened.editor.canvas.formula_settings_suspended = self.settings_dialog.open;
+                        opened.editor.canvas.formula_settings_suspended = self.settings_dialog.open || self.pending.is_some() || self.creation.is_some();
                         opened.editor.canvas.latex = self.preferences.latex.clone();
                         opened.editor.canvas.text_resize_default = self.preferences.text_resize;
                         opened.editor.middle_button_pan = self.preferences.middle_button_pan;
@@ -796,20 +934,33 @@ mod tests {
         fn click(ctx: &egui::Context, app: &mut XiTocApp, label: &str) {
             render(ctx, vec![], |ui| app.show(ui));
             let labels = render(ctx, vec![], |ui| app.show(ui));
-            let pos = labels[label];
+            let pos = if label == "Main menu" {
+                ctx.read_response(egui::Id::unique("main-application-menu"))
+                    .unwrap()
+                    .rect
+                    .center()
+            } else {
+                *labels
+                    .get(label)
+                    .unwrap_or_else(|| panic!("Menu item {label} missing: {:?}", labels.keys()))
+            };
             render(ctx, pointer(pos, true), |ui| app.show(ui));
             render(ctx, pointer(pos, false), |ui| app.show(ui));
         }
+        click(&ctx, &mut app, "Main menu");
         click(&ctx, &mut app, "Edit");
         click(&ctx, &mut app, "Duplicate");
         assert_eq!(app.documents[0].editor.canvas.drawing.strokes().len(), 2);
+        click(&ctx, &mut app, "Main menu");
         click(&ctx, &mut app, "Edit");
         click(&ctx, &mut app, "Delete");
         assert_eq!(app.documents[0].editor.canvas.drawing.strokes().len(), 1);
+        click(&ctx, &mut app, "Main menu");
         click(&ctx, &mut app, "Edit");
         click(&ctx, &mut app, "Undo");
         assert_eq!(app.documents[0].editor.canvas.drawing.strokes().len(), 2);
         assert_eq!(app.preferences, preferences);
+        click(&ctx, &mut app, "Main menu");
         click(&ctx, &mut app, "Edit");
         click(&ctx, &mut app, "Copy");
         let data = DocumentData::blank(DocumentKind::Page);
@@ -822,6 +973,7 @@ mod tests {
             },
         });
         render(&ctx, vec![], |ui| app.show(ui));
+        click(&ctx, &mut app, "Main menu");
         click(&ctx, &mut app, "Edit");
         click(&ctx, &mut app, "Paste");
         let time = ctx.input(|i| i.time) + 1.0;
@@ -842,20 +994,55 @@ mod tests {
     }
 
     #[test]
-    fn settings_open_through_edit_change_appearance_and_close() {
+    fn header_places_the_menu_below_and_to_the_right_of_document_tabs() {
+        use crate::ui::settings::tests::render;
+        let ctx = egui::Context::default();
+        let mut app = XiTocApp::default();
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        app.open(Loaded {
+            bytes: crate::pdf::encode(&data).unwrap().into(),
+            document: Document {
+                data,
+                location: Location::new("Header test.pdf".into()),
+                external: false,
+            },
+        });
+        render(&ctx, vec![], |ui| app.show(ui));
+        let labels = render(&ctx, vec![], |ui| app.show(ui));
+        let tab = labels["Header test.pdf"];
+        let title = labels["XiToc"];
+        let menu = ctx
+            .read_response(egui::Id::unique("main-application-menu"))
+            .unwrap()
+            .rect
+            .center();
+        assert!((tab.y - title.y).abs() < 4.);
+        assert!(tab.y < menu.y && menu.y - tab.y < 48.);
+        assert!(menu.x > 760.);
+    }
+
+    #[test]
+    fn settings_open_through_main_menu_change_appearance_and_close() {
         use crate::ui::settings::tests::{pointer, render};
         let ctx = egui::Context::default();
         let mut app = XiTocApp::default();
         fn click(ctx: &egui::Context, app: &mut XiTocApp, label: &str) {
             render(ctx, vec![], |ui| app.show(ui));
             let labels = render(ctx, vec![], |ui| app.show(ui));
-            let pos = *labels
-                .get(label)
-                .unwrap_or_else(|| panic!("Missing {label}: {:?}", labels.keys()));
+            let pos = if label == "Main menu" {
+                ctx.read_response(egui::Id::unique("main-application-menu"))
+                    .unwrap()
+                    .rect
+                    .center()
+            } else {
+                *labels
+                    .get(label)
+                    .unwrap_or_else(|| panic!("Missing {label}: {:?}", labels.keys()))
+            };
             render(ctx, pointer(pos, true), |ui| app.show(ui));
             render(ctx, pointer(pos, false), |ui| app.show(ui));
         }
-        click(&ctx, &mut app, "Edit");
+        click(&ctx, &mut app, "Main menu");
         click(&ctx, &mut app, "Settings…");
         assert!(app.settings_dialog.open);
         click(&ctx, &mut app, "Appearance");

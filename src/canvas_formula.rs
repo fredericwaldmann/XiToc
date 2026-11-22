@@ -213,8 +213,10 @@ impl Canvas {
                 &self.drawing.latex,
             ));
         }
-        if self.formula_session.is_some() {
-            self.show_formula_editor(ui);
+        if let Some(session) = &self.formula_session {
+            if session.surface == surface {
+                self.show_formula_editor(ui);
+            }
             return true;
         }
         false
@@ -231,19 +233,30 @@ impl Canvas {
             self.formula_session = Some(session);
             return;
         }
-        let popup_was_open = egui::Popup::is_any_open(ui.ctx());
         let mut commit = false;
         let mut cancel = false;
-        egui::Modal::new(egui::Id::unique(("formula-editor", session.id))).show(ui.ctx(), |ui| {
-            ui.set_width((ui.ctx().content_rect().width() - 48.0).clamp(300.0, 560.0));
-            ui.heading(if session.original.is_some() {
-                "Edit Formula"
-            } else {
-                "New Formula"
-            });
-            let view = session.view.as_ref().unwrap();
-            let label = if view.error.is_some() { egui::RichText::new(view.label).small().color(ui.visuals().error_fg_color) } else { egui::RichText::new(view.label).small() };
-            ui.menu_button(label, |ui| {
+        let window_closed = crate::ui::dialog::configuration(
+            ui.ctx(),
+            egui::Id::unique(("formula-editor", session.id)),
+            "LaTeX Equation",
+            [600., 490.],
+            |ui| {
+                let popup_was_open = egui::Popup::is_any_open(ui.ctx());
+                ui.set_width((ui.ctx().content_rect().width() - 48.0).clamp(300.0, 560.0));
+                ui.heading(if session.original.is_some() {
+                    "Edit Formula"
+                } else {
+                    "New Formula"
+                });
+                let view = session.view.as_ref().unwrap();
+                let label = if view.error.is_some() {
+                    egui::RichText::new(view.label)
+                        .small()
+                        .color(ui.visuals().error_fg_color)
+                } else {
+                    egui::RichText::new(view.label).small()
+                };
+                ui.menu_button(label, |ui| {
                 ui.set_max_width(440.0);
                 egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                     for (title, text) in [
@@ -270,92 +283,102 @@ impl Canvas {
                 if ui.button("Open Document LaTeX Settings").clicked() { self.latex_dialog.open = true; ui.close(); }
                 if ui.button("Copy Effective Configuration").clicked() { ui.ctx().copy_text(view.copy_text(&session.config.0.config, &session.config.1)); }
             });
-            ui.label("LaTeX math source");
-            let source_id = egui::Id::unique(("formula-source", session.id));
-            if let Some(cursor) = session.cursor
-                && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), source_id) { state.cursor.set_char_range(Some(cursor)); state.store(ui.ctx(), source_id); }
-            let editor = ui.add_sized(
-                [ui.available_width(), 116.0],
-                egui::TextEdit::multiline(&mut session.source)
-                    .id(source_id)
-                    .font(egui::TextStyle::Monospace)
-                    .desired_rows(5)
-                    .hint_text(r"\frac{-b \pm \sqrt{b^2-4ac}}{2a}"),
-            );
-            if session.focus {
-                editor.request_focus();
-                session.focus = false;
-            }
-            if editor.has_focus() { session.cursor = egui::TextEdit::load_state(ui.ctx(), source_id).and_then(|state| state.cursor.char_range()); }
-            if editor.changed() {
-                session.update_preview();
-            }
-            if !popup_was_open && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                cancel = true;
-            }
-            if editor.has_focus()
-                && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter))
-            {
-                commit = true;
-            }
-            ui.add_space(6.0);
-            ui.strong("Preview");
-            let (preview_rect, _) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), 128.0),
-                egui::Sense::hover(),
-            );
-            ui.painter()
-                .rect_filled(preview_rect, 3.0, ui.visuals().extreme_bg_color);
-            if let Some(preview) = &session.preview {
-                let fit = (preview_rect.width() / preview.width.max(1.0))
-                    .min((preview_rect.height() - 12.0) / preview.height.max(1.0))
-                    .min(1.0);
-                let center = preview_rect.center();
-                let w = preview.width * fit;
-                let h = preview.height * fit;
-                let map = |p: Pos2| {
-                    Pos2::new(
-                        center.x + (p.x - preview.width * 0.5) * fit,
-                        center.y + (p.y - preview.height * 0.5) * fit,
-                    )
-                };
-                let mut map = map;
-                session.texture.paint(
-                    ui.painter(),
-                    preview,
-                    fit * ui.ctx().pixels_per_point(),
-                    session.config.0.high_quality,
-                    &mut map,
-                );
-                let _ = (w, h);
-            } else {
-                ui.painter().text(
-                    preview_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "Formula preview appears here",
-                    egui::FontId::proportional(13.0),
-                    ui.visuals().weak_text_color(),
-                );
-            }
-            if let Some(error) = &session.error {
-                ui.colored_label(
-                    ui.visuals().error_fg_color,
-                    format!("Invalid formula · {error}"),
-                );
-                if session.preview.is_some() {
-                    ui.weak("Showing the last valid preview. Correct the source before finishing.");
+                ui.label("LaTeX math source");
+                let source_id = egui::Id::unique(("formula-source", session.id));
+                if let Some(cursor) = session.cursor
+                    && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), source_id)
+                {
+                    state.cursor.set_char_range(Some(cursor));
+                    state.store(ui.ctx(), source_id);
                 }
-            } else {
-                ui.weak("Ctrl/Cmd+Enter to finish · Escape to cancel");
-            }
-            ui.horizontal(|ui| {
-                commit |= ui
-                    .add_enabled(session.error.is_none(), egui::Button::new("Finish Formula"))
-                    .clicked();
-                cancel |= ui.button("Cancel").clicked();
-            });
-        });
-        if cancel {
+                let editor = ui.add_sized(
+                    [ui.available_width(), 116.0],
+                    egui::TextEdit::multiline(&mut session.source)
+                        .id(source_id)
+                        .font(egui::TextStyle::Monospace)
+                        .desired_rows(5)
+                        .hint_text(r"\frac{-b \pm \sqrt{b^2-4ac}}{2a}"),
+                );
+                if session.focus {
+                    editor.request_focus();
+                    session.focus = false;
+                }
+                if editor.has_focus() {
+                    session.cursor = egui::TextEdit::load_state(ui.ctx(), source_id)
+                        .and_then(|state| state.cursor.char_range());
+                }
+                if editor.changed() {
+                    session.update_preview();
+                }
+                if !popup_was_open && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    cancel = true;
+                }
+                if editor.has_focus()
+                    && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter))
+                {
+                    commit = true;
+                }
+                ui.add_space(6.0);
+                ui.strong("Preview");
+                let (preview_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 128.0),
+                    egui::Sense::hover(),
+                );
+                ui.painter()
+                    .rect_filled(preview_rect, 3.0, ui.visuals().extreme_bg_color);
+                if let Some(preview) = &session.preview {
+                    let fit = (preview_rect.width() / preview.width.max(1.0))
+                        .min((preview_rect.height() - 12.0) / preview.height.max(1.0))
+                        .min(1.0);
+                    let center = preview_rect.center();
+                    let w = preview.width * fit;
+                    let h = preview.height * fit;
+                    let map = |p: Pos2| {
+                        Pos2::new(
+                            center.x + (p.x - preview.width * 0.5) * fit,
+                            center.y + (p.y - preview.height * 0.5) * fit,
+                        )
+                    };
+                    let mut map = map;
+                    session.texture.paint(
+                        ui.painter(),
+                        preview,
+                        fit * ui.ctx().pixels_per_point(),
+                        session.config.0.high_quality,
+                        &mut map,
+                    );
+                    let _ = (w, h);
+                } else {
+                    ui.painter().text(
+                        preview_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "Formula preview appears here",
+                        egui::FontId::proportional(13.0),
+                        ui.visuals().weak_text_color(),
+                    );
+                }
+                if let Some(error) = &session.error {
+                    ui.colored_label(
+                        ui.visuals().error_fg_color,
+                        format!("Invalid formula · {error}"),
+                    );
+                    if session.preview.is_some() {
+                        ui.weak(
+                            "Showing the last valid preview. Correct the source before finishing.",
+                        );
+                    }
+                } else {
+                    ui.weak("Ctrl/Cmd+Enter to finish · Escape to cancel");
+                }
+                ui.horizontal(|ui| {
+                    commit |= ui
+                        .add_enabled(session.error.is_none(), egui::Button::new("Finish Formula"))
+                        .clicked();
+                    cancel |= ui.button("Cancel").clicked();
+                });
+            },
+        );
+        if cancel || window_closed {
             self.formula_session = None;
             return;
         }

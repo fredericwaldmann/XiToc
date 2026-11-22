@@ -341,90 +341,176 @@ impl Canvas {
         let locked = self.drawing.is_locked(draft.id);
         let mut cancel = false;
         let mut apply = false;
-        let result = egui::Modal::new(egui::Id::unique(("coordinate-system", draft.id))).show(ctx, |ui| {
-            let max_size = (ctx.content_rect().size() - egui::vec2(40., 40.)).max(egui::vec2(320., 320.));
-            let min_size = egui::vec2(760., 320.).min(max_size);
-            egui::Resize::default()
-                .id_salt(("coordinate-dialog-resize", draft.id))
-                // A practical compact default: the selected left tab scrolls,
-                // while the preview keeps enough height to remain legible.
-                .default_size(egui::vec2(1000., 360.).min(max_size))
-                .min_size(min_size)
-                .max_size(max_size)
-                .show(ui, |ui| {
-                let frame_before = draft.value.clone();
-                ui.horizontal(|ui| {
-                    ui.heading("Coordinate System");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        cancel |= ui.button("×").on_hover_text("Close").clicked();
-                        apply |= ui
-                            .add_enabled(
-                                !locked && draft.tikz_error.is_none(),
-                                egui::Button::new("Apply"),
-                            )
-                            .clicked();
-                        cancel |= ui.button("Cancel").clicked();
-                    });
-                });
-                ui.separator();
-                let body_height = (ui.available_height() - 130.).max(180.);
-                ui.horizontal_top(|ui| {
-                    let left_width = (ui.available_width() * 0.50).max(320.);
-                    ui.allocate_ui_with_layout(egui::vec2(left_width, body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
-                        ui.horizontal(|ui| {
-                            ui.selectable_value(&mut draft.tab, CoordinateTab::General, "General");
-                            ui.selectable_value(&mut draft.tab, CoordinateTab::Functions, "Functions");
-                            ui.selectable_value(&mut draft.tab, CoordinateTab::Tikz, "TikZ Editor");
-                        });
-                        ui.separator();
-                        egui::ScrollArea::vertical().id_salt(("coordinate-tab", draft.id)).auto_shrink([false, false]).show(ui, |ui| {
-                            match draft.tab {
-                                CoordinateTab::General => { ui.add_enabled_ui(!locked && draft.tikz_error.is_none(), |ui| general_fields(ui, &mut draft.value, &mut draft.size)); }
-                                CoordinateTab::Functions => { ui.add_enabled_ui(!locked && draft.tikz_error.is_none(), |ui| function_fields(ui, &mut draft.value)); }
-                                CoordinateTab::Tikz => {
-                                    ui.label("Supported TikZ subset · edits update the preview");
-                                    let response = ui.add(egui::TextEdit::multiline(&mut draft.tikz_source)
-                                        .code_editor().font(egui::TextStyle::Monospace)
-                                        .desired_width(f32::INFINITY).desired_rows(8)
-                                        .lock_focus(true));
-                                    if response.changed() {
-                                        match crate::coordinate_tikz::parse(&draft.tikz_source, &frame_before) {
-                                            Ok(config) => { draft.value = config; draft.tikz_error = None; draft.error = None; }
-                                            Err(error) => draft.tikz_error = Some(error),
-                                        }
-                                    }
-                                }
+        let result = crate::ui::dialog::configuration(
+            ctx,
+            egui::Id::unique(("coordinate-system", draft.id)),
+            "Coordinate System",
+            [1020., 390.],
+            |ui| {
+                let resize_id = draft.id;
+                let mut body = |ui: &mut egui::Ui| {
+                    let frame_before = draft.value.clone();
+                    ui.horizontal(|ui| {
+                        ui.heading("Coordinate System");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.ctx().viewport_id() == egui::ViewportId::ROOT {
+                                cancel |= ui.button("×").on_hover_text("Close").clicked();
                             }
+                            apply |= ui
+                                .add_enabled(
+                                    !locked && draft.tikz_error.is_none(),
+                                    egui::Button::new("Apply"),
+                                )
+                                .clicked();
+                            cancel |= ui.button("Cancel").clicked();
                         });
                     });
                     ui.separator();
-                    let right_width = ui.available_width();
-                    ui.allocate_ui_with_layout(egui::vec2(right_width, body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
-                        ui.label("Live Preview");
-                        let (rect, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::hover());
-                        painter.rect_filled(rect.rect, 4., crate::ui::style::palette(ui).board);
-                        draw_preview(&mut draft, &object, &painter, rect.rect.shrink(8.), crate::ui::style::palette(ui).text);
+                    let body_height = (ui.available_height() - 65.).max(120.);
+                    ui.horizontal_top(|ui| {
+                        let left_width = ui.available_width() * 0.50;
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(left_width, body_height),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.selectable_value(
+                                        &mut draft.tab,
+                                        CoordinateTab::General,
+                                        "General",
+                                    );
+                                    ui.selectable_value(
+                                        &mut draft.tab,
+                                        CoordinateTab::Functions,
+                                        "Functions",
+                                    );
+                                    ui.selectable_value(
+                                        &mut draft.tab,
+                                        CoordinateTab::Tikz,
+                                        "TikZ Editor",
+                                    );
+                                });
+                                ui.separator();
+                                egui::ScrollArea::vertical()
+                                    .id_salt(("coordinate-tab", draft.id))
+                                    .auto_shrink([false, false])
+                                    .show(ui, |ui| match draft.tab {
+                                        CoordinateTab::General => {
+                                            ui.add_enabled_ui(
+                                                !locked && draft.tikz_error.is_none(),
+                                                |ui| {
+                                                    general_fields(
+                                                        ui,
+                                                        &mut draft.value,
+                                                        &mut draft.size,
+                                                    )
+                                                },
+                                            );
+                                        }
+                                        CoordinateTab::Functions => {
+                                            ui.add_enabled_ui(
+                                                !locked && draft.tikz_error.is_none(),
+                                                |ui| function_fields(ui, &mut draft.value),
+                                            );
+                                        }
+                                        CoordinateTab::Tikz => {
+                                            ui.label(
+                                                "Supported TikZ subset · edits update the preview",
+                                            );
+                                            let response = ui.add(
+                                                egui::TextEdit::multiline(&mut draft.tikz_source)
+                                                    .code_editor()
+                                                    .font(egui::TextStyle::Monospace)
+                                                    .desired_width(f32::INFINITY)
+                                                    .desired_rows(8)
+                                                    .lock_focus(true),
+                                            );
+                                            if response.changed() {
+                                                match crate::coordinate_tikz::parse(
+                                                    &draft.tikz_source,
+                                                    &frame_before,
+                                                ) {
+                                                    Ok(config) => {
+                                                        draft.value = config;
+                                                        draft.tikz_error = None;
+                                                        draft.error = None;
+                                                    }
+                                                    Err(error) => draft.tikz_error = Some(error),
+                                                }
+                                            }
+                                        }
+                                    });
+                            },
+                        );
+                        ui.separator();
+                        let right_width = ui.available_width();
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(right_width, body_height),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.label("Live Preview");
+                                let (rect, painter) =
+                                    ui.allocate_painter(ui.available_size(), egui::Sense::hover());
+                                painter.rect_filled(
+                                    rect.rect,
+                                    4.,
+                                    crate::ui::style::palette(ui).board,
+                                );
+                                draw_preview(
+                                    &mut draft,
+                                    &object,
+                                    &painter,
+                                    rect.rect.shrink(8.),
+                                    crate::ui::style::palette(ui).text,
+                                );
+                            },
+                        );
                     });
-                });
-                if draft.tab != CoordinateTab::Tikz && draft.value != frame_before {
-                    draft.tikz_source = crate::coordinate_tikz::generate_preserving(&draft.value, &draft.tikz_source);
-                    draft.tikz_error = None;
+                    if draft.tab != CoordinateTab::Tikz && draft.value != frame_before {
+                        draft.tikz_source = crate::coordinate_tikz::generate_preserving(
+                            &draft.value,
+                            &draft.tikz_source,
+                        );
+                        draft.tikz_error = None;
+                    }
+                    if let Some(error) =
+                        draft
+                            .tikz_error
+                            .as_ref()
+                            .or(draft.error.as_ref())
+                            .or_else(|| {
+                                draft
+                                    .validation
+                                    .as_ref()
+                                    .and_then(|(_, v)| v.as_ref().err())
+                            })
+                    {
+                        ui.colored_label(ui.visuals().error_fg_color, error);
+                    }
+                    if locked {
+                        ui.weak("Unlock this coordinate system to apply changes.");
+                    }
+                    cancel |=
+                        ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                };
+                if ui.ctx().viewport_id() == egui::ViewportId::ROOT {
+                    let max_size = (ui.ctx().content_rect().size() - egui::vec2(40., 40.))
+                        .max(egui::vec2(320., 320.));
+                    let min_size = egui::vec2(760., 320.).min(max_size);
+                    egui::Resize::default()
+                        .id_salt(("coordinate-dialog-resize", resize_id))
+                        // A practical compact default: the selected left tab scrolls,
+                        // while the preview keeps enough height to remain legible.
+                        .default_size(egui::vec2(1000., 360.).min(max_size))
+                        .min_size(min_size)
+                        .max_size(max_size)
+                        .show(ui, &mut body);
+                } else {
+                    body(ui);
                 }
-                if let Some(error) = draft.tikz_error.as_ref().or(draft.error.as_ref()).or_else(|| {
-                    draft
-                        .validation
-                        .as_ref()
-                        .and_then(|(_, v)| v.as_ref().err())
-                }) {
-                    ui.colored_label(ui.visuals().error_fg_color, error);
-                }
-                if locked {
-                    ui.weak("Unlock this coordinate system to apply changes.");
-                }
-                cancel |= ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-                });
-            });
-        if cancel || result.backdrop_response.clicked() {
+            },
+        );
+        if cancel || result {
             return true;
         }
         if apply {

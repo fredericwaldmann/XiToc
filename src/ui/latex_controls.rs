@@ -90,23 +90,48 @@ impl DocumentLatexDialog {
         }
         let draft = self.draft.get_or_insert_with(|| drawing.latex.clone());
         let mut close = false;
-        egui::Modal::new(egui::Id::unique(("document-latex", drawing.owner()))).show(ctx, |ui| {
-            ui.set_width((ctx.content_rect().width()-48.).clamp(180., super::style::SETTINGS_WIDTH));
-            ui.heading("Document Settings · LaTeX");
-            ui.label("Global configuration: Enabled");
-            egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-220.).max(60.)).show(ui, |ui| {
+        let window_closed = crate::ui::dialog::configuration(
+            ctx,
+            egui::Id::unique(("document-latex", drawing.owner())),
+            "Document Settings · LaTeX",
+            [660., 510.],
+            |ui| {
+                ui.set_width(
+                    (ui.ctx().content_rect().width() - 48.)
+                        .clamp(180., super::style::SETTINGS_WIDTH),
+                );
+                ui.heading("Document Settings · LaTeX");
+                ui.label("Global configuration: Enabled");
+                egui::ScrollArea::vertical().max_height((ui.ctx().content_rect().height()-220.).max(60.)).show(ui, |ui| {
                 editors(ui, draft, "Document");
                 ui.weak("Order: Global preamble → Document preamble → Formula → Document postamble → Global postamble. Settings affect this document only; memory-only until M2.");
             });
-            ui.horizontal(|ui| {
-                if ui.button("Validate").clicked() { self.error = Some(match drawing.validate_latex_change(draft, &global.config) { Ok(()) => "Configuration is valid.".into(), Err(e) => e }); }
-                if ui.button("Apply").clicked() { match drawing.set_latex(draft.clone(), &global.config) { Ok(()) => { self.error = None; close = true; }, Err(e) => self.error = Some(e) } }
-                close |= ui.button("Cancel").clicked();
-            });
-            if let Some(e) = &self.error { ui.label(e); }
-            close |= ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-        });
-        if close {
+                ui.horizontal(|ui| {
+                    if ui.button("Validate").clicked() {
+                        self.error =
+                            Some(match drawing.validate_latex_change(draft, &global.config) {
+                                Ok(()) => "Configuration is valid.".into(),
+                                Err(e) => e,
+                            });
+                    }
+                    if ui.button("Apply").clicked() {
+                        match drawing.set_latex(draft.clone(), &global.config) {
+                            Ok(()) => {
+                                self.error = None;
+                                close = true;
+                            }
+                            Err(e) => self.error = Some(e),
+                        }
+                    }
+                    close |= ui.button("Cancel").clicked();
+                });
+                if let Some(e) = &self.error {
+                    ui.label(e);
+                }
+                close |= ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+            },
+        );
+        if close || window_closed {
             self.open = false;
             self.draft = None;
         }

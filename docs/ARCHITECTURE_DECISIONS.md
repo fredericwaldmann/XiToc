@@ -864,3 +864,23 @@ renderer, including custom and numeric labels. Origin zero is a tick-positioned
 label, not an independent node. A bounded editable TikZ-inspired source subset
 is stored with the structured model and parsed locally without TeX.
 General-purpose TikZ and PGFPlots compatibility remain out of scope.
+
+## Native Linux window decorations
+
+Keep eframe's X11 and Wayland backends enabled, while adding a Linux-targeted
+direct winit 0.30.13 dependency solely for `wayland-csd-adwaita`. XiToc disables
+eframe defaults, which otherwise leaves this winit feature out. Do not restore
+all winit defaults or force X11. Native startup explicitly sets title, app id,
+normal decorations, resizability and the XiToc icon; WASM startup stays separate.
+The compositor still controls server-side decorations and theme details.
+
+## Integrated Linux header and secondary viewports (#68)
+
+Use XiToc's existing visual tokens to draw the Linux header and send native
+viewport commands. The fixed right-hand order follows the requested Ubuntu
+layout. System color preference is optional and uses the theme reported by
+eframe. Dialog creation uses immediate viewports because the editor already
+owns mutable drafts and history. Deferred viewports would require shared state
+and a separate command path. Immediate dialogs can repaint their parent when
+input changes. Modality is enforced in the application. Desktop placement and
+focus requests are subject to compositor policy.

@@ -82,8 +82,11 @@ text-agent input shortcuts or incoming external dragover/drop events.
 
 ## Bootstrap, state and frame lifecycle
 
-Native `main` calls `eframe::run_native` with a 1100×760 initial viewport and
-480×360 minimum, constructing `XiTocApp::new(cc.storage)`. WASM `main` starts a local
+Native `main` calls `eframe::run_native` with a XiToc title/app id, 1100×760
+initial viewport and 480×360 minimum. It explicitly enables normal decorations
+and resizing and supplies the bundled SVG-derived application icon. Linux adds
+only winit's Adwaita client-side decoration feature; eframe's X11 and Wayland
+backends remain enabled. WASM `main` starts a local
 async task, finds `#xitoc-canvas` in [index.html](../index.html), starts `WebRunner`,
 and installs the pen bridge. Startup removes the loading status on success or
 shows a WebGL-related failure message. [Trunk.toml](../Trunk.toml) builds locked
@@ -1117,3 +1120,12 @@ M2's single-PDF visible-image/edit-payload round-trip gate.
   vector renderer shared with preview.
 - `object.rs`, `drawing.rs`, `canvas_selection.rs` and `object_clipboard.rs`
   integrate coordinate systems with the common document and interaction paths.
+
+## Integrated desktop header and dialog host
+
+`app.rs` places the shared tabs and toolbar above the Explorer and canvas.
+`ui/chrome.rs` provides the Linux window controls and the application menu.
+`ui/dialog.rs` presents configuration content in an immediate native viewport
+or an embedded modal. Dialog drafts, validation and document transactions
+remain with their original settings or canvas components. Settings offers System
+alongside explicit Light and Dark. Native file pickers continue to use rfd.

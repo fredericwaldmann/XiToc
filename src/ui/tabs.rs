@@ -8,6 +8,13 @@ pub struct Tab<'a> {
     pub read_only: bool,
     pub dirty: bool,
 }
+impl Tab<'_> {
+    pub fn width(&self) -> f32 {
+        let filename = self.path.rsplit('/').next().unwrap_or(self.path);
+        let characters = filename.chars().count() + usize::from(self.dirty) * 2;
+        (characters as f32 * 7. + 62.).clamp(128., 224.)
+    }
+}
 pub enum TabAction {
     Activate(usize),
     Close(usize),
@@ -43,7 +50,7 @@ impl Tabs {
                         } else {
                             filename.to_owned()
                         };
-                        let width = (title.chars().count() as f32 * 7.0 + 62.0).clamp(128.0, 224.0);
+                        let width = tab.width();
                         let (rect, response) =
                             ui.allocate_exact_size(Vec2::new(width, 32.0), Sense::click());
                         let selected = active == Some(index);
