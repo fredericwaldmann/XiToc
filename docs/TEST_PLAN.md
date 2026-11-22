@@ -2019,3 +2019,51 @@ step undo. For manual GUI verification, edit an axis endpoint and a curve
 expression/color in TikZ Editor, then confirm General/Functions and the preview
 reflect them. Type an incomplete command, confirm the preview is unchanged and
 Apply is disabled, correct it, Apply, and undo/redo. Repeat on native and WASM.
+
+## Scientific rendering quality (#70)
+
+Compare the same scene at 50%, 100%, 200%, 400%, and 800%. Include curved
+width-60 pressure ink, straight thin ink, a crossing highlighter, equations
+with fractions and radicals, sine and quadratic plots, and 3D axes. Repeat
+at 1×, fractional DPI and 2×, including rotation and live-to-committed ink.
+Check that a single highlighter does not accumulate opacity at its crossings.
+
+Run `cargo test --release formula_zoom_comparison -- --ignored` for a CPU
+comparison of the old and new texture coverage policies. The generated sheet
+at `/tmp/xitoc-formula-zoom-comparison.png` has the old output on the left and
+the new output on the right, from 50% to 800% top to bottom. This models the
+bilinear sampling step and does not measure GPU output.
+
+Run both revisions with `XITOC_INK_FRAMES=80 cargo test --release
+ink_frame_benchmark -- --ignored --nocapture` for matched inputs, and run the
+full long pen and long highlight cases for sustained drawing. These fixtures
+measure controller and CPU tessellation time, plus visible mesh payload.
+
+### Local release results
+
+Baseline was main `4f4d8e9`. Timings below are CPU frame mean / p95 / maximum
+in milliseconds. The short workloads use 80 frames. Long workloads use
+1,440 frames.
+
+| Workload | Before | After |
+| --- | ---: | ---: |
+| Width 2 | 0.067 / 0.149 / 0.891 | 0.027 / 0.051 / 0.075 |
+| Width 8 | 0.034 / 0.064 / 0.161 | 0.037 / 0.059 / 0.091 |
+| Width 25 | 0.047 / 0.079 / 1.174 | 0.044 / 0.058 / 0.291 |
+| Width 60 | 0.029 / 0.047 / 0.098 | 0.039 / 0.057 / 0.060 |
+| Pressure at 200% | 0.041 / 0.066 / 0.086 | 0.032 / 0.057 / 0.080 |
+| Mixed canvas | 1.631 / 2.224 / 2.574 | 1.724 / 2.516 / 3.286 |
+| Long width 60 | 0.274 / 0.659 / 0.885 | 0.294 / 0.784 / 1.175 |
+| Long highlighter, median across three runs | 1.116 / 2.036 / 4.120 | 1.108 / 2.064 / 4.044 |
+
+Worst observed long-highlighter frames across all three runs were 4.796 ms
+before and 7.089 ms after. Its peak visible mesh payload fell from 457,912 to
+431,208 bytes. Mean controller and canvas time on the long pen workload changed
+from 0.041 to 0.046 ms. Its final egui assembly time changed from 0.233 to
+0.248 ms. The benchmark does not measure GPU time, allocator counts, or
+input-to-photon latency.
+
+Formatting, strict Clippy, 382 passing tests with 15 ignored, native release,
+WASM check and Trunk release passed locally. An isolated native launch stayed
+running for eight seconds. The formula pixel comparison was inspected.
+A full native visual comparison of writing and plots remains outstanding.

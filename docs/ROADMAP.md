@@ -374,3 +374,9 @@ edits axes, labels, grids, ticks, 1D annotations, 2D functions and orthographic
 on the left with the shared live preview on the right. The safe editable TikZ
 subset synchronizes into the same structured model. Plot data and valid source
 are structured for the M2 single-PDF round trip.
+
+## Scientific rendering quality (#70)
+
+Use bounded geometric approximation for ink and plots and physical-density
+coverage for math outlines while keeping the underlying objects editable.
+Track visual comparisons and repeated frame timings in [TEST_PLAN.md](TEST_PLAN.md).

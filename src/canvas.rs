@@ -1781,7 +1781,7 @@ mod tests {
     fn thick_mesh_is_compact_and_continuous_across_chunks_and_zoom() {
         let ctx = egui::Context::default();
         let data = DocumentData::blank(DocumentKind::Whiteboard);
-        for scale in [0.5, 1.0, 2.0, 4.0] {
+        for scale in [0.5, 1.0, 2.0, 4.0, 8.0] {
             let mut canvas = Canvas::new(&data);
             let mut stroke = Stroke::new(data.id(), Surface::Canvas, [40, 60, 80, 255], 15.0);
             stroke.smoothing = drawing::Smoothing::PolylineV1;

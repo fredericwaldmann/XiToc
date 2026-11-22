@@ -897,3 +897,11 @@ equation-renderer typography for every coordinate label, independent numeric
 and origin-zero visibility, and tick-based zero placement. Generated TikZ now
 uses supported `xtick`/`xticklabels` directives rather than emitting an origin
 node; older node-based source remains readable.
+
+## Scientific rendering quality (#70)
+
+Separated handwriting chord approximation, formula coverage reduction, and
+plot sampling by physical footprint. Added tests for high zoom ink continuity
+and translucent coverage, 1× through 2× formula raster density, and sine and
+quadratic plot approximation. Formula semantics and editable drawing samples
+remain in the existing models.

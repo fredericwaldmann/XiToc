@@ -1247,3 +1247,27 @@ unless explicitly disabled. The 3D orthographic basis projects the positive
 octant and a bounded wireframe. Surface domain and axis clipping are in
 mathematical coordinates before projection. See
 [Scientific Coordinate Systems](SCIENTIFIC_COORDINATES.md).
+
+## Rendering quality and physical pixels (#70)
+
+Ink uses the same editable samples and quadratic reconstruction on the live
+and committed paths. Flattening selects the number of chords from curvature,
+with a 0.016 document-point midpoint error target and a subdivision cap.
+This keeps the derived path stable across zoom changes and shared with
+erasing. Thick ink tightens screen-space simplification. Translucent ink
+still unions stroke coverage before opacity is applied. The renderer keeps
+the existing local tile and stable-tail caches.
+
+LaTeX and coordinate labels share Latin Modern Math outlines. Formula
+textures use physical density from object scale, canvas zoom and DPI.
+Half-octave buckets bound rerasterization. High-quality mode resolves 2×2
+premultiplied coverage before upload when it fits the raster budget. The
+side and total sample limits bound large-formula allocations. Offscreen
+formulas skip layout and raster work in the canvas paint pass.
+
+The plot sampler buckets projected extent in physical pixels. Within the
+bounded recursion depth, it refines curves and wireframe runs according to
+midpoint error and keeps the existing domain and discontinuity checks. A
+sampling-only change retains cached math labels. Preview and canvas use
+the same sampler. Both native Glow and browser WebGL use existing epaint
+feathering for coordinate paths. No global multisampling change is needed.

@@ -173,7 +173,7 @@ impl Tiles {
                     pressures,
                     transform,
                     stroke,
-                    0.15 / self.dpi,
+                    0.12 / self.dpi,
                     start..(start + STABLE_BATCH).min(range.end),
                     &mut contours,
                 );

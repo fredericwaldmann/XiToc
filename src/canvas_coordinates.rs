@@ -71,6 +71,16 @@ fn math_label(source: &str) -> String {
     source.trim().trim_matches('$').to_owned()
 }
 
+// Bucket the projected object extent in physical pixels so dragging and
+// small zoom changes can reuse geometry. Both preview and canvas use this.
+fn sampling_extent(size: Point, scale: f32, dpi: f32) -> usize {
+    (size[0].max(size[1]) * f64::from(scale) * f64::from(dpi))
+        .clamp(64., 16_384.)
+        .log2()
+        .ceil()
+        .exp2() as usize
+}
+
 pub(super) fn paint_coordinate(
     cache: &mut CoordinateCache,
     painter: &egui::Painter,
@@ -90,16 +100,16 @@ pub(super) fn paint_coordinate(
         return;
     }
     let scale = (view.scale * placement.scale) as f32;
-    let quality = if scale < 0.55 {
-        64
-    } else if scale < 2. {
-        96
-    } else {
-        160
-    };
+    let quality = sampling_extent(object.size, scale, painter.ctx().pixels_per_point());
     let key = (object.config.clone(), object.size, quality);
     if cache.key.as_ref() != Some(&key) {
-        cache.math_labels.clear();
+        if cache
+            .key
+            .as_ref()
+            .is_none_or(|(config, size, _)| *config != object.config || *size != object.size)
+        {
+            cache.math_labels.clear();
+        }
         cache.geometry =
             geometry::generate(&object.config, object.size, quality, &mut cache.samples);
         cache.marks = cache.geometry.lines.iter().map(Marks::new).collect();
