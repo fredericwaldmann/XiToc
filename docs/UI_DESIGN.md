@@ -7,6 +7,13 @@ Rust/egui component tree on desktop and WASM. Original vector icons live in
 
 ## Reference and hierarchy
 
+The native operating-system window is configured separately from this egui
+interface. XiToc requests normal resizable decorations and provides its own
+window icon where the platform supports it. On Linux Wayland, winit's Adwaita
+client-side decorations provide GNOME-style window controls when the compositor
+uses client-side decorations; server-side decoration appearance remains under
+compositor/theme control. This does not replace or restyle the internal XiToc UI.
+
 Primary UX reference: [Apple Freeform for Mac: drawing and sketching](https://support.apple.com/guide/freeform/draw-and-sketch-frfm6e3d132d2/mac),
 consulted November 2026. Adopt compact drawing tools, nearby contextual options,
 and direct canvas manipulation. This is an adaptation, not a pixel replica.

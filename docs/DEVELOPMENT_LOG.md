@@ -897,3 +897,12 @@ equation-renderer typography for every coordinate label, independent numeric
 and origin-zero visibility, and tick-based zero placement. Generated TikZ now
 uses supported `xtick`/`xticklabels` directives rather than emitting an origin
 node; older node-based source remains readable.
+
+## Native Ubuntu window chrome
+
+Configured native XiToc with an explicit window title, app id, normal decoration
+and resize flags, and an original bundled application icon. eframe's defaults
+are disabled, so its winit dependency lacked `wayland-csd-adwaita`; enabled that
+single feature through a Linux-only direct winit dependency while retaining the
+existing Wayland and X11 backends. Browser startup and the internal egui layout
+are unchanged.
