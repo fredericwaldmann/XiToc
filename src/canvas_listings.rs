@@ -719,6 +719,7 @@ impl Canvas {
             })
             .collect::<Vec<_>>();
         if links.is_empty() {
+            watch.next = now + 0.85;
             watch.files.clear();
             watch.reconciled = Some(self.drawing.revision());
             return;
@@ -830,6 +831,10 @@ impl Canvas {
         if self.selection_gesture.is_some() {
             return;
         }
+        let dpi = ui.ctx().pixels_per_point();
+        if self.listing_measurement_key == Some((self.drawing.revision(), dpi)) {
+            return;
+        }
         let files = self
             .drawing
             .items()
@@ -851,6 +856,7 @@ impl Canvas {
                 self.drawing.sync_listing(next);
             }
         }
+        self.listing_measurement_key = Some((self.drawing.revision(), dpi));
     }
 }
 

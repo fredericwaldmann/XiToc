@@ -1129,3 +1129,18 @@ M2's single-PDF visible-image/edit-payload round-trip gate.
 or an embedded modal. Dialog drafts, validation and document transactions
 remain with their original settings or canvas components. Settings offers System
 alongside explicit Light and Dark. Native file pickers continue to use rfd.
+
+## Ink chunk joins and Whiteboard paint candidates
+
+`canvas.rs` derives a pressure-bearing centerline and asks `ink_mesh.rs` to
+tessellate opaque tangent strips, cap the real stroke ends, and carry the
+incoming tangent at each chunk boundary. Translucent coverage is still unioned
+in `ink_tiles.rs`. Whiteboard candidate selection reuses the bounds hierarchy
+in `eraser_index.rs`. Shape and ink caches retain their tessellation at the
+current scale and DPI across camera translation.
+
+For highlighter performance, `Cached::paint` in `canvas.rs` chooses between
+live tiles and the bounded complete mesh for compact completed strokes.
+`ink_mesh.rs` unions marker sections per stroke. `ink_tiles.rs` trims
+unreferenced vertices after clipping. The release profiling fixture is in
+`src/highlighter_benchmark.rs`.

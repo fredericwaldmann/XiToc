@@ -1271,3 +1271,51 @@ midpoint error and keeps the existing domain and discontinuity checks. A
 sampling-only change retains cached math labels. Preview and canvas use
 the same sampler. Both native Glow and browser WebGL use existing epaint
 feathering for coordinate paths. No global multisampling change is needed.
+
+## Continuous ink and Whiteboard panning (#72)
+
+Both live and committed opaque ink consume the pressure-bearing path derived
+from editable samples. The adaptive quadratic path and its existing physical
+precision target remain shared by paint and erase. The previous thin-ink
+renderer painted each segment and disk separately. The previous thick-ink
+renderer carried tangents within a chunk and emitted caps at chunk ends.
+Its use of egui's clockwise normal disagreed with the arc sweep convention.
+The geometry diagnostic exposed caps drawn inward and open wedges at bends.
+The renderer now derives the normal in the same angular convention as its
+arcs.
+The opaque renderer now uses tangent strips with an exposed round join at each
+bend. At chunk boundaries the following chunk owns the join and inherits the
+incoming tangent. The simplifier keeps the boundary tangents. A live chunk is
+rebuilt if its endpoint becomes an internal seam. Centered feathering fades
+coverage across one physical pixel and handles subpixel widths. Translucent ink
+still uses per-stroke union coverage.
+
+Whiteboard paint maps the viewport back into document space and queries the
+existing revision-keyed bounds hierarchy before allocating object caches.
+Candidates are painted in original stacking order. A screen margin accounts
+for shadows and edge feathering. Provisional transforms retain the ordered
+full traversal so moved objects and linked connectors can enter the viewport.
+Page overflow keeps its existing rendering path.
+
+Camera translation within the same scale and DPI reuses cached opaque ink
+and shape meshes. The paint pass translates visible submissions, so epaint
+still assembles the visible vertices each frame. Translucent tile caches retain
+a small overscan margin and rebuild when the viewport leaves it. Scale, DPI
+and semantic style differences still invalidate the relevant cache. Listing
+dimension measurement is gated by document revision and DPI. The shared
+native and browser renderer needs no new dependencies or GPU settings.
+
+### Many completed highlighters
+
+A tiled stroke's reusable region is based on the intersection of the viewport
+and its projected pressure envelope, with room for the coverage fringe.
+Moving the viewport beyond an old overscan margin does not rebuild the stroke
+if the saved tiles contain all relevant coverage. This preserves live tile
+meshes on release. Very long strokes continue to use viewport-sized tiles.
+
+An eligible completed marker without retained live tiles uses one coverage mesh.
+The complete path is limited to 256 derived points and a 1,536-point projected
+extent on each axis. It reuses the same flat nib sections and physical
+simplification tolerance as the tiled renderer, then unions the sections once.
+Tile clipping discards unreferenced vertices before a mesh is cached. Each
+marker remains an independent premultiplied-alpha submission in object order.

@@ -13,7 +13,7 @@ use std::{
 };
 
 const TILE_POINTS: f32 = 128.0;
-const STABLE_BATCH: usize = 24;
+pub(super) const STABLE_BATCH: usize = 24;
 type Cell = (i32, i32);
 type Coverage = Vec<Vec<Contour>>;
 
@@ -243,9 +243,12 @@ impl Tiles {
             .map(|(&cell, tile)| (self.rect(cell), &tile.mesh))
     }
 
-    pub(in crate::canvas) fn paint(&self, painter: &Painter) {
-        for tile in self.tiles.values() {
-            painter.add(egui::Shape::Mesh(tile.mesh.clone()));
+    pub(in crate::canvas) fn paint(&self, painter: &Painter, shift: egui::Vec2) {
+        let visible = painter.clip_rect().translate(-shift);
+        for (&cell, tile) in &self.tiles {
+            if visible.intersects(self.rect(cell)) {
+                super::super::submit_translated(painter, &tile.mesh, shift);
+            }
         }
     }
 }
@@ -320,6 +323,28 @@ fn clip_mesh(mesh: &mut egui::Mesh, rect: Rect) {
             }
         }
     }
+
+    // Fully rejected triangles leave their original vertices behind. Keep
+    // only referenced vertices so camera translations and uploads skip them.
+    let mut remap = vec![u32::MAX; mesh.vertices.len()];
+    let mut used = 0;
+    for index in &mut mesh.indices {
+        let old = *index as usize;
+        if remap[old] == u32::MAX {
+            remap[old] = used;
+            used += 1;
+        }
+    }
+    let mut vertices = vec![Vertex::default(); used as usize];
+    for (old, &new) in remap.iter().enumerate() {
+        if new != u32::MAX {
+            vertices[new as usize] = mesh.vertices[old];
+        }
+    }
+    for index in &mut mesh.indices {
+        *index = remap[*index as usize];
+    }
+    mesh.vertices = vertices;
 }
 
 fn merge(stable: &Coverage, contours: &[Contour]) -> Coverage {
@@ -401,6 +426,31 @@ mod tests {
                     .count()
             })
             .sum()
+    }
+
+    #[test]
+    fn clipped_mesh_drops_unreferenced_vertices_without_changing_coverage() {
+        let mut mesh = egui::Mesh::default();
+        let vertex = |x, y| egui::epaint::Vertex {
+            pos: pos2(x, y),
+            uv: egui::epaint::WHITE_UV,
+            color: Color32::from_white_alpha(89),
+        };
+        mesh.vertices = vec![
+            vertex(0., 0.),
+            vertex(4., 0.),
+            vertex(0., 4.),
+            vertex(20., 20.),
+            vertex(21., 20.),
+            vertex(20., 21.),
+        ];
+        mesh.indices = vec![0, 1, 2, 3, 4, 5];
+        clip_mesh(&mut mesh, Rect::from_min_max(pos2(-1., -1.), pos2(6., 6.)));
+        assert_eq!(
+            mesh.vertices,
+            [vertex(0., 0.), vertex(4., 0.), vertex(0., 4.)]
+        );
+        assert_eq!(mesh.indices, [0, 1, 2]);
     }
 
     #[test]

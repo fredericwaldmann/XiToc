@@ -82,6 +82,36 @@ fn union_ink(stroke: &Stroke) -> bool {
     stroke.color[3] < 255 || stroke.pen_type == crate::pen::PenType::Highlighter
 }
 
+/// Delta in logical screen points between two equally scaled camera views.
+/// Subtract in f64 before converting to screen coordinates.
+fn view_translation(from: Transform, to: Transform) -> Option<egui::Vec2> {
+    if from.scale != to.scale {
+        return None;
+    }
+    let position = to.to_screen(from.center);
+    let delta = egui::vec2(
+        (position[0] - from.origin[0]) as f32,
+        (position[1] - from.origin[1]) as f32,
+    );
+    // Rebase unusually large offsets to protect subpixel precision.
+    (delta.is_finite() && delta.abs().max_elem() <= 32_768.).then_some(delta)
+}
+
+fn submit_translated(painter: &egui::Painter, mesh: &Arc<egui::Mesh>, delta: egui::Vec2) {
+    if delta == egui::Vec2::ZERO {
+        painter.add(egui::Shape::Mesh(mesh.clone()));
+    } else {
+        let mut mesh = (**mesh).clone();
+        mesh.translate(delta);
+        painter.add(egui::Shape::mesh(mesh));
+    }
+}
+
+// Limit the complete coverage path to short strokes and a modest screen
+// extent. Very large paths keep the existing viewport-sized tile budget.
+const COMPLETE_MARKER_POINTS: usize = 256;
+const COMPLETE_MARKER_EXTENT: f32 = 1536.;
+
 struct Cached {
     placement: crate::object::Placement,
     path: Vec<[f64; 2]>,
@@ -130,7 +160,7 @@ impl Cached {
         let keep = if union {
             0
         } else {
-            changed.saturating_sub(1) / MESH_SEGMENTS
+            changed.saturating_sub(2) / MESH_SEGMENTS
         };
         self.meshes.truncate(keep);
         self.coverage.truncate(keep);
@@ -174,31 +204,32 @@ impl Cached {
         };
         for index in self.meshes.len()..chunks {
             let mut mesh = if union {
-                ink_mesh::mesh(&[(&self.path, &self.pressures)], transform, stroke, dpi)
-            } else {
-                let start = index * MESH_SEGMENTS;
-                let end = (start + MESH_SEGMENTS + 1).min(self.path.len());
-                if stroke.visible_width() * transform.scale * f64::from(dpi) >= 18.0 {
-                    ink_mesh::opaque_round_mesh(
-                        (&self.path[start..end], &self.pressures[start..end]),
+                if !self.live
+                    && stroke.pen_type == crate::pen::PenType::Highlighter
+                    && self.path.len() <= COMPLETE_MARKER_POINTS
+                {
+                    ink_mesh::completed_highlighter_mesh(
+                        (&self.path, &self.pressures),
                         transform,
                         stroke,
                         dpi,
                     )
                 } else {
-                    tessellate(
-                        ui,
-                        rounded_shapes(
-                            &self.path[start..end],
-                            &self.pressures[start..end],
-                            transform,
-                            stroke,
-                            index > 0,
-                            Color32::WHITE,
-                            dpi,
-                        ),
-                    )
+                    ink_mesh::mesh(&[(&self.path, &self.pressures)], transform, stroke, dpi)
                 }
+            } else {
+                let start = index * MESH_SEGMENTS;
+                let end = (start + MESH_SEGMENTS + 1).min(self.path.len());
+                ink_mesh::opaque_round_mesh(
+                    (&self.path[start..end], &self.pressures[start..end]),
+                    transform,
+                    stroke,
+                    dpi,
+                    start
+                        .checked_sub(1)
+                        .map(|i| (self.path[i], self.pressures[i])),
+                    end < self.path.len(),
+                )
             };
             let coverage: Vec<_> = mesh.vertices.iter().map(|v| v.color.a()).collect();
             ink_mesh::tint(&mut mesh, color, &coverage);
@@ -207,6 +238,15 @@ impl Cached {
             self.meshes.push(Arc::new(mesh));
         }
     }
+    fn highlighter_extent(&self, transform: Transform, stroke: &Stroke, dpi: f32) -> Rect {
+        let screen = |point| {
+            let [x, y] = transform.to_screen(point);
+            egui::pos2(x as f32, y as f32)
+        };
+        Rect::from_min_max(screen(self.bounds.0), screen(self.bounds.1))
+            .expand((stroke.visible_width() * transform.scale * 0.5) as f32 + 2. / dpi)
+    }
+
     fn paint(
         &mut self,
         ui: &egui::Ui,
@@ -220,7 +260,18 @@ impl Cached {
         if !union_ink(stroke) {
             self.tiled = None;
         }
+        let completed_highlighter =
+            !self.live && stroke.pen_type == crate::pen::PenType::Highlighter;
+        let compact = completed_highlighter
+            && self.tiled.is_none()
+            && self.path.len() <= COMPLETE_MARKER_POINTS
+            && {
+                let extent = self.highlighter_extent(transform, stroke, dpi);
+                extent.width() <= COMPLETE_MARKER_EXTENT
+                    && extent.height() <= COMPLETE_MARKER_EXTENT
+            };
         if retained
+            && !compact
             && union_ink(stroke)
             && !self.path.is_empty()
             && (self.live || self.tiled.is_some() || self.path.len() >= 32)
@@ -235,25 +286,56 @@ impl Cached {
                 flat: stroke.pen_type == crate::pen::PenType::Highlighter,
             };
             let color = ink_color(stroke);
-            if self
-                .tiled
-                .as_ref()
-                .is_none_or(|(old, tiles)| *old != key || tiles.clip() != clip)
-            {
-                self.tiled = Some((key, ink_mesh::Tiles::new(clip, dpi, color, self.live)));
-            }
-            let (_, tiles) = self.tiled.as_mut().unwrap();
-            tiles.prepare((&self.path, &self.pressures), transform, stroke, color);
-            tiles.paint(painter);
+            let reuse = self.tiled.as_ref().and_then(|(old, tiles)| {
+                let shift = view_translation(old.transform, transform)?;
+                let requested = clip.translate(-shift);
+                let relevant = if completed_highlighter {
+                    requested.intersect(self.highlighter_extent(old.transform, stroke, dpi))
+                } else {
+                    requested
+                };
+                ((*old
+                    == InkMeshKey {
+                        transform: old.transform,
+                        ..key
+                    })
+                    && (!self.live || shift == egui::Vec2::ZERO)
+                    && (relevant.is_negative() || tiles.clip().contains_rect(relevant)))
+                .then_some(shift)
+            });
+            let shift = if let Some(shift) = reuse {
+                shift
+            } else {
+                if completed_highlighter {
+                    self.meshes.clear();
+                    self.coverage.clear();
+                    self.mesh_bounds.clear();
+                    self.view = None;
+                }
+                self.tiled = Some((
+                    key,
+                    ink_mesh::Tiles::new(clip.expand(128.), dpi, color, self.live),
+                ));
+                egui::Vec2::ZERO
+            };
+            let (base, tiles) = self.tiled.as_mut().unwrap();
+            tiles.prepare((&self.path, &self.pressures), base.transform, stroke, color);
+            tiles.paint(painter, shift);
             self.rotation_preview = None;
             return;
         }
-        self.prepare_meshes(ui, transform, stroke);
+        let (base, shift) = self
+            .view
+            .and_then(|key| {
+                let shift = view_translation(key.transform, transform)?;
+                (!self.live).then_some((key.transform, shift))
+            })
+            .unwrap_or((transform, egui::Vec2::ZERO));
+        self.prepare_meshes(ui, base, stroke);
         self.rotation_preview = None;
-        let clip = painter.clip_rect();
         for (mesh, bounds) in self.meshes.iter().zip(&self.mesh_bounds) {
-            if clip.intersects(*bounds) {
-                painter.add(egui::Shape::Mesh(mesh.clone()));
+            if clip.intersects(bounds.translate(shift)) {
+                submit_translated(painter, mesh, shift);
             }
         }
     }
@@ -456,6 +538,7 @@ pub struct Canvas {
     cache: HashMap<Uuid, Cached>,
     eraser_index: crate::eraser_index::EraserIndex,
     object_index: crate::eraser_index::EraserIndex,
+    listing_measurement_key: Option<(u64, f32)>,
     connection_gesture: Option<connectors_ui::ConnectionGesture>,
     route_cache: HashMap<Uuid, (crate::connector::Connector, crate::shape::Shape)>,
     pub shape_defaults: crate::shape::ShapeDefaults,
@@ -543,6 +626,7 @@ impl Canvas {
             cache: HashMap::new(),
             eraser_index: Default::default(),
             object_index: Default::default(),
+            listing_measurement_key: None,
             connection_gesture: None,
             route_cache: Default::default(),
             shape_defaults: Default::default(),
@@ -1192,7 +1276,33 @@ impl Canvas {
         // End/cancel clears gesture-only anchor decisions before another gesture.
         // Committed state is not changed by this cache.
         let mut routing_hints = Vec::new();
-        for object in self.drawing.items() {
+        let items = self.drawing.items();
+        // Provisional transforms can pull offscreen objects and linked routes
+        // into view. They keep the existing ordered preview path.
+        let use_index = surface == Surface::Canvas
+            && !routing_active
+            && self.selection_gesture.is_none()
+            && self.listing_preview.is_none()
+            && attachment_preview.is_none()
+            && image_resize_preview.is_none();
+        let mut visible = Vec::new();
+        let mut indices: Box<dyn Iterator<Item = usize>> = if use_index {
+            self.object_index
+                .sync_objects(self.drawing.revision(), items);
+            let clip = painter.clip_rect().expand(8.);
+            self.object_index.query_rect(
+                surface,
+                transform.to_document([f64::from(clip.min.x), f64::from(clip.min.y)]),
+                transform.to_document([f64::from(clip.max.x), f64::from(clip.max.y)]),
+                |index| visible.push(index),
+            );
+            visible.sort_unstable();
+            Box::new(visible.into_iter())
+        } else {
+            Box::new(0..items.len())
+        };
+        for index in &mut indices {
+            let object = &items[index];
             if object.as_object().surface() != surface {
                 continue;
             }
@@ -1834,6 +1944,211 @@ mod tests {
         }
     }
 
+    #[test]
+    fn whiteboard_pan_culls_before_ink_cache_and_reuses_visible_meshes() {
+        let ctx = egui::Context::default();
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        let mut canvas = Canvas::new(&data);
+        let stroke = |x, alpha| {
+            let mut stroke = Stroke::new(data.id(), Surface::Canvas, [32, 45, 70, alpha], 16.);
+            for i in 0..50 {
+                stroke.push([x + f64::from(i), 28. + (f64::from(i) * 0.1).sin() * 4.]);
+            }
+            stroke
+        };
+        let visible = stroke(20., 255);
+        let translucent = stroke(28., 120);
+        let away = stroke(10_000., 255);
+        let (visible_id, alpha_id, away_id) = (visible.id, translucent.id, away.id);
+        let shape = crate::shape::Shape::create(
+            data.id(),
+            Surface::Canvas,
+            crate::shape::ShapeKind::Ellipse,
+            [10., 12.],
+            [35., 20.],
+            false,
+        )
+        .unwrap();
+        let shape_id = shape.id;
+        assert!(canvas.drawing.insert_snapshots(vec![
+            visible.into(),
+            translucent.into(),
+            away.into(),
+            shape.into()
+        ]));
+        let view = |x| Transform {
+            origin: [0.; 2],
+            center: [x, 0.],
+            scale: 8.,
+        };
+        frame_transform(&ctx, &mut canvas, Surface::Canvas, vec![], view(0.));
+        assert!(!canvas.cache.contains_key(&away_id));
+        let mesh = canvas.cache[&visible_id].meshes[0].clone();
+        let shape_mesh = canvas.shape_cache[&shape_id].meshes[0].clone();
+        let tile = canvas.cache[&alpha_id]
+            .tiled
+            .as_ref()
+            .unwrap()
+            .1
+            .meshes()
+            .next()
+            .unwrap()
+            .1
+            .clone();
+        frame_transform(&ctx, &mut canvas, Surface::Canvas, vec![], view(3.));
+        assert!(Arc::ptr_eq(&mesh, &canvas.cache[&visible_id].meshes[0]));
+        assert!(Arc::ptr_eq(
+            &shape_mesh,
+            &canvas.shape_cache[&shape_id].meshes[0]
+        ));
+        assert!(
+            canvas.cache[&alpha_id]
+                .tiled
+                .as_ref()
+                .unwrap()
+                .1
+                .meshes()
+                .any(|(_, mesh)| Arc::ptr_eq(&tile, mesh))
+        );
+        frame_transform(&ctx, &mut canvas, Surface::Canvas, vec![], view(9_990.));
+        assert!(canvas.cache.contains_key(&away_id));
+    }
+
+    #[test]
+    fn completed_highlighter_mesh_survives_pan_beyond_overscan_and_back() {
+        let ctx = egui::Context::default();
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        let mut canvas = Canvas::new(&data);
+        let mut stroke = Stroke::new(data.id(), Surface::Canvas, [237, 200, 40, 89], 22.);
+        stroke.pen_type = crate::pen::PenType::Highlighter;
+        for i in 0..42 {
+            let t = f64::from(i);
+            stroke.push([22. + t * 0.72, 28. + (t * 0.12).sin() * 4.]);
+        }
+        let id = stroke.id;
+        assert!(canvas.drawing.add(stroke));
+        let view = |x| Transform {
+            origin: [0.; 2],
+            center: [x, 0.],
+            scale: 8.,
+        };
+        frame_transform(&ctx, &mut canvas, Surface::Canvas, vec![], view(0.));
+        let base = canvas.cache[&id].meshes[0].clone();
+        assert!(canvas.cache[&id].tiled.is_none());
+        assert!(base.vertices.iter().any(|v| v.color.a() == 89));
+        for x in [-20., 50_000., 0.] {
+            frame_transform(&ctx, &mut canvas, Surface::Canvas, vec![], view(x));
+            assert!(Arc::ptr_eq(&base, &canvas.cache[&id].meshes[0]));
+        }
+        frame_transform(
+            &ctx,
+            &mut canvas,
+            Surface::Canvas,
+            vec![],
+            Transform {
+                scale: 4.,
+                ..view(0.)
+            },
+        );
+        assert!(!Arc::ptr_eq(&base, &canvas.cache[&id].meshes[0]));
+    }
+
+    #[test]
+    #[ignore = "release Whiteboard pan benchmark"]
+    fn whiteboard_pan_benchmark() {
+        use std::time::Instant;
+        let ctx = egui::Context::default();
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        for count in [100, 1_000, 5_000, 10_000] {
+            let mut canvas = Canvas::new(&data);
+            let mut objects = Vec::with_capacity(count);
+            for i in 0..count {
+                let x = (i % 100) as f64 * 120.;
+                let y = (i / 100) as f64 * 100. + 50.;
+                if i % 3 == 0 {
+                    objects.push(
+                        crate::shape::Shape::create(
+                            data.id(),
+                            Surface::Canvas,
+                            crate::shape::ShapeKind::Ellipse,
+                            [x, y],
+                            [x + 50., y + 25.],
+                            false,
+                        )
+                        .unwrap()
+                        .into(),
+                    );
+                } else {
+                    let mut stroke = Stroke::new(
+                        data.id(),
+                        Surface::Canvas,
+                        if i % 3 == 1 {
+                            [32, 45, 70, 255]
+                        } else {
+                            [230, 190, 20, 90]
+                        },
+                        8.,
+                    );
+                    for j in 0..50 {
+                        stroke.push([x + f64::from(j), y + (f64::from(j) * 0.12).sin() * 8.]);
+                    }
+                    objects.push(stroke.into());
+                }
+            }
+            assert!(canvas.drawing.insert_snapshots(objects));
+            for scale in [1., 2., 4., 8.] {
+                let mut times = Vec::new();
+                let mut prep = 0.;
+                let mut vertices = 0;
+                let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(1200., 720.));
+                for frame in 0..40 {
+                    let start = Instant::now();
+                    let mut out = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(rect),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            canvas.paint(
+                                ui,
+                                rect,
+                                Surface::Canvas,
+                                Transform {
+                                    origin: [0.; 2],
+                                    center: [f64::from(frame) * 3., 0.],
+                                    scale,
+                                },
+                            );
+                        },
+                    );
+                    let render_start = Instant::now();
+                    let primitives =
+                        ctx.tessellate(std::mem::take(&mut out.shapes), out.pixels_per_point);
+                    out.textures_delta.clear();
+                    vertices = primitives
+                        .iter()
+                        .map(|p| match &p.primitive {
+                            egui::epaint::Primitive::Mesh(m) => m.vertices.len(),
+                            _ => 0,
+                        })
+                        .sum::<usize>();
+                    if frame >= 4 {
+                        prep += (render_start - start).as_secs_f64() * 1000.;
+                        times.push(start.elapsed().as_secs_f64() * 1000.);
+                    }
+                }
+                times.sort_by(f64::total_cmp);
+                eprintln!(
+                    "{count:5} at {scale}x mean/p95/max {:.3}/{:.3}/{:.3} ms, prepare {:.3} ms, final vertices {vertices}",
+                    times.iter().sum::<f64>() / times.len() as f64,
+                    times[34],
+                    times[35],
+                    prep / times.len() as f64
+                );
+            }
+        }
+    }
+
     /// Deterministic CPU frame workload. Run with --ignored --nocapture.
     #[test]
     #[ignore]
@@ -2250,6 +2565,22 @@ mod tests {
             completed
                 .zip(meshes)
                 .all(|((_, mesh), old)| Arc::ptr_eq(mesh, &old))
+        );
+        let tile_base = canvas.cache[&id].tiled.as_ref().unwrap().0;
+        frame_transform(
+            &ctx,
+            &mut canvas,
+            Surface::Canvas,
+            vec![],
+            Transform {
+                origin: [0.; 2],
+                center: [-160., 0.],
+                scale: 1.,
+            },
+        );
+        assert_eq!(
+            canvas.cache[&id].tiled.as_ref().unwrap().0.transform,
+            tile_base.transform
         );
         canvas.undo();
         assert!(canvas.drawing.strokes().is_empty() && !canvas.cache.contains_key(&id));
@@ -3174,3 +3505,7 @@ mod tests {
         assert_eq!(canvas.drawing.strokes().len(), 1);
     }
 }
+
+#[cfg(test)]
+#[path = "highlighter_benchmark.rs"]
+mod highlighter_benchmark;

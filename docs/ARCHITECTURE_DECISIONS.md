@@ -884,3 +884,20 @@ owns mutable drafts and history. Deferred viewports would require shared state
 and a separate command path. Immediate dialogs can repaint their parent when
 input changes. Modality is enforced in the application. Desktop placement and
 focus requests are subject to compositor policy.
+
+## Whiteboard paint uses the existing bounds hierarchy (#72)
+
+Reuse the document-space object index already used for interaction. A revision
+updates bounds and a viewport query collects paint candidates in document
+stacking order. Keep the conservative traversal for provisional transforms.
+Translate cached screen-space mesh submissions at fixed scale and DPI. This
+removes repeated tessellation without a second rendering backend. Translucent
+coverage uses a small viewport margin and rebases when a pan leaves it.
+
+### Keep marker coverage independent of camera overscan
+
+Reuse tiles while they cover the visible part of the stroke. Compact completed
+markers arriving without live tiles can retain one complete union mesh.
+This avoids moving a tile grid across a small fixed stroke and avoids copying
+vertices discarded during tile clipping. Keep independent ordered alpha layers
+and the tiled fallback for long or in-progress geometry.

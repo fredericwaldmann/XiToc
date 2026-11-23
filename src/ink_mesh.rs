@@ -31,6 +31,36 @@ pub(super) fn mesh(
     coverage_mesh(&union(&contours), dpi)
 }
 
+/// The tile path and the complete path use the same flat nib sections.
+/// A compact completed stroke can union these once without tile clipping.
+pub(super) fn completed_highlighter_mesh(
+    (path, pressures): StrokePiece<'_>,
+    transform: Transform,
+    stroke: &Stroke,
+    dpi: f32,
+) -> Mesh {
+    if path.len() < 2 {
+        return mesh(&[(path, pressures)], transform, stroke, dpi);
+    }
+    let mut contours = Vec::new();
+    let end = path.len() - 1;
+    for start in (0..end).step_by(tiles::STABLE_BATCH) {
+        flat_range(
+            path,
+            pressures,
+            transform,
+            stroke,
+            0.12 / dpi,
+            start..(start + tiles::STABLE_BATCH).min(end),
+            &mut contours,
+        );
+    }
+    if contours.is_empty() {
+        return mesh(&[(path, pressures)], transform, stroke, dpi);
+    }
+    coverage_mesh(&union(&contours), dpi)
+}
+
 fn round_contours(
     path: &[[f64; 2]],
     pressures: &[Option<f32>],
@@ -253,11 +283,23 @@ fn vertex(mesh: &mut Mesh, pos: Pos2, color: Color32) {
 
 /// Tessellate the tangent strip of the pressure disks, plus just the exposed
 /// arcs at joins and caps. The fringe is confined to the exterior boundaries.
+fn feather(radius: f32, pixel: f32) -> (f32, f32, Color32) {
+    let half = pixel * 0.5;
+    let alpha = (255. * (radius / half).clamp(0., 1.)).round() as u8;
+    (
+        (radius - half).max(0.),
+        radius.max(half) + half,
+        Color32::from_white_alpha(alpha),
+    )
+}
+
 pub(super) fn opaque_round_mesh(
     (path, pressures): StrokePiece<'_>,
     transform: Transform,
     stroke: &Stroke,
     dpi: f32,
+    incoming: Option<([f64; 2], Option<f32>)>,
+    continues: bool,
 ) -> Mesh {
     use std::f32::consts::{PI, TAU};
     let aa = 1.0 / dpi;
@@ -271,13 +313,35 @@ pub(super) fn opaque_round_mesh(
             )
         })
         .collect();
-    let kept = super::simplify_swept_disks(&samples, 0.12 * aa);
+    // Keep seam-adjacent tangents independent of each chunk's simplification.
+    let kept = if samples.len() >= 4 {
+        let mut kept = vec![0];
+        kept.extend(
+            super::simplify_swept_disks(&samples[1..samples.len() - 1], 0.12 * aa)
+                .into_iter()
+                .map(|i| i + 1),
+        );
+        kept.push(samples.len() - 1);
+        kept
+    } else {
+        (0..samples.len()).collect()
+    };
     let mut points = kept.into_iter().map(|i| samples[i]);
     let mut mesh = Mesh::default();
     let Some((mut a, mut ra)) = points.next() else {
         return mesh;
     };
-    let mut last: Option<(Vec2, f32, Vec2)> = None;
+    let mut last = incoming.and_then(|(point, force)| {
+        let delta = a - screen_point(transform, point);
+        let length = delta.length();
+        let slope = (nib_radius(stroke, transform, force) - ra) / length;
+        if length == 0. || slope.abs() >= 1. {
+            return None;
+        }
+        let dir = delta / length;
+        let right = dir * slope - egui::vec2(-dir.y, dir.x) * (1. - slope * slope).sqrt();
+        Some((dir, slope.asin(), right))
+    });
     for (b, rb) in points {
         let delta = b - a;
         let length = delta.length();
@@ -297,7 +361,10 @@ pub(super) fn opaque_round_mesh(
             continue;
         }
         let dir = delta / length;
-        let normal = dir.rot90() * (1.0 - slope * slope).sqrt();
+        // The arcs below rotate by increasing atan2 angle. Egui's rot90
+        // rotates the other way, which puts caps and outside joins inside
+        // the strip and leaves an unfilled wedge on the visible boundary.
+        let normal = egui::vec2(-dir.y, dir.x) * (1.0 - slope * slope).sqrt();
         let left = dir * slope + normal;
         let right = dir * slope - normal;
         let tilt = slope.asin();
@@ -324,25 +391,25 @@ pub(super) fn opaque_round_mesh(
             (b + overlap, rb, right),
             (b + overlap, rb, left),
         ] {
-            vertex(&mut mesh, point + offset * radius, Color32::WHITE);
-            vertex(
-                &mut mesh,
-                point + offset * (radius + aa),
-                Color32::TRANSPARENT,
-            );
+            let (inner, outer, coverage) = feather(radius, aa);
+            vertex(&mut mesh, point + offset * inner, coverage);
+            vertex(&mut mesh, point + offset * outer, Color32::TRANSPARENT);
         }
-        for index in [
-            0, 2, 4, 2, 6, 4, // core
-            0, 4, 1, 1, 4, 5, // right fringe
-            2, 3, 6, 3, 7, 6, // left fringe
-        ] {
-            mesh.indices.push(base + index);
+        if ra > aa * 0.5 {
+            mesh.indices.extend([0, 4, 2].map(|i| base + i));
         }
+        if rb > aa * 0.5 {
+            mesh.indices.extend([2, 4, 6].map(|i| base + i));
+        }
+        mesh.indices
+            .extend([0, 1, 4, 1, 5, 4, 2, 6, 3, 3, 6, 7].map(|i| base + i));
         last = Some((dir, tilt, right));
         (a, ra) = (b, rb);
     }
     if let Some((_, tilt, right)) = last {
-        arc(&mut mesh, a, right, PI - 2.0 * tilt, ra, aa);
+        if !continues {
+            arc(&mut mesh, a, right, PI - 2.0 * tilt, ra, aa);
+        }
     } else if mesh.is_empty() {
         arc(&mut mesh, a, Vec2::X, TAU, ra, aa);
     }
@@ -354,7 +421,8 @@ fn arc(mesh: &mut Mesh, center: Pos2, start: Vec2, sweep: f32, radius: f32, aa: 
     let step = (1.0 - 0.15 * aa / (radius + aa)).acos() * 2.0;
     let steps = (sweep.abs() / step).ceil().clamp(1.0, 128.0) as u32;
     let base = mesh.vertices.len() as u32;
-    vertex(mesh, center, Color32::WHITE);
+    let (inner, outer, coverage) = feather(radius, aa);
+    vertex(mesh, center, coverage);
     for i in 0..=steps {
         let n = if i == 0 {
             start
@@ -365,13 +433,15 @@ fn arc(mesh: &mut Mesh, center: Pos2, start: Vec2, sweep: f32, radius: f32, aa: 
                 start.y * rotation.x + start.x * rotation.y,
             )
         };
-        vertex(mesh, center + n * radius, Color32::WHITE);
-        vertex(mesh, center + n * (radius + aa), Color32::TRANSPARENT);
+        vertex(mesh, center + n * inner, coverage);
+        vertex(mesh, center + n * outer, Color32::TRANSPARENT);
         if i > 0 {
             let a = base + 2 * i - 1;
             let b = a + 2;
-            mesh.indices
-                .extend([base, a, b, a, a + 1, b, b, a + 1, b + 1]);
+            if inner > 0. {
+                mesh.indices.extend([base, a, b, a, a + 1, b]);
+            }
+            mesh.indices.extend([b, a + 1, b + 1]);
         }
     }
 }
@@ -406,6 +476,112 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "writes a local raw, smoothed and mesh geometry diagnostic"]
+    fn stroke_geometry_diagnostic() {
+        use std::fmt::Write;
+        let mut stroke = Stroke::new(uuid::Uuid::new_v4(), Surface::Canvas, [0, 0, 0, 255], 10.);
+        stroke.smoothing = Smoothing::AdaptiveV1 { strength: 80 };
+        for i in 0..76 {
+            let t = f64::from(i) / 75.;
+            stroke.push([10. + t * 130., 45. + (t * 6.).sin() * 15.]);
+        }
+        let path = stroke.path();
+        assert!(path.len() > stroke.points.len());
+        let forces = vec![None; path.len()];
+        let mut svg = String::from(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="1250" height="1000"><rect width="100%" height="100%" fill="#fff"/>"##,
+        );
+        for (row, (scale, y)) in [(1., 10.), (4., 130.), (8., 420.)].into_iter().enumerate() {
+            let view = Transform {
+                origin: [20., y],
+                center: [0.; 2],
+                scale,
+            };
+            writeln!(svg, "<text x='20' y='{}' font-size='14'>{}% · raw samples (red), smoothed centerline (blue), core mesh (gray)</text>", y + 16., scale * 100.).unwrap();
+            for start in (0..path.len() - 1).step_by(crate::canvas::MESH_SEGMENTS) {
+                let end = (start + crate::canvas::MESH_SEGMENTS + 1).min(path.len());
+                let mesh = opaque_round_mesh(
+                    (&path[start..end], &forces[start..end]),
+                    view,
+                    &stroke,
+                    1.,
+                    start.checked_sub(1).map(|i| (path[i], None)),
+                    end < path.len(),
+                );
+                for &[a, b, c] in mesh.indices.as_chunks::<3>().0 {
+                    let vertices = [a, b, c].map(|i| mesh.vertices[i as usize]);
+                    if vertices.iter().all(|v| v.color.a() == 255) {
+                        let [a, b, c] = vertices.map(|v| v.pos);
+                        writeln!(
+                            svg,
+                            "<path fill='#666' d='M {} {} L {} {} L {} {} Z'/>",
+                            a.x, a.y, b.x, b.y, c.x, c.y
+                        )
+                        .unwrap();
+                    }
+                }
+            }
+            svg.push_str("<polyline fill='none' stroke='#2b8cce' points='");
+            for point in &path {
+                let [x, y] = view.to_screen(*point);
+                write!(svg, "{x},{y} ").unwrap();
+            }
+            svg.push_str("'/>");
+            for point in stroke.points.iter() {
+                let [x, y] = view.to_screen(point.position);
+                writeln!(
+                    svg,
+                    "<circle cx='{x}' cy='{y}' r='{}' fill='#c42137'/>",
+                    1.25 + row as f32 * 0.3
+                )
+                .unwrap();
+            }
+        }
+        svg.push_str("</svg>");
+        std::fs::write("/tmp/xitoc-stroke-geometry.svg", svg).unwrap();
+    }
+
+    #[test]
+    fn straight_chunk_boundary_does_not_emit_an_internal_cap() {
+        let stroke = Stroke::new(uuid::Uuid::new_v4(), Surface::Canvas, [0, 0, 0, 255], 60.);
+        for scale in [1., 4., 8., 16.] {
+            let view = Transform {
+                origin: [0.; 2],
+                center: [0.; 2],
+                scale,
+            };
+            let a = [0., 0.];
+            let b = [12., 0.];
+            let c = [24., 0.];
+            let first = opaque_round_mesh((&[a, b], &[None; 2]), view, &stroke, 2., None, true);
+            let second = opaque_round_mesh(
+                (&[b, c], &[None; 2]),
+                view,
+                &stroke,
+                2.,
+                Some((a, None)),
+                false,
+            );
+            let full = opaque_round_mesh((&[a, b, c], &[None; 3]), view, &stroke, 2., None, false);
+            assert_eq!(
+                first.indices.len() + second.indices.len(),
+                full.indices.len()
+            );
+            assert_eq!(
+                first.calc_bounds().union(second.calc_bounds()),
+                full.calc_bounds()
+            );
+            assert!(
+                first
+                    .vertices
+                    .iter()
+                    .chain(&second.vertices)
+                    .all(|v| v.pos.is_finite())
+            );
+        }
+    }
+
+    #[test]
     fn crossings_have_one_coverage_hit_per_stroke_at_each_zoom() {
         let mut stroke = Stroke::new(
             uuid::Uuid::new_v4(),
@@ -432,6 +608,22 @@ mod tests {
                 let point = egui::pos2(x as f32, y as f32);
                 assert_eq!(interior_hits(&first, point), 1, "{pen:?} at {scale}");
                 assert_eq!(interior_hits(&second, point), 1, "{pen:?} at {scale}");
+                if pen == crate::pen::PenType::Highlighter {
+                    let compact =
+                        completed_highlighter_mesh((&path, &force), transform, &stroke, 1.);
+                    let independent =
+                        completed_highlighter_mesh((&other, &[None; 2]), transform, &stroke, 1.);
+                    assert_eq!(
+                        interior_hits(&compact, point),
+                        1,
+                        "compact crossing at {scale}"
+                    );
+                    assert_eq!(
+                        interior_hits(&independent, point),
+                        1,
+                        "independent stroke at {scale}"
+                    );
+                }
                 assert!(
                     first
                         .vertices
