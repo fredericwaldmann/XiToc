@@ -243,9 +243,12 @@ impl Tiles {
             .map(|(&cell, tile)| (self.rect(cell), &tile.mesh))
     }
 
-    pub(in crate::canvas) fn paint(&self, painter: &Painter) {
-        for tile in self.tiles.values() {
-            painter.add(egui::Shape::Mesh(tile.mesh.clone()));
+    pub(in crate::canvas) fn paint(&self, painter: &Painter, shift: egui::Vec2) {
+        let visible = painter.clip_rect().translate(-shift);
+        for (&cell, tile) in &self.tiles {
+            if visible.intersects(self.rect(cell)) {
+                super::super::submit_translated(painter, &tile.mesh, shift);
+            }
         }
     }
 }

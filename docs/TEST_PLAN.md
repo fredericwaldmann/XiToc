@@ -2067,3 +2067,59 @@ Formatting, strict Clippy, 382 passing tests with 15 ignored, native release,
 WASM check and Trunk release passed locally. An isolated native launch stayed
 running for eight seconds. The formula pixel comparison was inspected.
 A full native visual comparison of writing and plots remains outstanding.
+
+## Continuous ink and Whiteboard navigation (#72)
+
+Run `cargo test --release stroke_geometry_diagnostic -- --ignored` to write
+`/tmp/xitoc-stroke-geometry.svg`. The diagram shows the raw samples, derived
+quadratic centerline and emitted opaque core triangles at 100%, 400% and 800%.
+It is a geometry diagnostic rather than a GPU screenshot. Check deliberate
+corners, short samples, pressure changes, self-crossing highlighter coverage,
+and the transition from live rendering to committed ink.
+
+Run `cargo test --release whiteboard_pan_benchmark -- --ignored --nocapture`.
+The fixture uses an identical 1,200×720 viewport and camera path for each
+revision with 100, 1,000, 5,000 and 10,000 strokes and shapes. Four warmup
+frames are excluded. Mean, p95, maximum, paint preparation and final mesh
+vertex count measure CPU work. They do not measure monitor frame rate or
+GPU time. Locked geometry tests cover chunk caps and cache reuse at 800%.
+
+### Local release comparison
+
+Baseline `3a1e2c4` and the candidate used the same 36 measured camera steps
+after warmup. The fixture contains opaque and translucent ink plus ellipses.
+The results below exclude GPU presentation and input latency.
+
+| Objects | Zoom | Before mean / p95 / max (ms) | After mean / p95 / max (ms) | Prepare before → after (ms) |
+| ---: | ---: | ---: | ---: | ---: |
+| 100 | 100% | 4.730 / 5.468 / 6.694 | 0.364 / 0.662 / 1.604 | 4.597 → 0.106 |
+| 100 | 200% | 3.810 / 4.464 / 4.960 | 0.171 / 0.057 / 4.894 | 3.663 → 0.153 |
+| 100 | 400% | 4.177 / 5.212 / 5.477 | 0.373 / 4.105 / 4.225 | 4.159 → 0.359 |
+| 100 | 800% | 0.693 / 3.951 / 4.313 | 0.190 / 2.280 / 3.807 | 0.687 → 0.183 |
+| 1,000 | 100% | 39.316 / 43.843 / 48.136 | 1.062 / 3.927 / 7.664 | 37.400 → 0.463 |
+| 1,000 | 200% | 14.378 / 16.142 / 16.156 | 0.638 / 2.116 / 14.759 | 14.136 → 0.540 |
+| 1,000 | 400% | 8.340 / 9.405 / 9.874 | 0.719 / 8.112 / 8.487 | 8.296 → 0.693 |
+| 1,000 | 800% | 0.726 / 3.656 / 3.866 | 0.192 / 1.890 / 4.569 | 0.720 → 0.187 |
+| 5,000 | 100% | 41.993 / 54.647 / 57.642 | 1.053 / 3.560 / 7.425 | 40.179 → 0.498 |
+| 5,000 | 200% | 21.400 / 27.739 / 41.472 | 0.636 / 3.125 / 13.460 | 21.137 → 0.536 |
+| 5,000 | 400% | 9.821 / 11.465 / 11.889 | 0.699 / 7.935 / 8.169 | 9.769 → 0.673 |
+| 5,000 | 800% | 1.790 / 5.228 / 5.628 | 0.191 / 2.345 / 4.080 | 1.775 → 0.186 |
+| 10,000 | 100% | 46.691 / 58.788 / 59.731 | 1.069 / 3.094 / 7.524 | 45.165 → 0.495 |
+| 10,000 | 200% | 17.680 / 20.178 / 21.960 | 0.588 / 2.222 / 13.520 | 17.460 → 0.495 |
+| 10,000 | 400% | 12.659 / 14.350 / 14.551 | 0.807 / 9.244 / 9.551 | 12.601 → 0.775 |
+| 10,000 | 800% | 2.677 / 6.059 / 6.751 | 0.232 / 2.408 / 5.280 | 2.661 → 0.224 |
+
+With 10,000 objects the final frame contained 47,548 → 50,087 vertices at
+100%, and 1,714 → 1,797 at 800%. The reduction came from less paint
+preparation and more reuse despite the slight increase in those frame payloads.
+Occasional peaks remain when translucent overscan must be rebuilt.
+
+The 1,440-frame width-60 drawing fixture changed from 0.253 / 0.650 / 1.120 ms
+to 0.056 / 0.098 / 0.317 ms. Peak visible mesh payload fell from 515,104 to
+400,932 bytes. The long highlighter changed from 0.915 / 1.702 / 4.216 ms to
+0.903 / 1.660 / 4.644 ms. These are single paired CPU runs.
+
+Formatting, strict Clippy, 387 passing tests with 17 ignored, native release,
+WASM compilation and Trunk release passed. Native startup ran for eight
+seconds with disposable preferences. The mesh diagnostic was inspected.
+Interactive pen and drag acceptance on the desktop and browser remains open.

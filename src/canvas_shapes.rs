@@ -41,9 +41,12 @@ pub(super) fn paint_shape(
         return;
     }
     let ppp = ui.ctx().pixels_per_point();
-    let rebuild = cache
-        .get(&shape.id)
-        .is_none_or(|c| c.source != *shape || c.view != view || c.delta != delta || c.ppp != ppp);
+    let rebuild = cache.get(&shape.id).is_none_or(|c| {
+        c.source != *shape
+            || view_translation(c.view, view).is_none()
+            || c.delta != delta
+            || c.ppp != ppp
+    });
     if rebuild {
         let paths = shape.contours(0.01); // Stable arclength table across view zoom/DPI.
         let mut shapes = Vec::new();
@@ -111,8 +114,10 @@ pub(super) fn paint_shape(
             },
         );
     }
-    for mesh in &cache[&shape.id].meshes {
-        painter.add(egui::Shape::Mesh(mesh.clone()));
+    let cached = &cache[&shape.id];
+    let shift = view_translation(cached.view, view).unwrap_or_default();
+    for mesh in &cached.meshes {
+        submit_translated(painter, mesh, shift);
     }
 }
 impl Canvas {

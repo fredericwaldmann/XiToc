@@ -51,7 +51,11 @@ fn flips_single_groups_rotated_scaled_pressure_and_exact_history_independent_of_
                         let center = bounds.center();
                         let original = c.drawing.strokes().to_vec();
                         let revision = c.drawing.revision();
-                        let untouched_cache = c.cache[&untouched].meshes.first().cloned();
+                        let untouched_cache = c
+                            .cache
+                            .get(&untouched)
+                            .and_then(|entry| entry.meshes.first())
+                            .cloned();
                         c.selection_action(command, &ctx);
                         assert_eq!(c.drawing.revision(), revision + 1);
                         assert_eq!(c.selection.ids, ids);

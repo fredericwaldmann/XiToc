@@ -380,3 +380,10 @@ are structured for the M2 single-PDF round trip.
 Use bounded geometric approximation for ink and plots and physical-density
 coverage for math outlines while keeping the underlying objects editable.
 Track visual comparisons and repeated frame timings in [TEST_PLAN.md](TEST_PLAN.md).
+
+## Continuous ink and Whiteboard navigation (#72)
+
+Preserve editable samples and use connected opaque stroke joins across cached
+chunks. Query visible Whiteboard objects in document coordinates and reuse
+tessellation across camera translations. See the release pan benchmark in
+[TEST_PLAN.md](TEST_PLAN.md).

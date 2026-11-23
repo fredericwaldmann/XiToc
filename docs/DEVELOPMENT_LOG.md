@@ -905,3 +905,11 @@ plot sampling by physical footprint. Added tests for high zoom ink continuity
 and translucent coverage, 1× through 2× formula raster density, and sine and
 quadratic plot approximation. Formula semantics and editable drawing samples
 remain in the existing models.
+
+## Continuous ink and Whiteboard navigation (#72)
+
+Connected opaque stroke chunks using retained tangents and a single join at
+each seam. Moved Whiteboard culling ahead of per-object rendering, reused
+same-scale ink and shape tessellation during pans, and retained translucent
+tiles over a small viewport margin. Added a mesh diagnostic and fixed-zoom
+release pan benchmark.
