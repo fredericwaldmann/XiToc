@@ -2201,3 +2201,14 @@ for eight seconds. Geometry tests cover clipping compaction, one coverage
 hit per independent stroke at crossings, compact cache reuse across
 pans and zoom invalidation, and retention of the live tiles at release.
 An interactive desktop or browser visual acceptance pass remains outstanding.
+
+### Desktop chrome (#74)
+
+On Linux, check restored corner transparency, all resize edges, empty-header
+dragging, maximize/fullscreen, and compositor tiling on both available backends.
+With more tabs than fit, drag a visible tab, activate a hidden tab through
+overflow, and close a reordered dirty tab through the discard workflow. At
+minimum window width, check Tools overflow plus the persistent left history
+group and right Eraser, Zoom and Menu. On web, check the same tab and toolbar
+interactions with embedded dialogs. Check that the Coordinate System background
+swatch still exposes the existing picker and hex editor.

@@ -84,9 +84,15 @@ impl eframe::App for XiTocApp {
         crate::image_import::browser::inject(ctx, raw);
     }
 
+    #[cfg(target_os = "linux")]
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.; 4]
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         #[cfg(target_os = "linux")]
         {
+            self.preferences.theme.apply(ui.ctx());
             ui::chrome::resize_edges(ui);
             let inset = ui.input(|i| {
                 !i.viewport().maximized.unwrap_or(false)
@@ -95,7 +101,8 @@ impl eframe::App for XiTocApp {
             if inset {
                 egui::Frame::new()
                     .inner_margin(5)
-                    .fill(style::palette(ui).border)
+                    .fill(style::palette(ui).shell)
+                    .corner_radius(8)
                     .show(ui, |ui| self.show(ui));
             } else {
                 self.show(ui);
@@ -114,6 +121,11 @@ impl eframe::App for XiTocApp {
     fn persist_egui_memory(&self) -> bool {
         false
     }
+}
+
+fn toolbar_center(available: egui::Rect) -> egui::Rect {
+    let width = (available.width() - 296.).clamp(0., 700.);
+    egui::Rect::from_center_size(available.center(), egui::vec2(width, available.height()))
 }
 
 impl XiTocApp {
@@ -411,15 +423,8 @@ impl XiTocApp {
                             response.on_hover_text("New Document");
                         });
                         let available = ui.available_width();
-                        let tab_width = if cfg!(target_os = "linux") {
-                            documents
-                                .clone()
-                                .map(|tab| tab.width() + 2.)
-                                .sum::<f32>()
-                                .min(available)
-                        } else {
-                            available
-                        };
+                        let tab_width =
+                            ui::tabs::Tabs::required_width(self.documents.len()).min(available);
                         if tab_width > 0. {
                             ui.allocate_ui(egui::vec2(tab_width, 32.), |ui| {
                                 ui.add_enabled_ui(!blocked, |ui| {
@@ -438,8 +443,37 @@ impl XiTocApp {
             match tab_action {
                 ui::tabs::TabAction::Activate(index) => self.activate(index),
                 ui::tabs::TabAction::Close(index) => self.close(index),
+                ui::tabs::TabAction::Reorder { from, insertion } => {
+                    self.reorder_tab(from, insertion)
+                }
             }
         }
+    }
+
+    fn reorder_tab(&mut self, from: usize, insertion: usize) {
+        if self.pending.is_some()
+            || from >= self.documents.len()
+            || insertion > self.documents.len()
+        {
+            return;
+        }
+        let to = insertion - usize::from(insertion > from);
+        if from == to {
+            return;
+        }
+        let tab = self.documents.remove(from);
+        self.documents.insert(to, tab);
+        self.active = self.active.map(|index| {
+            if index == from {
+                to
+            } else if from < index && index <= to {
+                index - 1
+            } else if to <= index && index < from {
+                index + 1
+            } else {
+                index
+            }
+        });
     }
 
     fn show_toolbar(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>, blocked: bool) {
@@ -457,65 +491,113 @@ impl XiTocApp {
             .exact_size(40.)
             .frame(style::frame(p.surface, 8, 6))
             .show(ui, |ui| {
+                let available = ui.available_rect_before_wrap();
+                let center = toolbar_center(available);
                 ui.add_enabled_ui(!blocked, |ui| {
-                    ui.horizontal(|ui| {
-                        if ui::icons::button(
-                            ui,
-                            ui::icons::Icon::Sidebar,
-                            "Show or hide Explorer",
-                            self.preferences.explorer_visible,
-                        )
-                        .clicked()
-                        {
-                            self.preferences.explorer_visible = !self.preferences.explorer_visible;
-                        }
-                        let document = self.active.map(|index| {
-                            let opened = &mut self.documents[index];
-                            (&opened.loaded.document, &mut opened.editor)
-                        });
-                        let mut document = document;
-                        if let Some((doc, editor)) =
-                            document.as_mut().filter(|(doc, _)| !doc.external)
-                        {
-                            let _ = doc;
-                            ui::toolbar::history(ui, &mut editor.canvas);
-                        } else {
-                            ui.add_enabled_ui(false, |ui| {
-                                ui::icons::button(ui, ui::icons::Icon::Undo, "Undo", false);
-                                ui::icons::button(ui, ui::icons::Icon::Redo, "Redo", false);
-                            });
-                        }
-                        ui.separator();
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui::chrome::menu(
-                                ui,
-                                &mut self.preferences,
-                                action,
-                                selection,
-                                can_create,
-                                &self.selected_folder,
-                            );
-                            ui.with_layout(
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    egui::ScrollArea::horizontal()
-                                        .id_salt("desktop-tools")
-                                        .scroll_source(egui::scroll_area::ScrollSource {
-                                            drag: egui::scroll_area::DragScroll::Never,
-                                            ..Default::default()
-                                        })
-                                        .show(ui, |ui| {
-                                            ui::toolbar::show(
-                                                ui,
-                                                document,
-                                                action,
-                                                &mut self.preferences.drawing,
-                                            )
-                                        });
-                                },
-                            );
-                        });
+                    let mut left = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(egui::Rect::from_min_max(
+                                available.min,
+                                egui::pos2(available.left() + 114., available.bottom()),
+                            ))
+                            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    );
+                    if ui::icons::button(
+                        &mut left,
+                        ui::icons::Icon::Sidebar,
+                        "Show or hide Explorer",
+                        self.preferences.explorer_visible,
+                    )
+                    .clicked()
+                    {
+                        self.preferences.explorer_visible = !self.preferences.explorer_visible;
+                    }
+                    let mut document = self.active.map(|index| {
+                        let opened = &mut self.documents[index];
+                        (&opened.loaded.document, &mut opened.editor)
                     });
+                    if let Some((_, editor)) = document.as_mut().filter(|(doc, _)| !doc.external) {
+                        ui::toolbar::history(&mut left, &mut editor.canvas);
+                    } else {
+                        left.add_enabled_ui(false, |ui| {
+                            ui::icons::button(ui, ui::icons::Icon::Undo, "Undo", false);
+                            ui::icons::button(ui, ui::icons::Icon::Redo, "Redo", false);
+                        });
+                    }
+                    let inline = center.width() >= 670.;
+                    let width_id = ui.scope_id().with("tool-content-width");
+                    let used = ui
+                        .data(|data| data.get_temp::<f32>(width_id))
+                        .unwrap_or(center.width());
+                    let middle_rect = if inline {
+                        center.translate(egui::vec2((center.width() - used).max(0.) * 0.5, 0.))
+                    } else {
+                        egui::Rect::from_center_size(
+                            center.center(),
+                            egui::vec2(72., center.height()),
+                        )
+                    };
+                    let mut middle = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(middle_rect)
+                            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    );
+                    middle.set_clip_rect(middle.clip_rect().intersect(center));
+                    if inline {
+                        let measured = ui::toolbar::show(
+                            &mut middle,
+                            document.as_mut().map(|(doc, editor)| (*doc, &mut **editor)),
+                            action,
+                            &mut self.preferences.drawing,
+                        );
+                        if (measured - used).abs() > 0.5 {
+                            ui.data_mut(|data| data.insert_temp(width_id, measured));
+                            ui.ctx().request_repaint();
+                        }
+                    } else {
+                        middle.centered_and_justified(|ui| {
+                            ui.menu_button("Tools", |ui| {
+                                ui.set_max_width(350.);
+                                ui::toolbar::show(
+                                    ui,
+                                    document.as_mut().map(|(doc, editor)| (*doc, &mut **editor)),
+                                    action,
+                                    &mut self.preferences.drawing,
+                                );
+                            });
+                        });
+                    }
+                    let mut right = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(egui::Rect::from_min_max(
+                                egui::pos2(available.right() - 140., available.top()),
+                                available.max,
+                            ))
+                            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                    );
+                    ui::chrome::menu(
+                        &mut right,
+                        &mut self.preferences,
+                        action,
+                        selection,
+                        can_create,
+                        &self.selected_folder,
+                    );
+                    if let Some((doc, editor)) = document.filter(|(doc, _)| !doc.external) {
+                        ui::toolbar::zoom(&mut right, doc, editor);
+                        ui::toolbar::eraser(&mut right, editor, &mut self.preferences.drawing);
+                        if !inline {
+                            ui::toolbar::sync_drawing_preferences(
+                                &mut editor.canvas,
+                                &self.preferences.drawing,
+                            );
+                        }
+                    } else {
+                        right.add_enabled_ui(false, |ui| {
+                            let _ = ui.button("100%");
+                            ui::icons::button(ui, ui::icons::Icon::Eraser, "Eraser", false);
+                        });
+                    }
                 });
             });
     }
@@ -991,6 +1073,46 @@ mod tests {
             1,
             "Edit-menu paste into a new document must complete"
         );
+    }
+
+    #[test]
+    fn reordering_duplicate_titles_preserves_active_editor_and_close_target() {
+        let mut app = XiTocApp::default();
+        for path in ["a/Notes.pdf", "b/Notes.pdf", "Other.pdf"] {
+            let data = DocumentData::blank(DocumentKind::Whiteboard);
+            app.open(Loaded {
+                bytes: crate::pdf::encode(&data).unwrap().into(),
+                document: Document {
+                    data,
+                    location: Location::new(path.into()),
+                    external: false,
+                },
+            });
+        }
+        app.activate(1);
+        let active_id = app.documents[1].loaded.document.data.id();
+        app.reorder_tab(1, 0);
+        assert_eq!(app.active, Some(0));
+        assert_eq!(app.documents[0].loaded.document.data.id(), active_id);
+        app.reorder_tab(1, 0);
+        assert_eq!(app.active, Some(1));
+        app.close(0);
+        assert_eq!(app.documents.len(), 2);
+        assert_eq!(
+            app.documents[app.active.unwrap()].loaded.document.data.id(),
+            active_id
+        );
+    }
+
+    #[test]
+    fn toolbar_center_reserves_both_edge_groups_at_small_and_large_widths() {
+        for width in [480., 800., 1100., 1600.] {
+            let row = egui::Rect::from_min_size(egui::pos2(8., 0.), egui::vec2(width, 28.));
+            let center = toolbar_center(row);
+            assert_eq!(center.center(), row.center());
+            assert!(center.left() >= row.left() + 114.);
+            assert!(center.right() <= row.right() - 140.);
+        }
     }
 
     #[test]

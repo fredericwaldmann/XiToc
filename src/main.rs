@@ -58,6 +58,7 @@ fn main() -> eframe::Result {
                 .with_inner_size([1100.0, 760.0])
                 .with_min_inner_size([480.0, 360.0])
                 .with_decorations(!cfg!(target_os = "linux"))
+                .with_transparent(cfg!(target_os = "linux"))
                 .with_resizable(true)
                 .with_icon(native_icon()),
             ..Default::default()

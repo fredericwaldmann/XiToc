@@ -920,3 +920,11 @@ Profiled dense and offscreen markers separately on the continuous ink branch.
 Kept reusable tiles when their coverage still contains the relevant stroke region,
 used a single mesh for compact completed markers without live tiles, and
 discarded unused vertices after tile clipping.
+
+### Desktop chrome refinement (#74)
+
+Removed the contrasting resize frame from the Linux root viewport and added
+compositor-backed rounded corners in the restored state. Compact tabs now
+support drag-to-reorder within the session, with truncated titles and an overflow
+menu. The toolbar uses independent left, center and right regions, and the
+native and embedded configuration hosts share control styling.

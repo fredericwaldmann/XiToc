@@ -392,3 +392,6 @@ For highlighter-heavy Whiteboards, reuse completed marker coverage across
 camera translation and limit tile rebuilding to newly exposed stroke regions.
 The [highlighter profile](TEST_PLAN.md) distinguishes dense overlap from
 viewports with no visible ink.
+
+- Desktop window refinement (#74) covers Linux client-side frame styling,
+  tab reordering and overflow, three-zone toolbar layout, and shared dialog styling.

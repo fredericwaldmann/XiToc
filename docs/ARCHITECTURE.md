@@ -1319,3 +1319,11 @@ extent on each axis. It reuses the same flat nib sections and physical
 simplification tolerance as the tiled renderer, then unions the sections once.
 Tile clipping discards unreferenced vertices before a mesh is cached. Each
 marker remains an independent premultiplied-alpha submission in object order.
+
+The Linux client-drawn root frame requests surface transparency and uses an
+opaque rounded egui shell while restored. Its inset is reserved for
+`BeginResize`. Maximized and fullscreen root viewports use square edges.
+The canvas and document layers retain their existing rendering paths. Tab
+reordering moves the open editor along with its document and remaps only the
+active index. The secondary viewport host owns shared dialog visuals while the
+original configuration components continue to own draft state and apply actions.

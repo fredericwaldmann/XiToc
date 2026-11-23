@@ -22,7 +22,7 @@ Apple's indexed guide text confirms bottom-of-window drawing tools, contextual
 nib/color options, and object/partial erasing. Its full page/images returned
 HTTP 429; detailed current macOS visual parity has not been verified.
 
-Keep the resizable real-folder Explorer, horizontally scrolling document tabs,
+Keep the resizable real-folder Explorer, compact document tabs with overflow,
 New Document (+), Settings and status bar.
 Order inside the editor: tabs → top drawing toolbar → canvas. Drawing tools
 MUST stay directly below the tabs. No bottom floating toolbar.
@@ -66,9 +66,9 @@ Fixed 40-point top panel directly below the document tabs, with 8×6 padding and
 and 1.25-point strokes. Preset buttons are 40×26. No floating palette or shadow.
 Never overlay Explorer, tabs or canvas with the drawing toolbar.
 
-Order: Explorer, Undo, Redo, drawing and insertion controls, then Main menu.
-The tools retain their internal order and scroll horizontally when needed.
-The menu stays at the right edge, outside the scrolling region.
+The left group contains Explorer, Undo and Redo. Drawing and insertion tools
+are centered in the full toolbar. At narrower widths they appear in the centered
+Tools menu. Eraser, Zoom and Main menu stay at the right edge in that order.
 One click selects a preset and Pen; its preview combines a nib icon with its actual
 color/opacity and a thickness stripe clamped to 1–8 screen points. Hover and
 accessible names expose name, type, document-point thickness and opacity.
@@ -86,13 +86,10 @@ explicitly replaces custom and edited presets with the five defaults.
 
 The preset strip scrolls horizontally with trackpad/Shift-wheel; Tab navigation
 reveals focused buttons. Selecting, reordering or resizing reveals the selected
-preset. At tool-region widths below 800, zoom moves into View. History
-stays at the left of the toolbar. At the native minimum 480×360 window,
-scroll the tool region to access controls beyond the visible strip. The toolbar
-stays on one row.
-Whiteboard-only grid stays in zoom/View. Browser export is in View on compact
-windows and inline only with at least 1000 editor points. Dirty ink export stays
-disabled. The immutable document type remains in the tab/tooltip and status.
+preset. The toolbar stays on one row, including at the native minimum 480×360.
+The Whiteboard grid switch is in Zoom. Browser export is in the tool group’s
+Options menu. Dirty ink export stays disabled. The immutable document type
+remains in the tab tooltip and status.
 
 ## Preset popover and state ownership
 
@@ -160,8 +157,11 @@ tools. Both document kinds retain existing navigation, erasing and undo behavior
 - No unmodified tool hotkeys added; do not steal future text-entry keystrokes.
 
 Tabs retain kind icon, filename, full path/type tooltip, dirty dot, close button,
-selected surface and 2-point underline; scroll horizontally instead of wrapping.
-The + action stays beside the scrollable tab region. Closing never deletes PDFs.
+and rounded selected surface. Tabs shrink from 210 to 96 points and truncate
+long titles with an ellipsis. More documents are available from the overflow menu.
+The active tab is kept visible when a slot fits. Drag a tab body to an insertion
+marker to reorder it for the current session. Drag empty header space to move
+the native window. Closing never deletes PDFs.
 Explorer virtual categories retain actual hierarchy; folder selection determines
 creation destination. Truncate long labels with full hover text. Status details
 keep full errors and the unsaved-ink caveat accessible on narrow windows.
@@ -824,3 +824,17 @@ Latin Modern Math renderer used by equations. Zero follows X-axis tick
 placement, with no second Y-axis zero label.
 Standard oriented handles resize and rotate the entire diagram. Double-click
 the rotation handle to reset canvas rotation independently of the 3D viewpoint.
+
+
+### Desktop window refinement
+
+The Linux root viewport uses transparent clearing and an 8-point rounded
+shell frame in its restored size. The shell-colored 5-point inset remains a
+resize target without a contrasting border. Maximized and fullscreen
+viewports keep square edges. Transparency depends on the desktop compositor.
+The current egui viewport API does not expose a separate tiled state.
+
+Configuration windows share 24-point control height, field and button rounding,
+and theme colors, while retaining their individual dimensions and controls.
+Desktop dialogs retain system decorations. The Coordinate System Frame section
+opens its optional background-color editor from a compact swatch.
