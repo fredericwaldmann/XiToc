@@ -387,3 +387,8 @@ Preserve editable samples and use connected opaque stroke joins across cached
 chunks. Query visible Whiteboard objects in document coordinates and reuse
 tessellation across camera translations. See the release pan benchmark in
 [TEST_PLAN.md](TEST_PLAN.md).
+
+For highlighter-heavy Whiteboards, reuse completed marker coverage across
+camera translation and limit tile rebuilding to newly exposed stroke regions.
+The [highlighter profile](TEST_PLAN.md) distinguishes dense overlap from
+viewports with no visible ink.

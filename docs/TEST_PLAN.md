@@ -2123,3 +2123,81 @@ Formatting, strict Clippy, 387 passing tests with 17 ignored, native release,
 WASM compilation and Trunk release passed. Native startup ran for eight
 seconds with disposable preferences. The mesh diagnostic was inspected.
 Interactive pen and drag acceptance on the desktop and browser remains open.
+
+### Highlighter-heavy Whiteboard profile
+
+Run `cargo test --locked --release highlighter_pan_profile -- --ignored --nocapture`.
+It pans the same 1,100×680 viewport at 100%, 200%, 400%, and 800% over six
+scenes. The scenes contain 1,000 opaque strokes, 1,000 distributed markers,
+1,000 concentrated markers, 5,000 distributed markers, 5,000 offscreen
+markers, and 1,000 mixed objects with ink, shapes, text, equations and coordinate
+systems. Strokes use a supported width of 24 and the marker opacity is 89/255.
+
+The run separates cold-frame work from 24 measured camera steps. Paint time
+includes the bounds query, preparation and mesh submission. Assembly is the
+following epaint tessellation pass. Cache counts report distinct ink objects
+painted during the sweep, not instantaneous visible counts. Tile changes
+include both newly cached strokes and changes to the tile base transform.
+Packed mesh counts estimate submission size. This profile does not time the
+GPU, measure physical input latency or account for driver allocations.
+
+For interactive review, pan away and back across several viewport margins at
+800%. Include markers that cross themselves and pairs of independent markers
+that cross. Compare the appearance after recoloring, rotating and undoing.
+
+#### Local paired release result
+
+The reference was `2a77a1b` on the open panning PR. Both binaries ran the same
+fixture sequentially after compilation. These are CPU timings from one run,
+not FPS targets.
+
+| Scene | Zoom | Before mean / p95 / max (ms) | After mean / p95 / max (ms) | Tile changes before → after |
+| --- | ---: | ---: | ---: | ---: |
+| opaque | 100% | 1.004 / 1.471 / 1.525 | 1.299 / 1.606 / 1.922 | 0 → 0 |
+| opaque | 200% | 0.133 / 0.133 / 0.494 | 0.094 / 0.119 / 0.370 | 0 → 0 |
+| opaque | 400% | 0.076 / 0.156 / 0.341 | 0.053 / 0.072 / 0.222 | 0 → 0 |
+| opaque | 800% | 0.025 / 0.036 / 0.100 | 0.023 / 0.034 / 0.099 | 0 → 0 |
+| highlighters | 100% | 1.164 / 1.008 / 10.732 | 1.365 / 1.328 / 8.740 | 10 → 0 |
+| highlighters | 200% | 1.806 / 5.409 / 28.051 | 0.249 / 0.156 / 4.288 | 30 → 0 |
+| highlighters | 400% | 1.860 / 14.583 / 15.682 | 0.167 / 0.077 / 3.040 | 27 → 0 |
+| highlighters | 800% | 0.888 / 3.736 / 4.376 | 0.064 / 0.031 / 1.252 | 12 → 0 |
+| overlap | 100% | 18.458 / 20.608 / 20.665 | 19.407 / 22.040 / 23.524 | 0 → 0 |
+| overlap | 200% | 62.321 / 17.980 / 1180.804 | 21.716 / 24.081 / 28.473 | 1000 → 0 |
+| overlap | 400% | 229.541 / 1718.070 / 1869.505 | 30.122 / 35.073 / 41.187 | 3000 → 0 |
+| overlap | 800% | 760.095 / 3146.319 / 3204.368 | 27.070 / 30.190 / 32.930 | 6000 → 0 |
+| distributed | 100% | 1.313 / 1.636 / 10.116 | 1.031 / 1.022 / 10.685 | 10 → 0 |
+| distributed | 200% | 1.433 / 4.777 / 23.379 | 0.268 / 0.224 / 4.507 | 30 → 0 |
+| distributed | 400% | 2.304 / 19.930 / 19.953 | 0.259 / 0.113 / 4.849 | 27 → 0 |
+| distributed | 800% | 1.615 / 6.666 / 6.685 | 0.102 / 0.038 / 1.978 | 12 → 0 |
+| empty | 100% | 0.008 / 0.010 / 0.010 | 0.005 / 0.005 / 0.006 | 0 → 0 |
+| empty | 200% | 0.008 / 0.008 / 0.010 | 0.005 / 0.005 / 0.012 | 0 → 0 |
+| empty | 400% | 0.008 / 0.010 / 0.010 | 0.005 / 0.007 / 0.008 | 0 → 0 |
+| empty | 800% | 0.005 / 0.006 / 0.006 | 0.008 / 0.013 / 0.013 | 0 → 0 |
+| mixed | 100% | 1.437 / 3.414 / 6.709 | 1.064 / 1.855 / 7.351 | 5 → 0 |
+| mixed | 200% | 1.349 / 3.848 / 19.736 | 0.261 / 0.170 / 3.670 | 18 → 0 |
+| mixed | 400% | 0.463 / 3.051 / 3.164 | 0.224 / 1.735 / 2.250 | 6 → 0 |
+| mixed | 800% | 0.066 / 0.044 / 1.306 | 0.139 / 0.071 / 2.726 | 0 → 0 |
+
+At 800% with 1,000 overlapping markers, mean paint preparation went from
+704.068 to 17.717 ms and mean epaint assembly from 56.027 to 9.353 ms.
+Peak vertices went from 2,125,225 to 599,000 and peak triangles from 898,059
+to 597,000. The pure ink fixture remained one epaint batch. Cold entry into
+this extreme scene still took 1.491 s after the change, down from 2.614 s.
+The 100% overlapping control had zero rebases on both revisions and warmed
+p95 rose from 20.608 to 22.040 ms. The mixed fixture had no visible ink on
+its 800% camera path, so that row only represents the visible non-ink objects.
+
+The entire six-scene process peaked at 287,656 KiB RSS before and 86,636 KiB
+after. The empty viewport never created a stroke mesh or submitted a batch
+on either revision. For the separate 1,440-frame active-marker workload,
+CPU mean / p95 / maximum were 1.164 / 2.100 / 7.792 ms before and
+1.256 / 2.464 / 6.049 ms after. Peak visible mesh payload fell from
+431,208 to 375,884 bytes. GPU time and interactive drawing latency were not
+measured.
+
+Local checks passed formatting, strict Clippy, 389 tests (18 ignored),
+native release, WASM compilation, and Trunk release. Native startup ran
+for eight seconds. Geometry tests cover clipping compaction, one coverage
+hit per independent stroke at crossings, compact cache reuse across
+pans and zoom invalidation, and retention of the live tiles at release.
+An interactive desktop or browser visual acceptance pass remains outstanding.

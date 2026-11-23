@@ -107,6 +107,11 @@ fn submit_translated(painter: &egui::Painter, mesh: &Arc<egui::Mesh>, delta: egu
     }
 }
 
+// Limit the complete coverage path to short strokes and a modest screen
+// extent. Very large paths keep the existing viewport-sized tile budget.
+const COMPLETE_MARKER_POINTS: usize = 256;
+const COMPLETE_MARKER_EXTENT: f32 = 1536.;
+
 struct Cached {
     placement: crate::object::Placement,
     path: Vec<[f64; 2]>,
@@ -199,7 +204,19 @@ impl Cached {
         };
         for index in self.meshes.len()..chunks {
             let mut mesh = if union {
-                ink_mesh::mesh(&[(&self.path, &self.pressures)], transform, stroke, dpi)
+                if !self.live
+                    && stroke.pen_type == crate::pen::PenType::Highlighter
+                    && self.path.len() <= COMPLETE_MARKER_POINTS
+                {
+                    ink_mesh::completed_highlighter_mesh(
+                        (&self.path, &self.pressures),
+                        transform,
+                        stroke,
+                        dpi,
+                    )
+                } else {
+                    ink_mesh::mesh(&[(&self.path, &self.pressures)], transform, stroke, dpi)
+                }
             } else {
                 let start = index * MESH_SEGMENTS;
                 let end = (start + MESH_SEGMENTS + 1).min(self.path.len());
@@ -221,6 +238,15 @@ impl Cached {
             self.meshes.push(Arc::new(mesh));
         }
     }
+    fn highlighter_extent(&self, transform: Transform, stroke: &Stroke, dpi: f32) -> Rect {
+        let screen = |point| {
+            let [x, y] = transform.to_screen(point);
+            egui::pos2(x as f32, y as f32)
+        };
+        Rect::from_min_max(screen(self.bounds.0), screen(self.bounds.1))
+            .expand((stroke.visible_width() * transform.scale * 0.5) as f32 + 2. / dpi)
+    }
+
     fn paint(
         &mut self,
         ui: &egui::Ui,
@@ -234,7 +260,18 @@ impl Cached {
         if !union_ink(stroke) {
             self.tiled = None;
         }
+        let completed_highlighter =
+            !self.live && stroke.pen_type == crate::pen::PenType::Highlighter;
+        let compact = completed_highlighter
+            && self.tiled.is_none()
+            && self.path.len() <= COMPLETE_MARKER_POINTS
+            && {
+                let extent = self.highlighter_extent(transform, stroke, dpi);
+                extent.width() <= COMPLETE_MARKER_EXTENT
+                    && extent.height() <= COMPLETE_MARKER_EXTENT
+            };
         if retained
+            && !compact
             && union_ink(stroke)
             && !self.path.is_empty()
             && (self.live || self.tiled.is_some() || self.path.len() >= 32)
@@ -251,18 +288,30 @@ impl Cached {
             let color = ink_color(stroke);
             let reuse = self.tiled.as_ref().and_then(|(old, tiles)| {
                 let shift = view_translation(old.transform, transform)?;
+                let requested = clip.translate(-shift);
+                let relevant = if completed_highlighter {
+                    requested.intersect(self.highlighter_extent(old.transform, stroke, dpi))
+                } else {
+                    requested
+                };
                 ((*old
                     == InkMeshKey {
                         transform: old.transform,
                         ..key
                     })
                     && (!self.live || shift == egui::Vec2::ZERO)
-                    && tiles.clip().contains_rect(clip.translate(-shift)))
+                    && (relevant.is_negative() || tiles.clip().contains_rect(relevant)))
                 .then_some(shift)
             });
             let shift = if let Some(shift) = reuse {
                 shift
             } else {
+                if completed_highlighter {
+                    self.meshes.clear();
+                    self.coverage.clear();
+                    self.mesh_bounds.clear();
+                    self.view = None;
+                }
                 self.tiled = Some((
                     key,
                     ink_mesh::Tiles::new(clip.expand(128.), dpi, color, self.live),
@@ -1966,6 +2015,45 @@ mod tests {
     }
 
     #[test]
+    fn completed_highlighter_mesh_survives_pan_beyond_overscan_and_back() {
+        let ctx = egui::Context::default();
+        let data = DocumentData::blank(DocumentKind::Whiteboard);
+        let mut canvas = Canvas::new(&data);
+        let mut stroke = Stroke::new(data.id(), Surface::Canvas, [237, 200, 40, 89], 22.);
+        stroke.pen_type = crate::pen::PenType::Highlighter;
+        for i in 0..42 {
+            let t = f64::from(i);
+            stroke.push([22. + t * 0.72, 28. + (t * 0.12).sin() * 4.]);
+        }
+        let id = stroke.id;
+        assert!(canvas.drawing.add(stroke));
+        let view = |x| Transform {
+            origin: [0.; 2],
+            center: [x, 0.],
+            scale: 8.,
+        };
+        frame_transform(&ctx, &mut canvas, Surface::Canvas, vec![], view(0.));
+        let base = canvas.cache[&id].meshes[0].clone();
+        assert!(canvas.cache[&id].tiled.is_none());
+        assert!(base.vertices.iter().any(|v| v.color.a() == 89));
+        for x in [-20., 50_000., 0.] {
+            frame_transform(&ctx, &mut canvas, Surface::Canvas, vec![], view(x));
+            assert!(Arc::ptr_eq(&base, &canvas.cache[&id].meshes[0]));
+        }
+        frame_transform(
+            &ctx,
+            &mut canvas,
+            Surface::Canvas,
+            vec![],
+            Transform {
+                scale: 4.,
+                ..view(0.)
+            },
+        );
+        assert!(!Arc::ptr_eq(&base, &canvas.cache[&id].meshes[0]));
+    }
+
+    #[test]
     #[ignore = "release Whiteboard pan benchmark"]
     fn whiteboard_pan_benchmark() {
         use std::time::Instant;
@@ -2477,6 +2565,22 @@ mod tests {
             completed
                 .zip(meshes)
                 .all(|((_, mesh), old)| Arc::ptr_eq(mesh, &old))
+        );
+        let tile_base = canvas.cache[&id].tiled.as_ref().unwrap().0;
+        frame_transform(
+            &ctx,
+            &mut canvas,
+            Surface::Canvas,
+            vec![],
+            Transform {
+                origin: [0.; 2],
+                center: [-160., 0.],
+                scale: 1.,
+            },
+        );
+        assert_eq!(
+            canvas.cache[&id].tiled.as_ref().unwrap().0.transform,
+            tile_base.transform
         );
         canvas.undo();
         assert!(canvas.drawing.strokes().is_empty() && !canvas.cache.contains_key(&id));
@@ -3401,3 +3505,7 @@ mod tests {
         assert_eq!(canvas.drawing.strokes().len(), 1);
     }
 }
+
+#[cfg(test)]
+#[path = "highlighter_benchmark.rs"]
+mod highlighter_benchmark;

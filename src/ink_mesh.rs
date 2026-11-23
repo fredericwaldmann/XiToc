@@ -31,6 +31,36 @@ pub(super) fn mesh(
     coverage_mesh(&union(&contours), dpi)
 }
 
+/// The tile path and the complete path use the same flat nib sections.
+/// A compact completed stroke can union these once without tile clipping.
+pub(super) fn completed_highlighter_mesh(
+    (path, pressures): StrokePiece<'_>,
+    transform: Transform,
+    stroke: &Stroke,
+    dpi: f32,
+) -> Mesh {
+    if path.len() < 2 {
+        return mesh(&[(path, pressures)], transform, stroke, dpi);
+    }
+    let mut contours = Vec::new();
+    let end = path.len() - 1;
+    for start in (0..end).step_by(tiles::STABLE_BATCH) {
+        flat_range(
+            path,
+            pressures,
+            transform,
+            stroke,
+            0.12 / dpi,
+            start..(start + tiles::STABLE_BATCH).min(end),
+            &mut contours,
+        );
+    }
+    if contours.is_empty() {
+        return mesh(&[(path, pressures)], transform, stroke, dpi);
+    }
+    coverage_mesh(&union(&contours), dpi)
+}
+
 fn round_contours(
     path: &[[f64; 2]],
     pressures: &[Option<f32>],
@@ -578,6 +608,22 @@ mod tests {
                 let point = egui::pos2(x as f32, y as f32);
                 assert_eq!(interior_hits(&first, point), 1, "{pen:?} at {scale}");
                 assert_eq!(interior_hits(&second, point), 1, "{pen:?} at {scale}");
+                if pen == crate::pen::PenType::Highlighter {
+                    let compact =
+                        completed_highlighter_mesh((&path, &force), transform, &stroke, 1.);
+                    let independent =
+                        completed_highlighter_mesh((&other, &[None; 2]), transform, &stroke, 1.);
+                    assert_eq!(
+                        interior_hits(&compact, point),
+                        1,
+                        "compact crossing at {scale}"
+                    );
+                    assert_eq!(
+                        interior_hits(&independent, point),
+                        1,
+                        "independent stroke at {scale}"
+                    );
+                }
                 assert!(
                     first
                         .vertices

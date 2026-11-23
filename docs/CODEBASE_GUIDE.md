@@ -1138,3 +1138,9 @@ incoming tangent at each chunk boundary. Translucent coverage is still unioned
 in `ink_tiles.rs`. Whiteboard candidate selection reuses the bounds hierarchy
 in `eraser_index.rs`. Shape and ink caches retain their tessellation at the
 current scale and DPI across camera translation.
+
+For highlighter performance, `Cached::paint` in `canvas.rs` chooses between
+live tiles and the bounded complete mesh for compact completed strokes.
+`ink_mesh.rs` unions marker sections per stroke. `ink_tiles.rs` trims
+unreferenced vertices after clipping. The release profiling fixture is in
+`src/highlighter_benchmark.rs`.

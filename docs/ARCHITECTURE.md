@@ -1304,3 +1304,18 @@ a small overscan margin and rebuild when the viewport leaves it. Scale, DPI
 and semantic style differences still invalidate the relevant cache. Listing
 dimension measurement is gated by document revision and DPI. The shared
 native and browser renderer needs no new dependencies or GPU settings.
+
+### Many completed highlighters
+
+A tiled stroke's reusable region is based on the intersection of the viewport
+and its projected pressure envelope, with room for the coverage fringe.
+Moving the viewport beyond an old overscan margin does not rebuild the stroke
+if the saved tiles contain all relevant coverage. This preserves live tile
+meshes on release. Very long strokes continue to use viewport-sized tiles.
+
+An eligible completed marker without retained live tiles uses one coverage mesh.
+The complete path is limited to 256 derived points and a 1,536-point projected
+extent on each axis. It reuses the same flat nib sections and physical
+simplification tolerance as the tiled renderer, then unions the sections once.
+Tile clipping discards unreferenced vertices before a mesh is cached. Each
+marker remains an independent premultiplied-alpha submission in object order.
