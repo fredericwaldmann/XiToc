@@ -1125,6 +1125,9 @@ M2's single-PDF visible-image/edit-payload round-trip gate.
 
 `app.rs` places the shared tabs and toolbar above the Explorer and canvas.
 `ui/chrome.rs` provides the Linux window controls and the application menu.
+`ui/tabs.rs` fits fixed-height tabs, exposes overflow, and reports reorder
+insertions. `app.rs` applies reorder actions to the existing editors and
+positions the three toolbar groups; `ui/toolbar.rs` renders their controls.
 `ui/dialog.rs` presents configuration content in an immediate native viewport
 or an embedded modal. Dialog drafts, validation and document transactions
 remain with their original settings or canvas components. Settings offers System

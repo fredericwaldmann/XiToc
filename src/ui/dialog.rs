@@ -112,13 +112,15 @@ pub fn configuration(
                 .with_resizable(true),
             |ui, class| {
                 if class == egui::ViewportClass::EmbeddedWindow {
-                    content(ui);
+                    dialog_content(ui, &mut content);
                     return false;
                 }
                 if ui.input(|input| input.viewport().close_requested()) {
                     return true;
                 }
-                egui::CentralPanel::default().show(ui, |ui| content(ui));
+                egui::CentralPanel::default()
+                    .frame(dialog_frame(ui))
+                    .show(ui, |ui| dialog_content(ui, &mut content));
                 false
             },
         );
@@ -126,9 +128,31 @@ pub fn configuration(
     embedded(ctx, id, &mut content)
 }
 
+fn dialog_frame(ui: &egui::Ui) -> egui::Frame {
+    egui::Frame::new()
+        .inner_margin(12)
+        .fill(super::style::palette(ui).surface)
+}
+
+fn dialog_content(ui: &mut egui::Ui, content: &mut impl FnMut(&mut egui::Ui)) {
+    ui.scope(|ui| {
+        let style = ui.style_mut();
+        style.spacing.interact_size.y = 24.;
+        style.spacing.button_padding = egui::vec2(8., 3.);
+        for widgets in [
+            &mut style.visuals.widgets.inactive,
+            &mut style.visuals.widgets.hovered,
+            &mut style.visuals.widgets.active,
+        ] {
+            widgets.corner_radius = 5.into();
+        }
+        content(ui);
+    });
+}
+
 fn embedded(ctx: &egui::Context, id: egui::Id, content: &mut impl FnMut(&mut egui::Ui)) -> bool {
     egui::Modal::new(id)
-        .show(ctx, content)
+        .show(ctx, |ui| dialog_content(ui, content))
         .backdrop_response
         .clicked()
 }

@@ -15,20 +15,16 @@ pub fn show(
     document: Option<(&Document, &mut Editor)>,
     action: &mut Option<Action>,
     prefs: &mut crate::settings::DrawingPreferences,
-) {
+) -> f32 {
     let Some((doc, editor)) = document else {
-        ui.weak("Open a document to begin");
-        return;
+        return ui.weak("Open a document to begin").rect.width();
     };
-    if editor.canvas.eraser_mode != prefs.eraser_mode {
-        editor.canvas.finish();
-        editor.canvas.eraser_mode = prefs.eraser_mode;
-    }
     let width = ui.available_width();
-    ui.push_id(doc.data.id(), |ui| {
-        ui.horizontal(|ui| {
+    let used = ui.push_id(doc.data.id(), |ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            if doc.external { ui.weak("Read-only PDF"); return; }
+            let start = ui.cursor().left();
+            if doc.external { return ui.weak("Read-only PDF").rect.width(); }
             let selection = icons::button(ui, if editor.canvas.selection_mode == Tool::Lasso { Icon::Lasso } else { Icon::Select }, "Selection · Rectangle / Lasso · Shift adds, Alt removes", matches!(editor.canvas.tool, Tool::Select | Tool::Lasso));
             if selection.clicked() { editor.canvas.select(editor.canvas.selection_mode); }
             ui.menu_button("▾", |ui| {
@@ -103,9 +99,7 @@ pub fn show(
             if width >= 420.0 && ui.push_id("sticky-note-tool",|ui|icons::button(ui, Icon::StickyNote, "Sticky Note · click to create and type", editor.canvas.tool == Tool::StickyNote)).inner.clicked() {
                 editor.canvas.select(Tool::StickyNote);
             }
-            let reserved = if width >= 1000.0 { 480.0 } else if width >= 800.0 { 380.0 } else if width >= 500.0 { 268.0 } else { 210.0 };
-            let reserved=reserved+244.0+if image_selected {60.0}else{0.0}+if formula_selection.is_some(){72.0}else{0.0}+if width>=400.0{30.0}else{0.0};
-            let strip_width = (width - reserved).max(24.0);
+            let strip_width = (width * 0.29).clamp(80., 220.);
             ui.allocate_ui(egui::vec2(strip_width, style::CONTROL), |ui| {
                 egui::ScrollArea::horizontal().id_salt("pen-presets").min_scrolled_width(24.0).auto_shrink([false, false])
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -148,29 +142,42 @@ pub fn show(
                 .close_behavior(if added { egui::PopupCloseBehavior::IgnoreClicks } else { egui::PopupCloseBehavior::CloseOnClickOutside })
                 .width(style::TOOL_POPOVER_WIDTH)
                 .show(|ui| { egui::ScrollArea::vertical().max_height((ui.ctx().content_rect().height() - 150.0).max(80.0)).show(ui, |ui| super::drawing_controls::preset(ui, &mut prefs.presets)); });
-            let eraser = icons::button(ui, Icon::Eraser, "Eraser · click for mode and size", editor.canvas.tool == Tool::Eraser);
-            if eraser.clicked() { editor.canvas.select(Tool::Eraser); }
-            egui::Popup::from_toggle_button_response(&eraser)
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .show(|ui| {
-                    ui.strong("Eraser");
-                    for mode in [EraserMode::Stroke, EraserMode::Partial] {
-                        if ui.selectable_value(&mut prefs.eraser_mode, mode, mode.label()).changed() {
-                            editor.canvas.finish(); editor.canvas.eraser_mode = mode;
-                        }
-                    }
-                    super::drawing_controls::eraser_radius(ui, &mut editor.canvas.eraser_radius);
-                });
-            if width >= 650.0 { menu(ui, "Snap", |ui| super::snapping_controls::menu(ui, &mut editor.canvas.snapping)); }
-            if width >= 800.0 { view(ui, doc, editor); }
-            else { menu(ui, "View", |ui| { if width<650.0 {menu(ui, "Snap", |ui| super::snapping_controls::menu(ui, &mut editor.canvas.snapping));}
-                if width<400.0 && icons::button(ui,Icon::Hand,"Hand · Space-drag to pan",editor.canvas.tool==Tool::Pan).clicked(){editor.canvas.select(Tool::Pan);} view(ui, doc, editor); export(ui, action, editor.canvas.dirty()); }); }
-            #[cfg(target_arch = "wasm32")]
-            if width >= 1000.0 { export(ui, action, editor.canvas.dirty()); }
-        });
-    });
-    editor.canvas.shape_defaults = prefs.shape_defaults.clone();
-    editor.canvas.apply_pen(&prefs.presets.active().style);
+            menu(ui, "Options", |ui| {
+                menu(ui, "Snap", |ui| super::snapping_controls::menu(ui, &mut editor.canvas.snapping));
+                if width < 400. && ui.button("Hand").clicked() {
+                    editor.canvas.select(Tool::Pan);
+                    ui.close();
+                }
+                if width < 420. && ui.button("Sticky Note").clicked() {
+                    editor.canvas.select(Tool::StickyNote);
+                    ui.close();
+                }
+                if width < 650. && editor.canvas.selected_image().is_some() {
+                    menu(ui, "Image", |ui| editor.canvas.image_controls(ui));
+                }
+                if ui.button("Document Settings · LaTeX…").clicked() {
+                    editor.canvas.finish();
+                    editor.canvas.latex_dialog.open = true;
+                    ui.close();
+                }
+                export(ui, action, editor.canvas.dirty());
+            });
+            ui.min_rect().right() - start
+        }).inner
+    }).inner;
+    if !doc.external {
+        sync_drawing_preferences(&mut editor.canvas, prefs);
+    }
+    used
+}
+
+pub fn sync_drawing_preferences(canvas: &mut Canvas, prefs: &crate::settings::DrawingPreferences) {
+    if canvas.eraser_mode != prefs.eraser_mode {
+        canvas.finish();
+        canvas.eraser_mode = prefs.eraser_mode;
+    }
+    canvas.shape_defaults = prefs.shape_defaults.clone();
+    canvas.apply_pen(&prefs.presets.active().style);
 }
 
 pub fn history(ui: &mut egui::Ui, canvas: &mut Canvas) {
@@ -202,46 +209,66 @@ pub fn history(ui: &mut egui::Ui, canvas: &mut Canvas) {
     }
 }
 
-fn view(ui: &mut egui::Ui, doc: &Document, editor: &mut Editor) {
-    if doc.external {
-        ui.label("Read-only · preview unavailable");
-        return;
+pub fn eraser(
+    ui: &mut egui::Ui,
+    editor: &mut Editor,
+    prefs: &mut crate::settings::DrawingPreferences,
+) {
+    let eraser = icons::button(
+        ui,
+        Icon::Eraser,
+        "Eraser · click for mode and size",
+        editor.canvas.tool == Tool::Eraser,
+    );
+    if eraser.clicked() {
+        editor.canvas.select(Tool::Eraser);
     }
-    let settings = icons::button(ui, Icon::Settings, "Document Settings", false);
-    egui::Popup::from_toggle_button_response(&settings).show(|ui| {
-        ui.strong("Document Settings");
-        if ui.button("LaTeX…").clicked() {
-            editor.canvas.finish();
-            editor.canvas.latex_dialog.open = true;
-            ui.close();
-        }
-    });
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        if icons::button(ui, Icon::Minus, "Zoom out", false).clicked() {
-            editor.zoom_by(0.8);
-        }
-        ui.add_sized(
-            [44.0, 26.0],
-            egui::Label::new(format!("{:.0}%", editor.zoom() * 100.0)),
-        );
-        if icons::button(ui, Icon::Plus, "Zoom in", false).clicked() {
-            editor.zoom_by(1.25);
-        }
-        if icons::button(ui, Icon::Reset, "Reset view / fit page width", false).clicked() {
-            editor.reset_view();
-        }
-        if doc.data.kind() == DocumentKind::Whiteboard
-            && icons::button(
-                ui,
-                Icon::Grid,
-                "Toggle dot grid (session only)",
-                editor.grid_visible(),
-            )
-            .clicked()
-        {
-            editor.toggle_grid();
-        }
+    egui::Popup::from_toggle_button_response(&eraser)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.strong("Eraser");
+            for mode in [EraserMode::Stroke, EraserMode::Partial] {
+                if ui
+                    .selectable_value(&mut prefs.eraser_mode, mode, mode.label())
+                    .changed()
+                {
+                    editor.canvas.finish();
+                    editor.canvas.eraser_mode = mode;
+                }
+            }
+            super::drawing_controls::eraser_radius(ui, &mut editor.canvas.eraser_radius);
+        });
+}
+
+pub fn zoom(ui: &mut egui::Ui, doc: &Document, editor: &mut Editor) {
+    menu(ui, &format!("{:.0}%", editor.zoom() * 100.), |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            if icons::button(ui, Icon::Minus, "Zoom out", false).clicked() {
+                editor.zoom_by(0.8);
+            }
+            ui.add_sized(
+                [44.0, 26.0],
+                egui::Label::new(format!("{:.0}%", editor.zoom() * 100.0)),
+            );
+            if icons::button(ui, Icon::Plus, "Zoom in", false).clicked() {
+                editor.zoom_by(1.25);
+            }
+            if icons::button(ui, Icon::Reset, "Reset view / fit page width", false).clicked() {
+                editor.reset_view();
+            }
+            if doc.data.kind() == DocumentKind::Whiteboard
+                && icons::button(
+                    ui,
+                    Icon::Grid,
+                    "Toggle dot grid (session only)",
+                    editor.grid_visible(),
+                )
+                .clicked()
+            {
+                editor.toggle_grid();
+            }
+        });
     });
 }
 
@@ -588,7 +615,7 @@ mod image_tests {
         let mut action = None;
         let mut frame = |events| {
             render(&ctx, events, |ui| {
-                show(ui, Some((&doc, &mut editor)), &mut action, &mut prefs)
+                show(ui, Some((&doc, &mut editor)), &mut action, &mut prefs);
             })
         };
         frame(vec![]);

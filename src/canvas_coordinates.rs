@@ -617,7 +617,17 @@ fn optional_color(ui: &mut egui::Ui, label: &str, value: &mut Option<[u8; 3]>, i
             *value = enabled.then_some(initial);
         }
         if let Some(rgb) = value {
-            crate::ui::shape_controls::color_control(ui, rgb, 255);
+            ui.push_id(label, |ui| {
+                let swatch = ui
+                    .add(egui::Button::new(
+                        egui::RichText::new("●")
+                            .color(egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2])),
+                    ))
+                    .on_hover_text(format!("Edit {label} color"));
+                egui::Popup::menu(&swatch)
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                    .show(|ui| crate::ui::shape_controls::color_control(ui, rgb, 255));
+            });
         }
     });
 }

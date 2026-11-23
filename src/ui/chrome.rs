@@ -235,17 +235,21 @@ pub fn window_buttons(_ui: &mut egui::Ui) {
             ),
             ("Minimize window", Command::Minimized(true)),
         ] {
-            let response = ui.add(
-                egui::Button::new("")
-                    .min_size(egui::Vec2::splat(28.))
-                    .frame_when_inactive(false),
-            );
+            let (_, response) =
+                ui.allocate_exact_size(egui::Vec2::splat(28.), egui::Sense::click());
             response.widget_info(|| {
                 egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label)
             });
             let center = response.rect.center();
             let color = ui.style().interact(&response).fg_stroke.color;
             let painter = ui.painter();
+            let visuals = ui.style().interact(&response);
+            if response.hovered() || response.is_pointer_button_down_on() {
+                painter.circle_filled(center, 11., visuals.weak_bg_fill);
+            }
+            if response.has_focus() {
+                painter.circle_stroke(center, 11., visuals.bg_stroke);
+            }
             match command {
                 Command::Close => {
                     super::icons::paint(painter, center, super::icons::Icon::Close, color)
@@ -266,7 +270,11 @@ pub fn window_buttons(_ui: &mut egui::Ui) {
                         painter.rect_filled(
                             square,
                             1.,
-                            ui.style().interact(&response).weak_bg_fill,
+                            if response.hovered() {
+                                visuals.weak_bg_fill
+                            } else {
+                                style::palette(ui).shell
+                            },
                         );
                     }
                     painter.rect_stroke(square, 1., stroke, egui::StrokeKind::Inside);
